@@ -1,138 +1,139 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>隐形打标工具</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0" />
+<title>图片鲁棒打标 / 读取 / 测试</title>
 <style>
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: #fafafa;
-  margin: 0;
-  padding: 16px;
-  color: #333;
-  text-align: center;
-}
-.container {
-  max-width: 420px;
-  margin: auto;
-}
-input[type="file"], input[type="text"], button {
-  width: 100%;
-  padding: 10px;
-  margin: 8px 0;
-  border-radius: 8px;
-  border: 1px solid #ccc;
-  font-size: 16px;
-}
-button {
-  background-color: #007bff;
-  color: white;
-  border: none;
-  cursor: pointer;
-}
-button:hover { background-color: #0069d9; }
-canvas { display: none; max-width: 100%; }
-#result { margin-top: 14px; font-weight: 500; color: #007bff; }
+:root{--bg:#f7fbff;--card:#fff;--accent:#0b63ff;--muted:#6b7c93}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial;background:var(--bg);margin:0;padding:14px;color:#0b2440}
+.wrap{max-width:640px;margin:0 auto}
+h1{text-align:center;color:var(--accent);font-size:18px;margin-bottom:8px}
+.card{background:var(--card);border-radius:12px;padding:12px;margin:10px 0;border:1px solid #e6f2ff;box-shadow:0 6px 18px rgba(11,37,80,0.04)}
+input[type=file],input[type=text],select,button{width:100%;padding:12px;border-radius:10px;border:1px solid #d7eaff;margin:8px 0;box-sizing:border-box;font-size:15px}
+button{background:var(--accent);color:#fff;border:none;font-weight:600}
+small.note{display:block;color:var(--muted);margin-top:6px;font-size:13px}
+#preview,#testPreview{width:100%;border-radius:8px;margin-top:8px;object-fit:contain;max-height:360px}
+#log{white-space:pre-wrap;font-size:13px;color:#0b2440;margin-top:8px}
+.report{margin-top:8px;padding:10px;border-radius:8px;background:#f0f6ff;border:1px solid:#e0efff}
+.row{display:flex;gap:8px}
+.col{flex:1}
+.progress{height:8px;background:#e9f1ff;border-radius:8px;overflow:hidden;margin-top:6px}
+.progress-bar{height:100%;width:0;background:linear-gradient(90deg,var(--accent),#3aa0ff)}
+.tiny{font-size:12px;color:var(--muted)}
 </style>
 </head>
 <body>
-<div class="container">
-  <h2>隐形打标工具</h2>
-  <input type="file" id="imageInput" accept="image/*">
-  <input type="text" id="tagText" placeholder="输入要打的标记内容">
-  <button id="encodeBtn">打标并自动保存</button>
-  <button id="decodeBtn">读取图片中的标记</button>
-  <canvas id="canvas"></canvas>
-  <p id="result"></p>
+<div class="wrap">
+<h1>📌 图片鲁棒打标 / 读取 / 测试</h1>
+
+<div class="card">
+  <strong>说明</strong>
+  <p class="tiny">1) 打标图片 → 嵌入唯一文本信息<br>
+  2) 读取标记 → 提取嵌入文本<br>
+  3) 鲁棒性测试 → 裁剪/模糊/亮度/对比度变化<br>
+  优化：色彩保留 / 多层次散播 / 手机友好 UI + 自动保存</p>
+</div>
+
+<!-- 打标模块 -->
+<div class="card">
+  <strong>1️⃣ 打标图片</strong>
+  <input id="fileIn" type="file" accept="image/*">
+  <input id="textIn" type="text" placeholder="输入标记文本（≤32字节）">
+  <div class="row">
+    <div class="col">
+      <label>冗余</label>
+      <select id="redundancy"><option>12</option><option selected>8</option><option>6</option><option>4</option></select>
+    </div>
+    <div class="col">
+      <label>强度</label>
+      <select id="delta"><option>4</option><option selected>6</option><option>8</option></select>
+    </div>
+  </div>
+  <input id="seed" type="text" placeholder="随机种子（留空默认文本哈希）" />
+  <button id="embedBtn">打标并自动保存</button>
+  <div class="progress"><div id="embedProgress" class="progress-bar"></div></div>
+  <img id="preview" src="" alt="">
+  <div id="log" aria-live="polite"></div>
+</div>
+
+<!-- 读取模块 -->
+<div class="card">
+  <strong>2️⃣ 读取标记</strong>
+  <input id="fileRead" type="file" accept="image/*">
+  <label>确保使用相同 冗余 / 强度 / 随机种子</label>
+  <button id="readBtn">读取图片中的标记</button>
+  <div id="readOut" class="report"></div>
+  <div class="tiny">提示：裁剪/模糊/重绘过多可能降低读取成功率</div>
+</div>
+
+<!-- 鲁棒性测试模块 -->
+<div class="card">
+  <strong>3️⃣ 鲁棒性测试</strong>
+  <label>选择已打标图片进行测试</label>
+  <input id="fileTest" type="file" accept="image/*">
+  <div class="row">
+    <div class="col"><button id="cropBtn">随机裁剪</button></div>
+    <div class="col"><button id="blurBtn">轻度模糊</button></div>
+    <div class="col"><button id="brightBtn">亮度/对比度</button></div>
+  </div>
+  <img id="testPreview" src="" alt="">
+  <button id="readTestBtn">读取处理后标记</button>
+  <div id="readTestOut" class="report"></div>
+  <div class="tiny">提示：可多次操作，测试标记在不同变形下的恢复情况</div>
+</div>
 </div>
 
 <script>
-const SIGNATURE = "TAGX"; // 签名头，防误读
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
-let currentFileName = "image";
+/* ================== DCT 8x8 ================== */
+const N=8;
+const C=Array.from({length:N},()=>new Array(N));
+for(let u=0;u<N;u++)for(let v=0;v<N;v++)C[u][v]=(u===0?1/Math.sqrt(2):1)*(v===0?1/Math.sqrt(2):1);
 
-document.getElementById("imageInput").addEventListener("change", e => {
-  const file = e.target.files[0];
-  if (!file) return;
-  currentFileName = file.name.replace(/\.[^/.]+$/, ""); // 去掉后缀
-  const reader = new FileReader();
-  reader.onload = function(evt) {
-    const img = new Image();
-    img.onload = function() {
-      canvas.width = img.width;
-      canvas.height = img.height;
-      ctx.drawImage(img, 0, 0);
-    };
-    img.src = evt.target.result;
-  };
-  reader.readAsDataURL(file);
-});
+function dct8(block){const F=Array.from({length:8},()=>new Array(8).fill(0));for(let u=0;u<8;u++)for(let v=0;v<8;v++){let s=0;for(let x=0;x<8;x++)for(let y=0;y<8;y++)s+=block[x][y]*Math.cos(((2*x+1)*u*Math.PI)/16)*Math.cos(((2*y+1)*v*Math.PI)/16);F[u][v]=0.25*C[u][v]*s;}return F;}
+function idct8(F){const block=Array.from({length:8},()=>new Array(8).fill(0));for(let x=0;x<8;x++)for(let y=0;y<8;y++){let s=0;for(let u=0;u<8;u++)for(let v=0;v<8;v++)s+=C[u][v]*F[u][v]*Math.cos(((2*x+1)*u*Math.PI)/16)*Math.cos(((2*y+1)*v*Math.PI)/16);block[x][y]=0.25*s;}return block;}
 
-function textToBits(str) {
-  return Array.from(new TextEncoder().encode(str)).flatMap(b => {
-    return [...Array(8)].map((_, i) => (b >> (7 - i)) & 1);
-  });
-}
+/* ================== YUV转换 ================== */
+function rgbaToYUV(imgd,w,h){const d=imgd.data;const Y=Array.from({length:h},()=>new Array(w).fill(0));const U=Array.from({length:h},()=>new Array(w).fill(0));const V=Array.from({length:h},()=>new Array(w).fill(0));let idx=0;for(let i=0;i<h;i++)for(let j=0;j<w;j++){const r=d[idx++],g=d[idx++],b=d[idx++],a=d[idx++];Y[i][j]=0.299*r+0.587*g+0.114*b;U[i][j]=-0.169*r-0.331*g+0.5*b;V[i][j]=0.5*r-0.419*g-0.081*b;}return {Y,U,V};}
+function applyYUVToImageData(Y,U,V,imgd,w,h){const d=imgd.data;let idx=0;for(let i=0;i<h;i++)for(let j=0;j<w;j++){const y=Y[i][j],u=U[i][j],v=V[i][j];let r=y+1.402*v,g=y-0.344136*u-0.714136*v,b=y+1.772*u;d[idx++]=Math.min(255,Math.max(0,Math.round(r)));d[idx++]=Math.min(255,Math.max(0,Math.round(g)));d[idx++]=Math.min(255,Math.max(0,Math.round(b)));d[idx++]=255;}}
 
-function bitsToText(bits) {
-  const bytes = [];
-  for (let i = 0; i < bits.length; i += 8) {
-    bytes.push(parseInt(bits.slice(i, i + 8).join(""), 2));
-  }
-  return new TextDecoder().decode(new Uint8Array(bytes));
-}
+/* ================== bits ↔ bytes ================== */
+const SIGN="TAGR";
+function buildBits(msg){const encoder=new TextEncoder();const payload=encoder.encode(msg);const len=payload.length;const header=new Uint8Array(4+2+len);for(let i=0;i<4;i++)header[i]=SIGN.charCodeAt(i);header[4]=(len>>8)&0xff;header[5]=len&0xff;header.set(payload,6);const bits=[];for(let i=0;i<header.length;i++)for(let b=7;b>=0;b--)bits.push((header[i]>>b)&1);return bits;}
+function bitsToBytes(bits){const bytes=[];for(let i=0;i+7<bits.length;i+=8){let v=0;for(let b=0;b<8;b++)v=(v<<1)|bits[i+b];bytes.push(v);}return bytes;}
 
-document.getElementById("encodeBtn").addEventListener("click", () => {
-  const text = document.getElementById("tagText").value.trim();
-  if (!text) return alert("请输入要打的标记文字");
-  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const pixels = imgData.data;
+/* ================== PRNG ================== */
+function xorshift32(seed){let x=seed>>>0;return function(){x^=x<<13;x>>>0;x^=x>>>17;x>>>0;x^=x<<5;x>>>0;return x;}}
+function seedFromString(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
+function generateBlockOrder(blocksAcross,blocksDown,seedStr){const n=blocksAcross*blocksDown;const seed=seedFromString(seedStr||"default_seed");const rnd=xorshift32(seed);const arr=new Array(n);for(let i=0;i<n;i++)arr[i]=i;for(let i=n-1;i>0;i--){const r=rnd()%(i+1);const t=arr[i];arr[i]=arr[r];arr[r]=t;}return arr;}
 
-  // 构建带签名和长度的内容
-  const content = SIGNATURE + String.fromCharCode(text.length >> 8, text.length & 0xff) + text;
-  const bits = textToBits(content);
+/* ================== 嵌入/提取 ================== */
+const PAIR=[[2,1],[1,2]];
+function embedBitsToY(Y,w,h,bits,redundancy,delta,blockOrder,progressCallback){const blocksAcross=Math.floor(w/8),blocksDown=Math.floor(h/8);const totalBlocks=blocksAcross*blocksDown;const required=bits.length*redundancy;if(required>totalBlocks)return {ok:false,reason:`空间不足：需 ${required} 块，现有 ${totalBlocks} 块`};let used=0;for(let i=0;i<bits.length;i++){for(let r=0;r<redundancy;r++){const blockIdx=blockOrder[used++];const bx=Math.floor(blockIdx/blocksAcross),by=blockIdx%blocksAcross;const block=Array.from({length:8},()=>new Array(8).fill(0));for(let x=0;x<8;x++)for(let y=0;y<8;y++)block[x][y]=Y[bx*8+x][by*8+y]-128;const F=dct8(block);const [u1,v1]=PAIR[0],[u2,v2]=PAIR[1];let a=F[u1][v1],b=F[u2][v2];const bit=bits[i];if(bit===1){if(!(a>b+delta)){F[u1][v1]+=(b+delta-a+0.6);}}else{if(!(b>a+delta)){F[u2][v2]+=(a+delta-b+0.6);}}const newBlock=idct8(F);for(let x=0;x<8;x++)for(let y=0;y<8;y++)Y[bx*8+x][by*8+y]=Math.min(255,Math.max(0,newBlock[x][y]+128));}if(progressCallback)progressCallback(Math.round((i+1)/bits.length*100));}return {ok:true};}
 
-  if (bits.length > pixels.length / 4) {
-    alert("信息太长，图片像素不足！");
-    return;
-  }
+function extractBitsFromY(Y,w,h,bitsLen,redundancy,blockOrder){const blocksAcross=Math.floor(w/8),blocksDown=Math.floor(h/8);const totalBlocks=blocksAcross*blocksDown;const required=bitsLen*redundancy;if(required>totalBlocks)return {ok:false,reason:'块数不足'};const collected=Array.from({length:bitsLen},()=>[]);let used=0;for(let i=0;i<bitsLen;i++){for(let r=0;r<redundancy;r++){const blockIdx=blockOrder[used++];const bx=Math.floor(blockIdx/blocksAcross),by=blockIdx%blocksAcross;const block=Array.from({length:8},()=>new Array(8).fill(0));for(let x=0;x<8;x++)for(let y=0;y<8;y++)block[x][y]=Y[bx*8+x][by*8+y]-128;const F=dct8(block);const [u1,v1]=PAIR[0],[u2,v2]=PAIR[1];const a=F[u1][v1],b=F[u2][v2];collected[i].push({bit:a>b?1:0,conf:(a-b)/(Math.abs(a)+Math.abs(b)+1e-6)});}}const bits=[],bitConfs=[];let recovered=0;for(let i=0;i<bitsLen;i++){const ones=collected[i].reduce((s,o)=>s+o.bit,0);const vote=ones>=Math.ceil(collected[i].length/2)?1:0;bits.push(vote);if(vote===1)recovered++;const avgAbs=collected[i].reduce((s,o)=>s+Math.abs(o.conf),0)/collected[i].length;bitConfs.push(avgAbs);}return {ok:true,bits,bitConfs,recovered,total:bitsLen};}
 
-  for (let i = 0; i < bits.length; i++) {
-    const pixelIndex = i * 4;
-    pixels[pixelIndex] = (pixels[pixelIndex] & 0xfe) | bits[i];
-  }
-  ctx.putImageData(imgData, 0, 0);
+/* ================== UI wiring ================== */
+const fileIn=document.getElementById('fileIn'),preview=document.getElementById('preview'),progressBar=document.getElementById('embedProgress'),logDiv=document.getElementById('log');
+let workCanvas=document.createElement('canvas'),workCtx=workCanvas.getContext('2d'),origName='image';
+function log(msg){logDiv.textContent=(new Date()).toLocaleTimeString()+'  '+msg+'\n'+logDiv.textContent;}
+fileIn.addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;origName=f.name.replace(/\.[^/.]+$/,'');const url=URL.createObjectURL(f);const img=new Image();img.onload=()=>{workCanvas.width=img.naturalWidth;workCanvas.height=img.naturalHeight;workCtx.drawImage(img,0,0);preview.src=workCanvas.toDataURL('image/png');log(`加载 ${f.name} 尺寸 ${img.naturalWidth}x${img.naturalHeight}`);URL.revokeObjectURL(url);};img.src=url;});
+document.getElementById('embedBtn').addEventListener('click',async()=>{const text=document.getElementById('textIn').value.trim();if(!text){alert('请输入标记文本');return;}const redundancy=parseInt(document.getElementById('redundancy').value,10),delta=parseFloat(document.getElementById('delta').value),seedInput=document.getElementById('seed').value.trim();const seedStr=seedInput||text;const w=workCanvas.width,h=workCanvas.height;if(!w||!h){alert('请先选择图片');return;}const imgd=workCtx.getImageData(0,0,w,h),{Y,U,V}=rgbaToYUV(imgd,w,h);const bits=buildBits(text);const blockOrder=generateBlockOrder(Math.floor(w/8),Math.floor(h/8),seedStr);progressBar.style.width='0%';log(`准备嵌入：文本 ${text.length} 字节 bits=${bits.length} 冗余=${redundancy} 强度=${delta} seed=${seedStr}`);const res=embedBitsToY(Y,w,h,bits,redundancy,delta,blockOrder,p=>{progressBar.style.width=p+'%';});if(!res.ok){alert(res.reason);log(res.reason);return;}progressBar.style.width='100%';applyYUVToImageData(Y,U,V,imgd,w,h);workCtx.putImageData(imgd,0,0);preview.src=workCanvas.toDataURL('image/png');const a=document.createElement('a');a.href=workCanvas.toDataURL('image/png');a.download=`${origName}_tagged.png`;a.click();log('嵌入完成并下载：'+`${origName}_tagged.png`);alert('嵌入完成并已保存（手机请长按图片保存）');});
 
-  // 自动保存
-  const link = document.createElement("a");
-  link.download = `${currentFileName}_tagged.png`;
-  link.href = canvas.toDataURL("image/png");
-  link.click();
-});
+/* 读取模块 */
+const fileRead=document.getElementById('fileRead');
+let readCanvas=document.createElement('canvas'),readCtx=readCanvas.getContext('2d');
+fileRead.addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;const url=URL.createObjectURL(f);const img=new Image();img.onload=()=>{readCanvas.width=img.naturalWidth;readCanvas.height=img.naturalHeight;readCtx.drawImage(img,0,0);preview.src=readCanvas.toDataURL('image/png');log('用于读取的图片已加载');URL.revokeObjectURL(url);};img.src=url;});
+document.getElementById('readBtn').addEventListener('click',()=>{const redundancy=parseInt(document.getElementById('redundancy').value,10);const seedInput=document.getElementById('seed').value.trim();const seedStr=seedInput||document.getElementById('textIn').value.trim()||"default_seed";const w=readCanvas.width,h=readCanvas.height;if(!w||!h){alert('请先选择图片');return;}const imgd=readCtx.getImageData(0,0,w,h),{Y}=rgbaToYUV(imgd,w,h);const bitsLen=32;const blockOrder=generateBlockOrder(Math.floor(w/8),Math.floor(h/8),seedStr);const res=extractBitsFromY(Y,w,h,bitsLen,redundancy,blockOrder);if(!res.ok){alert(res.reason);return;}let msg='';const bytes=bitsToBytes(res.bits);try{msg=new TextDecoder().decode(new Uint8Array(bytes));}catch(e){msg='无法解码';}document.getElementById('readOut').textContent=`标记内容：${msg}\n恢复率：${res.recovered}/${res.total} 字节`;log('读取完成: '+msg);});
 
-document.getElementById("decodeBtn").addEventListener("click", () => {
-  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const pixels = imgData.data;
-  const bits = [];
-  for (let i = 0; i < pixels.length; i += 4) {
-    bits.push(pixels[i] & 1);
-  }
-
-  let text = bitsToText(bits);
-  if (!text.startsWith(SIGNATURE)) {
-    document.getElementById("result").innerText = "未检测到隐藏标记。";
-    return;
-  }
-
-  // 解析长度与内容
-  const lenHigh = text.charCodeAt(4);
-  const lenLow = text.charCodeAt(5);
-  const length = (lenHigh << 8) + lenLow;
-  const payload = text.slice(6, 6 + length);
-  document.getElementById("result").innerText = "检测到标记内容：" + payload;
-});
+/* 鲁棒性测试 */
+const fileTest=document.getElementById('fileTest'),testPreview=document.getElementById('testPreview');
+let testCanvas=document.createElement('canvas'),testCtx=testCanvas.getContext('2d');
+fileTest.addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;const url=URL.createObjectURL(f);const img=new Image();img.onload=()=>{testCanvas.width=img.naturalWidth;testCanvas.height=img.naturalHeight;testCtx.drawImage(img,0,0);testPreview.src=testCanvas.toDataURL('image/png');URL.revokeObjectURL(url);};img.src=url;});
+document.getElementById('cropBtn').addEventListener('click',()=>{const w=testCanvas.width,h=testCanvas.height;const cropW=Math.floor(w*0.8),cropH=Math.floor(h*0.8);const offsetX=Math.floor(Math.random()*(w-cropW)),offsetY=Math.floor(Math.random()*(h-cropH));const imgData=testCtx.getImageData(offsetX,offsetY,cropW,cropH);testCanvas.width=cropW;testCanvas.height=cropH;testCtx.putImageData(imgData,0,0);testPreview.src=testCanvas.toDataURL('image/png');});
+document.getElementById('blurBtn').addEventListener('click',()=>{testCtx.filter='blur(2px)';testCtx.drawImage(testCanvas,0,0);testCtx.filter='none';testPreview.src=testCanvas.toDataURL('image/png');});
+document.getElementById('brightBtn').addEventListener('click',()=>{const imgData=testCtx.getImageData(0,0,testCanvas.width,testCanvas.height);const d=imgData.data;const factor=Math.random()*0.4+0.8;for(let i=0;i<d.length;i+=4){d[i]=Math.min(255,d[i]*factor);d[i+1]=Math.min(255,d[i+1]*factor);d[i+2]=Math.min(255,d[i+2]*factor);}testCtx.putImageData(imgData,0,0);testPreview.src=testCanvas.toDataURL('image/png');});
+document.getElementById('readTestBtn').addEventListener('click',()=>{const w=testCanvas.width,h=testCanvas.height;if(!w||!h){alert('请先选择图片');return;}const imgd=testCtx.getImageData(0,0,w,h);const {Y}=rgbaToYUV(imgd,w,h);const redundancy=parseInt(document.getElementById('redundancy').value,10);const seedInput=document.getElementById('seed').value.trim();const seedStr=seedInput||document.getElementById('textIn').value.trim()||"default_seed";const blocksAcross=Math.floor(w/8),blocksDown=Math.floor(h/8);const bitsLen=32;const blockOrder=generateBlockOrder(blocksAcross,blocksDown,seedStr);const res=extractBitsFromY(Y,w,h,bitsLen,redundancy,blockOrder);if(!res.ok){alert(res.reason);return;}let msg='';const bytes=bitsToBytes(res.bits);try{msg=new TextDecoder().decode(new Uint8Array(bytes));}catch(e){msg='无法解码';}document.getElementById('readTestOut').textContent=`标记内容：${msg}\n恢复率：${res.recovered}/${res.total} 字节`;});
 </script>
 </body>
 </html>
