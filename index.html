@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>隐形打标工具</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #fafafa;
+  margin: 0;
+  padding: 16px;
+  color: #333;
+  text-align: center;
+}
+.container {
+  max-width: 420px;
+  margin: auto;
+}
+input[type="file"], input[type="text"], button {
+  width: 100%;
+  padding: 10px;
+  margin: 8px 0;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  font-size: 16px;
+}
+button {
+  background-color: #007bff;
+  color: white;
+  border: none;
+  cursor: pointer;
+}
+button:hover { background-color: #0069d9; }
+canvas { display: none; max-width: 100%; }
+#result { margin-top: 14px; font-weight: 500; color: #007bff; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h2>隐形打标工具</h2>
+  <input type="file" id="imageInput" accept="image/*">
+  <input type="text" id="tagText" placeholder="输入要打的标记内容">
+  <button id="encodeBtn">打标并自动保存</button>
+  <button id="decodeBtn">读取图片中的标记</button>
+  <canvas id="canvas"></canvas>
+  <p id="result"></p>
+</div>
+
+<script>
+const SIGNATURE = "TAGX"; // 签名头，防误读
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+let currentFileName = "image";
+
+document.getElementById("imageInput").addEventListener("change", e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  currentFileName = file.name.replace(/\.[^/.]+$/, ""); // 去掉后缀
+  const reader = new FileReader();
+  reader.onload = function(evt) {
+    const img = new Image();
+    img.onload = function() {
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
+    };
+    img.src = evt.target.result;
+  };
+  reader.readAsDataURL(file);
+});
+
+function textToBits(str) {
+  return Array.from(new TextEncoder().encode(str)).flatMap(b => {
+    return [...Array(8)].map((_, i) => (b >> (7 - i)) & 1);
+  });
+}
+
+function bitsToText(bits) {
+  const bytes = [];
+  for (let i = 0; i < bits.length; i += 8) {
+    bytes.push(parseInt(bits.slice(i, i + 8).join(""), 2));
+  }
+  return new TextDecoder().decode(new Uint8Array(bytes));
+}
+
+document.getElementById("encodeBtn").addEventListener("click", () => {
+  const text = document.getElementById("tagText").value.trim();
+  if (!text) return alert("请输入要打的标记文字");
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const pixels = imgData.data;
+
+  // 构建带签名和长度的内容
+  const content = SIGNATURE + String.fromCharCode(text.length >> 8, text.length & 0xff) + text;
+  const bits = textToBits(content);
+
+  if (bits.length > pixels.length / 4) {
+    alert("信息太长，图片像素不足！");
+    return;
+  }
+
+  for (let i = 0; i < bits.length; i++) {
+    const pixelIndex = i * 4;
+    pixels[pixelIndex] = (pixels[pixelIndex] & 0xfe) | bits[i];
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  // 自动保存
+  const link = document.createElement("a");
+  link.download = `${currentFileName}_tagged.png`;
+  link.href = canvas.toDataURL("image/png");
+  link.click();
+});
+
+document.getElementById("decodeBtn").addEventListener("click", () => {
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const pixels = imgData.data;
+  const bits = [];
+  for (let i = 0; i < pixels.length; i += 4) {
+    bits.push(pixels[i] & 1);
+  }
+
+  let text = bitsToText(bits);
+  if (!text.startsWith(SIGNATURE)) {
+    document.getElementById("result").innerText = "未检测到隐藏标记。";
+    return;
+  }
+
+  // 解析长度与内容
+  const lenHigh = text.charCodeAt(4);
+  const lenLow = text.charCodeAt(5);
+  const length = (lenHigh << 8) + lenLow;
+  const payload = text.slice(6, 6 + length);
+  document.getElementById("result").innerText = "检测到标记内容：" + payload;
+});
+</script>
+</body>
+</html>
