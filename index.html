@@ -1501,12 +1501,12 @@ ${jsonStr}`;
     
     // 普通扭蛋
     function playNormalGacha() {
-        if (state.coins < 10) {
-            showToast("金币不足 (需10)");
+        if (state.coins < 1) {
+            showToast("金币不足 (需1)");
             return;
         }
         
-        state.coins -= 10;
+        state.coins -= 1;
         
         document.getElementById('sfx-gacha').play();
         
