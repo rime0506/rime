@@ -557,6 +557,73 @@
     position: relative;
     overflow: hidden; /* 隐藏外部滚动 */
 }
+
+/* 单个家具导出按钮样式 - 优化版（更容易点击） */
+.export-single-btn {
+    position: absolute;
+    top: 2px; /* 改为顶部，不容易被手指遮挡 */
+    right: 2px;
+    width: 22px; /* 增大按钮尺寸 */
+    height: 22px;
+    background: var(--accent-blue);
+    color: var(--text-color);
+    font-size: 10px; /* 增大字体 */
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border: 2px solid white; /* 加粗边框增加可视性 */
+    opacity: 0.9;
+    transition: all 0.2s ease;
+    z-index: 100; /* 提高层级 */
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2); /* 添加阴影增加立体感 */
+    user-select: none; /* 防止文本被选中 */
+    -webkit-tap-highlight-color: transparent; /* 移除移动端点击高亮 */
+}
+
+/* 触摸屏优化 */
+.export-single-btn:active,
+.export-single-btn.touch-active {
+    opacity: 1;
+    transform: scale(0.85);
+    background: var(--main-pink);
+    color: white;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+/* 桌面端悬停效果 */
+@media (hover: hover) and (pointer: fine) {
+    .export-single-btn:hover {
+        opacity: 1;
+        transform: scale(1.15);
+        background: var(--main-pink);
+        color: white;
+        box-shadow: 0 3px 6px rgba(0,0,0,0.3);
+    }
+}
+
+/* 防止导出按钮干扰其他点击事件 */
+.item-slot-cute {
+    position: relative;
+}
+
+/* 背包横向滚动条的可见性调整 */
+.inventory-bar-cute::-webkit-scrollbar {
+    height: 4px;
+    display: block;
+}
+
+.inventory-bar-cute::-webkit-scrollbar-track {
+    background: var(--bg-pink);
+    border-radius: 2px;
+}
+
+.inventory-bar-cute::-webkit-scrollbar-thumb {
+    background: var(--main-pink);
+    border-radius: 2px;
+}
+
 </div>
     </style>
     <!-- 家具导出弹窗 -->
@@ -902,11 +969,11 @@ function closeExportModal() {
     document.getElementById('export-modal').style.display = 'none';
 }
 
-// 导出家具数据
+// 导出家具数据 - iOS Safari 兼容版
 function exportFurnitureData() {
     // 创建只包含家具信息的对象
     const exportData = {
-        version: "1.0",
+        version: "2.0",
         exportTime: new Date().toISOString(),
         totalFurniture: Object.keys(state.customItems).length,
         furniture: {}
@@ -929,12 +996,23 @@ function exportFurnitureData() {
     // 转换为JSON字符串
     const jsonStr = JSON.stringify(exportData, null, 2);
     
-    // 创建下载链接
-    const blob = new Blob([jsonStr], { type: 'application/json' });
+    // 添加文件头说明，确保用户知道这是JSON格式
+    const fileContent = `=== AI像素屋家具导出文件 ===
+文件说明：这是您的AI生成家具数据文件，内容是标准的JSON格式。
+虽然文件扩展名是.txt以确保iOS设备兼容，但您可以用任何文本编辑器或JSON工具打开。
+
+${jsonStr}`;
+    
+    // 创建下载链接 - 使用.txt扩展名确保iOS Safari兼容
+    // iOS Safari看到.txt文件会显示完整的分享菜单，包括"存储到文件"
+    const blob = new Blob([fileContent], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `my_pixel_furniture_${Date.now()}.json`;
+    
+    // 生成包含时间戳的文件名
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    a.download = `ai_pixel_furniture_${timestamp}.txt`;
     
     // 触发下载
     document.body.appendChild(a);
@@ -944,8 +1022,70 @@ function exportFurnitureData() {
     setTimeout(() => {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        showToast(`✅ 成功导出 ${exportData.totalFurniture} 个家具`);
+        showToast(`✅ 成功导出 ${exportData.totalFurniture} 个家具到.txt文件`);
         closeExportModal();
+    }, 100);
+}
+// 导出单个家具 - iOS Safari 兼容版
+function exportSingleFurniture(itemId) {
+    if (!state.customItems[itemId]) {
+        showToast("找不到该家具");
+        return;
+    }
+    
+    const item = state.customItems[itemId];
+    
+    // 创建单个家具的导出数据
+    const exportData = {
+        version: "2.0",
+        exportTime: new Date().toISOString(),
+        type: "single_furniture",
+        furniture: {
+            [itemId]: {
+                name: item.name,
+                svg: item.svg,
+                rarity: item.rarity,
+                type: item.type,
+                width: item.width || 1,
+                height: item.height || 1,
+                inPool: item.inPool || true
+            }
+        }
+    };
+    
+    // 转换为JSON字符串
+    const jsonStr = JSON.stringify(exportData, null, 2);
+    
+    // 添加文件头说明
+    const fileContent = `=== AI像素屋单个家具导出文件 ===
+家具名称：${item.name}
+稀有度：${item.rarity}
+分类：${getTypeDisplayName(item.type)}
+文件说明：这是单个家具的导出文件，内容是标准的JSON格式。
+虽然文件扩展名是.txt以确保iOS设备兼容，但您可以用任何文本编辑器或JSON工具打开。
+
+${jsonStr}`;
+    
+    // 创建下载链接 - 使用.txt扩展名确保iOS Safari兼容
+    const blob = new Blob([fileContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    
+    // 生成文件名，使用家具名称（过滤掉特殊字符）
+    const safeName = item.name.replace(/[<>:"/\\|?*]/g, '_').substring(0, 30);
+    const timestamp = new Date().toISOString().slice(0, 10); // 只取日期
+    a.download = `${safeName}_${item.rarity}_${timestamp}.txt`;
+    
+    // 触发下载
+    document.body.appendChild(a);
+    a.click();
+    
+    // 清理
+    setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast(`✅ 成功导出 "${item.name}"`);
     }, 100);
 }
 
@@ -1875,108 +2015,110 @@ el.innerHTML = `
         
         renderInventory();
     }
+// 渲染背包 - 修复：全部分类时只显示一行
+function renderInventory() {
+    const container = document.getElementById('inventory-container');
+    container.innerHTML = '';
     
-    // 渲染背包 - 修复：全部分类时只显示一行
-    function renderInventory() {
-        const container = document.getElementById('inventory-container');
-        container.innerHTML = '';
+    // 获取所有符合条件的物品
+    let allItems = [];
+    Object.keys(state.inventory).forEach(id => {
+        if (state.inventory[id] > 0 && state.customItems[id]) {
+            const item = state.customItems[id];
+            // 根据过滤器筛选
+            if (currentInventoryFilter === 'all' || item.type === currentInventoryFilter) {
+                allItems.push({id, count: state.inventory[id]});
+            }
+        }
+    });
+    
+    if (allItems.length === 0) {
+        container.innerHTML = '<div style="text-align:center; padding:20px; color:#999; font-size:10px;">暂无物品</div>';
+        return;
+    }
+    
+    // 创建水平滚动的背包条
+    const list = document.createElement('div');
+    list.className = 'inventory-bar-cute';
+    
+    // 按分类添加标签（只在全部分类时显示分类标签）
+    if (currentInventoryFilter === 'all') {
+        // 分组显示
+        const itemsByType = {
+            [ITEM_TYPES.FURNITURE]: [],
+            [ITEM_TYPES.DECOR]: [],
+            [ITEM_TYPES.WALL]: [],
+            [ITEM_TYPES.FLOOR]: []
+        };
         
-        // 获取所有符合条件的物品
-        let allItems = [];
-        Object.keys(state.inventory).forEach(id => {
-            if (state.inventory[id] > 0 && state.customItems[id]) {
-                const item = state.customItems[id];
-                // 根据过滤器筛选
-                if (currentInventoryFilter === 'all' || item.type === currentInventoryFilter) {
-                    allItems.push({id, count: state.inventory[id]});
-                }
+        allItems.forEach(({id, count}) => {
+            const item = state.customItems[id];
+            if (itemsByType[item.type]) {
+                itemsByType[item.type].push({id, count});
             }
         });
         
-        if (allItems.length === 0) {
-            container.innerHTML = '<div style="text-align:center; padding:20px; color:#999; font-size:10px;">暂无物品</div>';
-            return;
-        }
-        
-        // 创建水平滚动的背包条
-        const list = document.createElement('div');
-        list.className = 'inventory-bar-cute';
-        
-        // 按分类添加标签（只在全部分类时显示分类标签）
-        if (currentInventoryFilter === 'all') {
-            // 分组显示
-            const itemsByType = {
-                [ITEM_TYPES.FURNITURE]: [],
-                [ITEM_TYPES.DECOR]: [],
-                [ITEM_TYPES.WALL]: [],
-                [ITEM_TYPES.FLOOR]: []
-            };
+        // 按分类顺序添加物品
+        Object.entries(itemsByType).forEach(([type, items]) => {
+            if (items.length === 0) return;
             
-            allItems.forEach(({id, count}) => {
-                const item = state.customItems[id];
-                if (itemsByType[item.type]) {
-                    itemsByType[item.type].push({id, count});
-                }
-            });
+            // 添加分类分隔符
+            const separator = document.createElement('div');
+            separator.className = 'category-separator';
+            separator.innerHTML = `
+                <div style="display: flex; align-items: center; margin: 0 8px; color: ${getTypeColor(type)}; font-size: 8px; white-space: nowrap;">
+                    <span style="width: 8px; height: 8px; border-radius: 50%; background: ${getTypeColor(type)}; margin-right: 4px;"></span>
+                    ${getTypeDisplayName(type)}
+                </div>
+            `;
+            list.appendChild(separator);
             
-            // 按分类顺序添加物品
-            Object.entries(itemsByType).forEach(([type, items]) => {
-                if (items.length === 0) return;
-                
-                // 添加分类分隔符
-                const separator = document.createElement('div');
-                separator.className = 'category-separator';
-                separator.innerHTML = `
-                    <div style="display: flex; align-items: center; margin: 0 8px; color: ${getTypeColor(type)}; font-size: 8px; white-space: nowrap;">
-                        <span style="width: 8px; height: 8px; border-radius: 50%; background: ${getTypeColor(type)}; margin-right: 4px;"></span>
-                        ${getTypeDisplayName(type)}
-                    </div>
-                `;
-                list.appendChild(separator);
-                
-                // 添加该分类的物品
-                items.forEach(({id, count}) => {
-                    const item = state.customItems[id];
-                    const rarityObj = RARITY[item.rarity];
-                    
-                    const div = document.createElement('div');
-                    div.className = `item-slot-cute ${selectedId === id ? 'selected' : ''}`;
-                    div.setAttribute('data-item-id', id);
-                    div.innerHTML = `
-                        <div class="furniture-icon">${item.svg}</div>
-                        <div class="rarity-badge ${rarityObj.class}">${rarityObj.name}</div>
-                        ${item.inPool ? '<div class="in-pool-badge">🎁</div>' : ''}
-                        <div class="item-count-badge">${count}</div>
-                    `;
-                    
-                    div.onclick = (e) => {
-                        e.stopPropagation();
-                        selectedId = (selectedId === id) ? null : id;
-                        renderInventory();
-                        showToast(`已选中: ${item.name} (${getTypeDisplayName(item.type)})`);
-                    };
-                    
-                    div.addEventListener('touchstart', startDrag);
-                    div.addEventListener('mousedown', startDrag);
-                    
-                    list.appendChild(div);
-                });
-            });
-        } else {
-            // 特定分类时直接显示物品
-            allItems.forEach(({id, count}) => {
+            // 添加该分类的物品
+            items.forEach(({id, count}) => {
                 const item = state.customItems[id];
                 const rarityObj = RARITY[item.rarity];
                 
                 const div = document.createElement('div');
                 div.className = `item-slot-cute ${selectedId === id ? 'selected' : ''}`;
                 div.setAttribute('data-item-id', id);
-                div.innerHTML = `
-                    <div class="furniture-icon">${item.svg}</div>
-                    <div class="rarity-badge ${rarityObj.class}">${rarityObj.name}</div>
-                    ${item.inPool ? '<div class="in-pool-badge">🎁</div>' : ''}
-                    <div class="item-count-badge">${count}</div>
-                `;
+                
+// 在背包物品的HTML中添加导出按钮
+div.innerHTML = `
+    <div class="furniture-icon">${item.svg}</div>
+    <div class="rarity-badge ${rarityObj.class}">${rarityObj.name}</div>
+    ${item.inPool ? '<div class="in-pool-badge">🎁</div>' : ''}
+    <div class="item-count-badge">${count}</div>
+    <div class="export-single-btn" data-item-id="${id}" title="导出这个家具">
+        📤
+    </div>
+`;
+
+// 移除原本的onclick属性，改用事件监听器（防止事件冒泡冲突）
+const exportBtn = div.querySelector('.export-single-btn');
+exportBtn.addEventListener('click', function(e) {
+    e.stopPropagation(); // 阻止事件冒泡到父元素
+    e.preventDefault();  // 阻止默认行为
+    
+    const itemId = this.getAttribute('data-item-id');
+    if (itemId && state.customItems[itemId]) {
+        // 添加点击反馈动画
+        this.style.transform = 'scale(0.8)';
+        setTimeout(() => {
+            this.style.transform = 'scale(1)';
+        }, 150);
+        
+        exportSingleFurniture(itemId);
+    }
+});
+
+// 阻止父元素的点击事件被触发（当点击导出按钮时）
+exportBtn.addEventListener('touchstart', function(e) {
+    e.stopPropagation();
+});
+
+exportBtn.addEventListener('mousedown', function(e) {
+    e.stopPropagation();
+});
                 
                 div.onclick = (e) => {
                     e.stopPropagation();
@@ -1990,24 +2132,53 @@ el.innerHTML = `
                 
                 list.appendChild(div);
             });
-        }
-        
-        container.appendChild(list);
-        
-        // 添加CSS样式用于分隔符
-        if (!document.querySelector('#separator-style')) {
-            const style = document.createElement('style');
-            style.id = 'separator-style';
-            style.textContent = `
-                .category-separator {
-                    display: flex;
-                    align-items: center;
-                    flex-shrink: 0;
-                }
+        });
+    } else {
+        // 特定分类时直接显示物品
+        allItems.forEach(({id, count}) => {
+            const item = state.customItems[id];
+            const rarityObj = RARITY[item.rarity];
+            
+            const div = document.createElement('div');
+            div.className = `item-slot-cute ${selectedId === id ? 'selected' : ''}`;
+            div.setAttribute('data-item-id', id);
+            div.innerHTML = `
+                <div class="furniture-icon">${item.svg}</div>
+                <div class="rarity-badge ${rarityObj.class}">${rarityObj.name}</div>
+                ${item.inPool ? '<div class="in-pool-badge">🎁</div>' : ''}
+                <div class="item-count-badge">${count}</div>
             `;
-            document.head.appendChild(style);
-        }
+            
+            div.onclick = (e) => {
+                e.stopPropagation();
+                selectedId = (selectedId === id) ? null : id;
+                renderInventory();
+                showToast(`已选中: ${item.name} (${getTypeDisplayName(item.type)})`);
+            };
+            
+            div.addEventListener('touchstart', startDrag);
+            div.addEventListener('mousedown', startDrag);
+            
+            list.appendChild(div);
+        });
     }
+    
+    container.appendChild(list);
+    
+    // 添加CSS样式用于分隔符
+    if (!document.querySelector('#separator-style')) {
+        const style = document.createElement('style');
+        style.id = 'separator-style';
+        style.textContent = `
+            .category-separator {
+                display: flex;
+                align-items: center;
+                flex-shrink: 0;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+}
     
     // === 拖拽逻辑 ===
     
