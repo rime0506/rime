@@ -1388,6 +1388,16 @@
         </button>
     </div>
     
+    <!-- 宠物列表 -->
+    <div style="width: 100%; background: var(--bg-pink); border: 3px solid var(--main-pink); border-radius: 8px; padding: 10px; margin-bottom: 15px; max-height: 200px; overflow-y: auto;">
+        <div style="font-size: 10px; color: var(--dark-pink); margin-bottom: 10px; text-align: center;">
+            🐾 我的宠物列表 🐾
+        </div>
+        <div id="pet-list">
+            <!-- 宠物列表将在这里动态生成 -->
+        </div>
+    </div>
+    
     <!-- 返回按钮 -->
     <button class="pixel-btn" onclick="switchScreen('gacha')" style="width: 100%;">
         ⬅️ 返回扭蛋
@@ -4361,6 +4371,9 @@ function switchScreen(id) {
             state.pets.push(pet);
             state.currentPet = pet;
             
+            // 保存状态
+            saveData();
+            
             // 渲染宠物
             renderPetDisplay(pet);
             renderPetList();
@@ -4429,6 +4442,9 @@ function switchScreen(id) {
         
         // 更新宠物状态
         updatePetStatus(pet);
+        
+        // 保存数据
+        saveData();
     }
     
     // 检查宠物升级
@@ -4470,6 +4486,7 @@ function switchScreen(id) {
         if (newName && newName.trim()) {
             const oldName = state.currentPet.name;
             state.currentPet.name = newName.trim();
+            saveData(); // 保存数据
             showToast(`✅ ${oldName}已重命名为${state.currentPet.name}`);
             renderPetDisplay(state.currentPet);
             renderPetList();
@@ -4480,14 +4497,20 @@ function switchScreen(id) {
     function renderPetDisplay(pet) {
         const petDisplay = document.getElementById('pet-display');
         const petName = document.getElementById('pet-name');
+        const petDescription = document.getElementById('pet-description');
         const petStatus = document.getElementById('pet-status');
         
         if (petDisplay) {
             petDisplay.innerHTML = pet.svg;
+            console.log('宠物显示已更新:', pet.name);
         }
         
         if (petName) {
             petName.textContent = pet.name;
+        }
+        
+        if (petDescription) {
+            petDescription.textContent = `生成提示: ${pet.prompt || '无描述'}`;
         }
         
         if (petStatus) {
@@ -5820,6 +5843,14 @@ function init() {
                 state.characters = [];
             }
             
+            // 确保宠物相关数据存在（兼容旧版本）
+            if (!state.pets) {
+                state.pets = [];
+            }
+            if (!state.petCounter) {
+                state.petCounter = 0;
+            }
+            
             initializeCatalog();
             updateOccupiedGrid();
         } else {
@@ -5828,6 +5859,9 @@ function init() {
             state.inventory['plant_01'] = 2;
             state.inventory['painting_01'] = 1;
             state.characters = []; // 初始化空角色数组
+            state.pets = []; // 初始化空宠物数组
+            state.petCounter = 0; // 初始化宠物计数器
+            state.currentPet = null; // 初始化当前宠物
             initializeCatalog();
             updateOccupiedGrid();
         }
