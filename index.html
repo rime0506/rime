@@ -896,7 +896,7 @@
             
             <!-- 角色预览 -->
             <div style="display: flex; justify-content: center; margin: 15px 0;">
-                <div id="character-preview" style="width: 120px; height: 120px; border: 2px solid var(--main-pink); border-radius: 8px; padding: 10px; background: #fff; position: relative;">
+                <div id="character-preview" style="width: 128px; height: 128px; border: 2px solid var(--main-pink); border-radius: 8px; padding: 0; background: #fff; position: relative; overflow: hidden;">
                     <!-- 角色预览动态生成 -->
                 </div>
             </div>
@@ -970,6 +970,19 @@
                 <span style="margin: 0 10px;">📦 总计: <strong style="color: var(--dark-pink);" id="catalog-total">0</strong></span>
                 <span style="margin: 0 10px;">✅ 已收集: <strong style="color: var(--accent-yellow);" id="catalog-owned">0</strong></span>
                 <span style="margin: 0 10px;">📊 收集率: <strong style="color: var(--accent-blue);" id="catalog-rate">0%</strong></span>
+            </div>
+            
+            <!-- 选择功能 -->
+            <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center;">
+                <button class="pixel-btn" onclick="selectAllCatalogItems()" style="padding: 8px 15px; font-size: 10px; flex: 1;">
+                    ✅ 全选
+                </button>
+                <button class="pixel-btn" onclick="deselectAllCatalogItems()" style="padding: 8px 15px; font-size: 10px; flex: 1;">
+                    ❌ 取消全选
+                </button>
+                <button class="pixel-btn ai" onclick="exportSelectedCatalogItems()" style="padding: 8px 15px; font-size: 10px; flex: 2;">
+                    📥 导出选中 (<span id="selected-count">0</span>)
+                </button>
             </div>
             
             <div id="catalog-items" class="catalog-grid">
@@ -1856,6 +1869,7 @@ ${jsonStr}`;
     let currentCatalogTab = 'all';
     let currentCatalogFilter = 'all';
     let currentGachaMachine = 'furniture'; // 新增：当前激活的扭蛋机 (furniture/clothes)
+    let selectedCatalogItems = new Set(); // 选中的物品ID集合
     
     // === 核心函数：格子系统 ===
     
@@ -2032,9 +2046,9 @@ ${jsonStr}`;
                     clothDiv.innerHTML = item.svg;
                     const svg = clothDiv.querySelector('svg');
                     if (svg) {
-                        svg.style.transform = 'translate(-2px, -2px) scale(1.05)'; // 稍微放大1-2px
-                        svg.style.width = '128px';
-                        svg.style.height = '128px';
+                        svg.style.width = '100%';
+                        svg.style.height = '100%';
+                        svg.style.display = 'block';
                     }
                     characterContainer.appendChild(clothDiv);
                 }
@@ -2499,21 +2513,29 @@ ${jsonStr}`;
             let systemPrompt;
             
             if (generateType === 'clothes') {
-                // 服装专用提示词 - 恢复精致像素艺术风格 + 位置规范
-                systemPrompt = `你是像素换装游戏的专业美术生成器，擅长创作精致的像素艺术风格服装。
+                // 服装专用提示词 - 使用精致像素艺术风格 + 位置规范
+                systemPrompt = `你是复古像素游戏美术师，专门创作16-bit时代的精致像素艺术服装。
 
-【核心要求】精致的像素艺术风格，像《星露谷物语》那样有丰富的细节和设计感！
+核心要求：真·像素风格（不是简单色块！）
+1. 像素网格限制：整个128x128画布想象成64x64个小像素格子（每个格子2x2像素，但用1x1的rect绘制）
+2. 小格子构图：所有细节必须用这些小像素格子拼出来，不能直接用大矩形
+3. 像素级细节：要有《星露谷物语》、《泰拉瑞亚》那种一个像素一个像素拼出来的感觉
+4. 色彩限制：每个服装最多使用8-12种颜色，但要通过排列创造丰富感
 
-【像素艺术技法】
-- 使用<path>元素创建复杂形状（如裙子轮廓、袖子、装饰）
-- 使用<rect>元素绘制细节和纹理
-- 可以使用<polygon>、<circle>等元素增加细节
+像素艺术技法：
 - 抖动处理：用棋盘格像素创造颜色过渡
 - 抗锯齿：在边缘用中间色像素平滑过渡
-- 轮廓线：用深色像素勾勒轮廓，增加立体感
-- 阴影和高光：用不同深浅的颜色创造层次
-- 装饰细节：蝴蝶结、蕾丝、波点、条纹、图案、纽扣等
-- 纹理：用像素点阵模拟布料质感
+- 轮廓线：用深色像素勾勒轮廓，但不是纯黑色粗线
+- 像素集群：相似的像素聚在一起形成色块，但内部要有变化
+- 阴影和高光：用不同深浅的颜色创造层次和立体感
+- 装饰细节：蝴蝶结、蕾丝、波点、条纹、图案、纽扣、发饰等
+
+设计规则（重要！）：
+- 必须使用：多个小矩形/圆形拼合，模拟像素格子
+- 细节密度：每8x8像素区域内至少要有2-3种颜色变化
+- 纹理方法：用像素点阵模拟布料、蕾丝、皮革等材质
+- 使用<path>元素创建复杂形状（如裙子轮廓、袖子）
+- 使用<rect>、<polygon>、<circle>等元素增加细节
 
 【人物底模规范】
 画布尺寸：128×128像素
@@ -2560,18 +2582,21 @@ viewBox="0 0 128 128"
 【绘制要求】
 - ⚠️ 每个<rect>元素必须包含：x, y, width, height, fill 这5个属性！
 - ⚠️ 坐标必须严格按照上面给出的范围，不要使用(0,0)或其他错误坐标！
-- 可以使用<path>元素创建复杂形状（如裙子轮廓、袖子、装饰）
-- 可以使用<polygon>、<circle>等元素增加细节
-- 每个SVG至少有30-80个元素，创造丰富的细节和层次
-- 颜色选择：使用和谐的色彩搭配，根据主题自由选择
+- 使用真正的像素格子拼合技法（不是色块填充）
+- 有丰富的像素级细节（小格子、小点阵）
+- 包含抖动、抗锯齿等像素艺术技巧
+- 每个SVG至少有30-80个元素（小矩形/圆形/路径），创造丰富的细节
+- 颜色选择：使用和谐的色彩搭配，根据主题自由选择（8-12种颜色）
 - SVG画布背景透明
 - 添加shape-rendering="crispEdges"属性保持像素清晰
 
 【设计风格要求】
+- 想象你在用MS Paint一个像素一个像素地画
+- 拒绝"矢量感"，追求"像素感"
+- 细节！细节！还是细节！（但不是复杂渐变，是小像素点）
 - 要有丰富的装饰：蝴蝶结、蕾丝边、波点、条纹、图案、纽扣、发饰等
 - 要有层次感：使用阴影、高光、不同深浅的颜色
 - 要有设计感：不是简单色块，而是精心设计的服装
-- 要有细节：每个服装都要有独特的细节和特色
 - 参考《星露谷物语》的精致像素艺术风格
 
 主题：${prompt}
@@ -2641,7 +2666,7 @@ viewBox="0 0 128 128"
                     model: selectedModel,
                     messages: [
                         { role: "system", content: systemPrompt },
-                        { role: "user", content: `生成10个像素${generateTypeText}，主题：${prompt}。⚠️重要：每个<rect>必须包含x, y, width, height, fill这5个属性，缺一不可！可以使用<path>、<polygon>、<circle>等元素创建复杂形状和装饰。使用精致的像素艺术风格，创造丰富的细节、装饰和设计感，像《星露谷物语》那样。` }
+                        { role: "user", content: `生成10个像素${generateTypeText}，主题：${prompt}。⚠️重要：每个<rect>必须包含x, y, width, height, fill这5个属性，缺一不可！使用真正的像素格子拼合技法，不是简单色块。要有丰富的像素级细节（小格子、小点阵），包含抖动、抗锯齿等像素艺术技巧。想象你在用MS Paint一个像素一个像素地画，拒绝"矢量感"，追求"像素感"。细节！细节！还是细节！` }
                     ],
                     temperature: 0.8,
                     max_tokens: 20000
@@ -3193,21 +3218,29 @@ viewBox="0 0 128 128"
         const selectedModel = document.getElementById('selected-model').value;
         
         try {
-            // 专门的服装生成提示词 - 恢复精致像素艺术风格 + 位置规范
-            const systemPrompt = `你是像素换装游戏的专业美术生成器，擅长创作精致的像素艺术风格服装。
+            // 专门的服装生成提示词 - 使用精致像素艺术风格 + 位置规范
+            const systemPrompt = `你是复古像素游戏美术师，专门创作16-bit时代的精致像素艺术服装。
 
-【核心要求】精致的像素艺术风格，像《星露谷物语》那样有丰富的细节和设计感！
+核心要求：真·像素风格（不是简单色块！）
+1. 像素网格限制：整个128x128画布想象成64x64个小像素格子（每个格子2x2像素，但用1x1的rect绘制）
+2. 小格子构图：所有细节必须用这些小像素格子拼出来，不能直接用大矩形
+3. 像素级细节：要有《星露谷物语》、《泰拉瑞亚》那种一个像素一个像素拼出来的感觉
+4. 色彩限制：每个服装最多使用8-12种颜色，但要通过排列创造丰富感
 
-【像素艺术技法】
-- 使用<path>元素创建复杂形状（如裙子轮廓、袖子、装饰）
-- 使用<rect>元素绘制细节和纹理
-- 可以使用<polygon>、<circle>等元素增加细节
+像素艺术技法：
 - 抖动处理：用棋盘格像素创造颜色过渡
 - 抗锯齿：在边缘用中间色像素平滑过渡
-- 轮廓线：用深色像素勾勒轮廓，增加立体感
-- 阴影和高光：用不同深浅的颜色创造层次
-- 装饰细节：蝴蝶结、蕾丝、波点、条纹、图案、纽扣等
-- 纹理：用像素点阵模拟布料质感
+- 轮廓线：用深色像素勾勒轮廓，但不是纯黑色粗线
+- 像素集群：相似的像素聚在一起形成色块，但内部要有变化
+- 阴影和高光：用不同深浅的颜色创造层次和立体感
+- 装饰细节：蝴蝶结、蕾丝、波点、条纹、图案、纽扣、发饰等
+
+设计规则（重要！）：
+- 必须使用：多个小矩形/圆形拼合，模拟像素格子
+- 细节密度：每8x8像素区域内至少要有2-3种颜色变化
+- 纹理方法：用像素点阵模拟布料、蕾丝、皮革等材质
+- 使用<path>元素创建复杂形状（如裙子轮廓、袖子）
+- 使用<rect>、<polygon>、<circle>等元素增加细节
 
 【人物底模规范】
 画布尺寸：128×128像素
@@ -3255,19 +3288,21 @@ shape-rendering="crispEdges"（保持像素清晰）
 【绘制要求】
 - ⚠️ 每个<rect>元素必须包含：x, y, width, height, fill 这5个属性！
 - ⚠️ 坐标必须严格按照上面给出的范围，不要使用(0,0)或其他错误坐标！
-- 可以使用<path>元素创建复杂形状（如裙子轮廓、袖子、装饰）
-- 可以使用<polygon>、<circle>等元素增加细节
-- 每个SVG至少有30-80个元素，创造丰富的细节和层次
-- 颜色选择：使用和谐的色彩搭配，根据主题自由选择
-- 坐标必须准确对应人物身体部位，不要在左上角(0,0)绘制
+- 使用真正的像素格子拼合技法（不是色块填充）
+- 有丰富的像素级细节（小格子、小点阵）
+- 包含抖动、抗锯齿等像素艺术技巧
+- 每个SVG至少有30-80个元素（小矩形/圆形/路径），创造丰富的细节
+- 颜色选择：使用和谐的色彩搭配，根据主题自由选择（8-12种颜色）
 - SVG画布背景透明
 - 添加shape-rendering="crispEdges"属性保持像素清晰
 
 【设计风格要求】
+- 想象你在用MS Paint一个像素一个像素地画
+- 拒绝"矢量感"，追求"像素感"
+- 细节！细节！还是细节！（但不是复杂渐变，是小像素点）
 - 要有丰富的装饰：蝴蝶结、蕾丝边、波点、条纹、图案、纽扣、发饰等
 - 要有层次感：使用阴影、高光、不同深浅的颜色
 - 要有设计感：不是简单色块，而是精心设计的服装
-- 要有细节：每个服装都要有独特的细节和特色
 - 参考《星露谷物语》的精致像素艺术风格
 
 主题：${prompt}
@@ -3292,7 +3327,7 @@ shape-rendering="crispEdges"（保持像素清晰）
                     model: selectedModel,
                     messages: [
                         { role: "system", content: systemPrompt },
-                        { role: "user", content: `生成5个符合人物模型比例的服装，主题：${prompt}。⚠️重要：每个<rect>必须包含x, y, width, height, fill这5个属性，缺一不可！可以使用<path>、<polygon>、<circle>等元素创建复杂形状和装饰。使用精致的像素艺术风格，创造丰富的细节、装饰和设计感，像《星露谷物语》那样。` }
+                        { role: "user", content: `生成5个符合人物模型比例的服装，主题：${prompt}。⚠️重要：每个<rect>必须包含x, y, width, height, fill这5个属性，缺一不可！使用真正的像素格子拼合技法，不是简单色块。要有丰富的像素级细节（小格子、小点阵），包含抖动、抗锯齿等像素艺术技巧。想象你在用MS Paint一个像素一个像素地画，拒绝"矢量感"，追求"像素感"。细节！细节！还是细节！` }
                     ],
                     temperature: 0.8,
                     max_tokens: 20000
@@ -3935,8 +3970,11 @@ function renderCharacter() {
 
     el.innerHTML = "";
 
-    // base
+    // base - 基础人模
     const baseContainer = document.createElement('div');
+    baseContainer.style.position = 'absolute';
+    baseContainer.style.top = '0';
+    baseContainer.style.left = '0';
     baseContainer.style.width = '100%';
     baseContainer.style.height = '100%';
     baseContainer.innerHTML = BASE_CHARACTER_SVG;
@@ -3944,6 +3982,7 @@ function renderCharacter() {
     if (baseSvg) {
         baseSvg.style.width = '100%';
         baseSvg.style.height = '100%';
+        baseSvg.style.display = 'block';
     }
     el.appendChild(baseContainer);
 
@@ -3954,21 +3993,21 @@ function renderCharacter() {
         if (!id) return;
         const item = state.customItems[id];
         if (item) {
-            // 为服装SVG添加容器，应用slot-specific偏移
+            // 服装SVG直接覆盖整个128x128区域，不需要偏移
             const clothingContainer = document.createElement('div');
-            const offset = slotOffsets[slot];
             clothingContainer.style.position = 'absolute';
-            clothingContainer.style.top = offset.top;
-            clothingContainer.style.left = offset.left;
-            // 不限制容器尺寸，让SVG完全显示
+            clothingContainer.style.top = '0';
+            clothingContainer.style.left = '0';
+            clothingContainer.style.width = '100%';
+            clothingContainer.style.height = '100%';
             clothingContainer.innerHTML = item.svg;
             
-            // 获取并设置SVG的缩放
+            // 获取并设置SVG，让它填满整个容器
             const svg = clothingContainer.querySelector('svg');
             if (svg) {
-                svg.style.transform = 'translate(-2px, -2px) scale(1.05)'; // 稍微放大1-2px
-                svg.style.width = '128px';
-                svg.style.height = '128px';
+                svg.style.width = '100%';
+                svg.style.height = '100%';
+                svg.style.display = 'block';
             }
             
             el.appendChild(clothingContainer);
@@ -4016,19 +4055,20 @@ function renderBaseModelToMainScreen() {
         
         const item = state.customItems[id];
         if (item) {
+            // 服装SVG直接覆盖整个128x128区域，不需要偏移
             const clothDiv = document.createElement('div');
-            const offset = slotOffsets[slot];
             clothDiv.style.position = 'absolute';
-            clothDiv.style.top = offset.top;
-            clothDiv.style.left = offset.left;
-            // 不限制容器尺寸，让SVG完全显示
+            clothDiv.style.top = '0';
+            clothDiv.style.left = '0';
+            clothDiv.style.width = '100%';
+            clothDiv.style.height = '100%';
             let svgContent = item.svg;
             clothDiv.innerHTML = svgContent;
             const svg = clothDiv.querySelector('svg');
             if (svg) {
-                svg.style.transform = 'translate(-2px, -2px) scale(1.05)'; // 稍微放大1-2px
-                svg.style.width = '128px';
-                svg.style.height = '128px';
+                svg.style.width = '100%';
+                svg.style.height = '100%';
+                svg.style.display = 'block';
             }
             container.appendChild(clothDiv);
         }
@@ -4600,6 +4640,31 @@ function renderClothesInventory() {
             
             const catalogItem = document.createElement('div');
             catalogItem.className = `catalog-item ${isOwned ? 'owned' : ''}`;
+            catalogItem.style.position = 'relative';
+            
+            // 添加复选框（只有已发现的物品才能选中）
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.style.position = 'absolute';
+            checkbox.style.top = '5px';
+            checkbox.style.left = '5px';
+            checkbox.style.width = '18px';
+            checkbox.style.height = '18px';
+            checkbox.style.zIndex = '10';
+            checkbox.style.cursor = isSeen ? 'pointer' : 'not-allowed';
+            checkbox.disabled = !isSeen;
+            checkbox.checked = isSeen && selectedCatalogItems.has(id);
+            checkbox.addEventListener('change', (e) => {
+                e.stopPropagation();
+                if (isSeen) {
+                    if (checkbox.checked) {
+                        selectedCatalogItems.add(id);
+                    } else {
+                        selectedCatalogItems.delete(id);
+                    }
+                    updateSelectedCount();
+                }
+            });
             
             if (!isSeen) {
                 catalogItem.innerHTML = `
@@ -4608,9 +4673,9 @@ function renderClothesInventory() {
                     <div class="rarity-display" style="background:#ccc; color:#fff; padding:3px 8px; border-radius:5px; font-size:9px; margin-top:5px;">???</div>
                 `;
             } else {
-                const ownershipBadge = isOwned ? '<div style="position: absolute; top: 5px; right: 5px; background: var(--accent-yellow); color: white; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold;">✓</div>' : '';
+                const ownershipBadge = isOwned ? '<div style="position: absolute; top: 5px; right: 5px; background: var(--accent-yellow); color: white; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; z-index: 5;">✓</div>' : '';
                 const inventoryCount = state.inventory[id] || 0;
-                const countDisplay = inventoryCount > 1 ? `<div style="position: absolute; top: 5px; left: 5px; background: var(--accent-blue); color: white; border-radius: 10px; padding: 2px 6px; font-size: 9px; font-weight: bold;">×${inventoryCount}</div>` : '';
+                const countDisplay = inventoryCount > 1 ? `<div style="position: absolute; top: 5px; right: ${isOwned ? '30px' : '5px'}; background: var(--accent-blue); color: white; border-radius: 10px; padding: 2px 6px; font-size: 9px; font-weight: bold; z-index: 5;">×${inventoryCount}</div>` : '';
                 
                 catalogItem.innerHTML = `
                     ${ownershipBadge}
@@ -4621,12 +4686,129 @@ function renderClothesInventory() {
                 `;
             }
             
+            catalogItem.appendChild(checkbox);
             catalogGrid.appendChild(catalogItem);
         });
         
         if (filteredItems.length === 0) {
             catalogGrid.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:20px; font-size:10px; color:#999;">暂无物品</div>';
         }
+        
+        updateSelectedCount();
+    }
+    
+    function updateSelectedCount() {
+        const count = selectedCatalogItems.size;
+        const countElement = document.getElementById('selected-count');
+        if (countElement) {
+            countElement.textContent = count;
+        }
+    }
+    
+    function selectAllCatalogItems() {
+        // 获取当前显示的物品列表
+        const allItems = Object.keys(state.customItems).filter(id => {
+            if (currentGachaMachine === 'furniture') {
+                return state.customItems[id].type !== ITEM_TYPES.CLOTHES;
+            } else {
+                return state.customItems[id].type === ITEM_TYPES.CLOTHES;
+            }
+        });
+        
+        let filteredItems = allItems;
+        if (currentCatalogTab === 'owned') {
+            filteredItems = filteredItems.filter(id => state.catalog[id]?.owned);
+        } else if (currentCatalogTab === 'missing') {
+            filteredItems = filteredItems.filter(id => !state.catalog[id]?.owned);
+        }
+        if (currentCatalogFilter !== 'all') {
+            filteredItems = filteredItems.filter(id => {
+                return state.customItems[id].rarity === currentCatalogFilter;
+            });
+        }
+        
+        // 只选中已发现的物品
+        filteredItems.forEach(id => {
+            if (state.catalog[id]?.seen) {
+                selectedCatalogItems.add(id);
+            }
+        });
+        
+        // 更新复选框状态
+        const catalogGrid = document.getElementById('catalog-items');
+        const checkboxes = catalogGrid.querySelectorAll('input[type="checkbox"]');
+        checkboxes.forEach((checkbox, index) => {
+            if (filteredItems[index] && state.catalog[filteredItems[index]]?.seen) {
+                checkbox.checked = true;
+            }
+        });
+        
+        updateSelectedCount();
+    }
+    
+    function deselectAllCatalogItems() {
+        selectedCatalogItems.clear();
+        const catalogGrid = document.getElementById('catalog-items');
+        const checkboxes = catalogGrid.querySelectorAll('input[type="checkbox"]');
+        checkboxes.forEach(checkbox => {
+            checkbox.checked = false;
+        });
+        updateSelectedCount();
+    }
+    
+    function exportSelectedCatalogItems() {
+        if (selectedCatalogItems.size === 0) {
+            showToast('请先选择要导出的物品');
+            return;
+        }
+        
+        const selectedItems = {};
+        selectedCatalogItems.forEach(id => {
+            if (state.customItems[id]) {
+                const item = state.customItems[id];
+                selectedItems[id] = {
+                    name: item.name,
+                    svg: item.svg,
+                    rarity: item.rarity,
+                    type: item.type,
+                    width: item.width || 1,
+                    height: item.height || 1,
+                    inPool: item.inPool !== undefined ? item.inPool : true,
+                    slot: item.slot || undefined
+                };
+            }
+        });
+        
+        const isFurniture = currentGachaMachine === 'furniture';
+        const exportData = {
+            version: "2.0",
+            exportTime: new Date().toISOString(),
+            totalItems: selectedCatalogItems.size,
+            [isFurniture ? 'furniture' : 'clothes']: selectedItems
+        };
+        
+        // 转换为JSON字符串
+        const jsonStr = JSON.stringify(exportData, null, 2);
+        
+        // 添加文件头说明
+        const fileContent = `=== AI像素屋${isFurniture ? '家具' : '服装'}导出文件 ===
+文件说明：这是您选择的${isFurniture ? '家具' : '服装'}数据文件，内容是标准的JSON格式。
+虽然文件扩展名是.txt以确保iOS设备兼容，但您可以用任何文本编辑器或JSON工具打开。
+
+${jsonStr}`;
+        
+        const blob = new Blob([fileContent], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+        a.download = `selected_${isFurniture ? 'furniture' : 'clothes'}_${timestamp}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showToast(`已导出 ${selectedCatalogItems.size} 个${isFurniture ? '家具' : '服装'}`);
     }
     
     function updateUI() {
