@@ -418,33 +418,61 @@
         
         /* 图鉴样式 */
         .catalog-tabs {
-            display: flex; gap: 5px; margin-bottom: 10px; justify-content: center;
+            display: flex; gap: 8px; margin-bottom: 15px; justify-content: center;
         }
         .catalog-tab {
-            padding: 5px 10px; font-size: 8px; border: 2px solid var(--dark-pink);
-            border-radius: 4px; background: var(--bg-pink); cursor: pointer;
+            padding: 8px 15px; font-size: 10px; border: 2px solid var(--dark-pink);
+            border-radius: 8px; background: var(--bg-pink); cursor: pointer;
+            transition: all 0.2s; font-weight: bold;
+        }
+        .catalog-tab:hover {
+            background: #ffe4ec; transform: translateY(-2px);
         }
         .catalog-tab.active {
-            background: var(--main-pink); color: white;
+            background: var(--main-pink); color: white; transform: scale(1.05);
         }
         .catalog-grid {
-            display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
-            margin: 10px 0; max-height: 350px; overflow-y: auto; padding: 5px;
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+            margin: 15px 0; max-height: 400px; overflow-y: auto; padding: 8px;
+        }
+        .catalog-grid::-webkit-scrollbar {
+            width: 10px;
+        }
+        .catalog-grid::-webkit-scrollbar-track {
+            background: #ffe4ec;
+            border-radius: 5px;
+        }
+        .catalog-grid::-webkit-scrollbar-thumb {
+            background: var(--main-pink);
+            border-radius: 5px;
+        }
+        .catalog-grid::-webkit-scrollbar-thumb:hover {
+            background: var(--dark-pink);
         }
         .catalog-item {
-            background: var(--bg-pink); border: 3px solid var(--main-pink); border-radius: 8px;
-            padding: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center;
-            position: relative;
+            background: linear-gradient(135deg, #ffffff 0%, #fff5f7 100%);
+            border: 3px solid var(--main-pink); border-radius: 12px;
+            padding: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+            position: relative; transition: all 0.3s; cursor: pointer;
+            box-shadow: 0 2px 4px rgba(224, 108, 159, 0.1);
         }
-        .catalog-item.owned { border-color: var(--accent-yellow); }
+        .catalog-item:hover {
+            transform: translateY(-3px); 
+            box-shadow: 0 4px 8px rgba(224, 108, 159, 0.2);
+        }
+        .catalog-item.owned { 
+            border-color: var(--accent-yellow);
+            background: linear-gradient(135deg, #fffce6 0%, #fff9e6 100%);
+        }
         .catalog-item svg {
-            width: 40px; height: 40px; margin-bottom: 5px;
+            width: 50px; height: 50px; margin-bottom: 8px; image-rendering: pixelated;
         }
         .catalog-item-name {
-            font-size: 8px; color: var(--text-color); text-align: center; margin-bottom: 3px;
+            font-size: 10px; color: var(--text-color); text-align: center; margin-bottom: 5px;
+            font-weight: bold; line-height: 1.3;
         }
         .catalog-stats {
-            font-size: 6px; color: #666; margin-top: 2px;
+            font-size: 8px; color: #888; margin-top: 4px;
         }
         
         /* 设置弹窗 */
@@ -545,21 +573,20 @@
         
         /* 宠物页面样式 */
         #pet-display {
-            transition: transform 0.3s ease;
+            transition: all 0.3s ease;
         }
         
         #pet-display:hover {
-            transform: scale(1.1);
+            transform: scale(1.05);
         }
         
         #pet-status {
-            animation: pulse 2s infinite;
+            animation: float 3s ease-in-out infinite;
         }
         
-        @keyframes pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.05); }
-            100% { transform: scale(1); }
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-5px); }
         }
         
         #pet-prompt-input {
@@ -574,6 +601,35 @@
         
         .pet-interaction-btn:active {
             transform: scale(0.95);
+        }
+        
+        /* 美化宠物列表滚动条 */
+        #pet-list::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        #pet-list::-webkit-scrollbar-track {
+            background: #ffe4ec;
+            border-radius: 4px;
+        }
+        
+        #pet-list::-webkit-scrollbar-thumb {
+            background: var(--main-pink);
+            border-radius: 4px;
+        }
+        
+        #pet-list::-webkit-scrollbar-thumb:hover {
+            background: var(--dark-pink);
+        }
+        
+        /* 宠物能力条动画 */
+        #pet-abilities {
+            animation: fadeIn 0.5s ease-in;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
         
         /* 家具显示在奖池的标志 */
@@ -777,6 +833,23 @@
         </div>
     </div>
     
+    <!-- 宠物生成弹窗 -->
+    <div id="pet-generate-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-title">🐾 宠物召唤魔法 🐾</div>
+            <p class="modal-info">输入你想召唤的宠物风格，AI将为你创造一个可爱的像素宠物！</p>
+            
+            <textarea id="pet-prompt-input" class="prompt-input" placeholder="例如：可爱的粉色猫咪、蓝色的海洋生物、梦幻的独角兽、科幻的机器人宠物、会飞的小龙、萌萌的熊猫宝宝..."></textarea>
+            
+            <div class="modal-info">消耗：🟡1 | 生成：1个专属宠物（随机能力和等级）</div>
+            
+            <div class="modal-buttons">
+                <button class="pixel-btn" onclick="closePetGenerateModal()" style="background:#ccc;">取消</button>
+                <button class="pixel-btn pink" onclick="generatePetFromModal()">✨ 开始召唤</button>
+            </div>
+        </div>
+    </div>
+    
 <!-- 角色装扮弹窗 -->
     <div id="character-modal" class="modal">
         <div class="modal-content">
@@ -874,35 +947,36 @@
     
     <!-- 图鉴弹窗 -->
     <div id="catalog-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-title">📖 物品图鉴 📖</div>
+        <div class="modal-content" style="max-width: 700px; width: 90%;">
+            <div class="modal-title" style="font-size: 18px; margin-bottom: 15px;">📖 物品图鉴 📖</div>
             
             <!-- 图鉴标签页 -->
             <div class="catalog-tabs">
-                <button class="catalog-tab active" onclick="switchCatalogTab('all')">全部</button>
-                <button class="catalog-tab" onclick="switchCatalogTab('owned')">已拥有</button>
-                <button class="catalog-tab" onclick="switchCatalogTab('missing')">未拥有</button>
+                <button class="catalog-tab active" onclick="switchCatalogTab('all')">✨ 全部物品</button>
+                <button class="catalog-tab" onclick="switchCatalogTab('owned')">✅ 已拥有</button>
+                <button class="catalog-tab" onclick="switchCatalogTab('missing')">❓ 未拥有</button>
             </div>
             
             <!-- 稀有度过滤器 -->
-            <div class="rarity-filter">
+            <div class="rarity-filter" style="margin-bottom: 15px;">
                 <button class="rarity-filter-btn all active" onclick="filterCatalogItems('all')">全部</button>
                 <button class="rarity-filter-btn r" onclick="filterCatalogItems('r')">R</button>
                 <button class="rarity-filter-btn sr" onclick="filterCatalogItems('sr')">SR</button>
                 <button class="rarity-filter-btn ssr" onclick="filterCatalogItems('ssr')">SSR</button>
             </div>
             
-            <div class="modal-info" id="catalog-info">
-                总计: <span id="catalog-total">0</span> | 
-                已收集: <span id="catalog-owned">0</span> | 
-                收集率: <span id="catalog-rate">0%</span>
+            <!-- 统计信息 -->
+            <div id="catalog-info" style="background: var(--bg-pink); border: 3px solid var(--main-pink); border-radius: 10px; padding: 10px; margin-bottom: 15px; font-size: 11px; text-align: center;">
+                <span style="margin: 0 10px;">📦 总计: <strong style="color: var(--dark-pink);" id="catalog-total">0</strong></span>
+                <span style="margin: 0 10px;">✅ 已收集: <strong style="color: var(--accent-yellow);" id="catalog-owned">0</strong></span>
+                <span style="margin: 0 10px;">📊 收集率: <strong style="color: var(--accent-blue);" id="catalog-rate">0%</strong></span>
             </div>
             
             <div id="catalog-items" class="catalog-grid">
                 <!-- 图鉴内容动态生成 -->
             </div>
             
-            <button class="pixel-btn" onclick="closeCatalogModal()" style="width: 100%; margin-top: 10px;">关闭</button>
+            <button class="pixel-btn" onclick="closeCatalogModal()" style="width: 100%; margin-top: 15px; padding: 12px; font-size: 12px;">关闭图鉴</button>
         </div>
     </div>
     
@@ -1150,10 +1224,6 @@
                 <div class="nav-tab-icon">🎰</div>
                 <div class="nav-tab-text">扭蛋</div>
             </div>
-            <div class="nav-tab" onclick="openPoolModal()">
-                <div class="nav-tab-icon">🎁</div>
-                <div class="nav-tab-text">奖池</div>
-            </div>
             <div class="nav-tab" onclick="openCatalogModal()">
                 <div class="nav-tab-icon">📖</div>
                 <div class="nav-tab-text">图鉴</div>
@@ -1230,8 +1300,7 @@
         <div id="character-display" style="width: 128px; height: 128px; image-rendering: pixelated;">
             <!-- 初始人模将在这里显示 -->
             <svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-                <!-- 背景 -->
-                <rect x="0" y="0" width="128" height="128" fill="#FFFFFF"/>
+                <!-- 背景透明 -->
                 
                 <!-- 黑色描边层 (Silhouette) -->
                 <!-- 头部轮廓 -->
@@ -1325,82 +1394,96 @@
 
 <!-- === 主界面：宠物管理 === -->
 <div id="screen-pet" class="screen">
-    <h2 style="font-size: 16px; color: var(--dark-pink); margin-bottom: 15px;">🐾 宠物管理 🐾</h2>
+    <h2 style="font-size: 18px; color: var(--dark-pink); margin-bottom: 20px; text-align: center;">🐾 我的宠物乐园 🐾</h2>
     
-    <!-- 宠物显示区域 -->
-    <div style="width: 200px; height: 200px; background: var(--bg-pink); border: 4px solid var(--main-pink); border-radius: 8px; display: flex; align-items: center; justify-content: center; margin-bottom: 15px; overflow: hidden; position: relative;">
-        <div id="pet-display" style="width: 160px; height: 160px; image-rendering: pixelated;">
-            <!-- 初始宠物占位符 -->
-            <svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
-                <rect x="0" y="0" width="160" height="160" fill="#ffffff"/>
-                <circle cx="80" cy="80" r="60" fill="#ffdef2"/>
-                <circle cx="60" cy="70" r="10" fill="#e06c9f"/>
-                <circle cx="100" cy="70" r="10" fill="#e06c9f"/>
-                <path d="M 60 100 Q 80 120 100 100" stroke="#e06c9f" stroke-width="4" fill="none"/>
-                <circle cx="80" cy="120" r="8" fill="#ffdef2" stroke="#e06c9f" stroke-width="2"/>
-            </svg>
+    <!-- 主显示区域 -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+        
+        <!-- 左侧：宠物显示 -->
+        <div style="display: flex; flex-direction: column; gap: 15px;">
+            <!-- 宠物显示区域 -->
+            <div style="width: 100%; aspect-ratio: 1; background: linear-gradient(135deg, #fff5f7 0%, #ffe4ec 100%); border: 5px solid var(--main-pink); border-radius: 12px; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; box-shadow: 0 4px 8px rgba(224, 108, 159, 0.2);">
+                <div id="pet-display" style="width: 85%; height: 85%; image-rendering: pixelated;">
+                    <!-- 初始宠物占位符 -->
+                    <svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" style="width: 100%; height: 100%; display: block;">
+                        <rect x="0" y="0" width="128" height="128" fill="#ffffff"/>
+                        <circle cx="64" cy="64" r="50" fill="#ffdef2"/>
+                        <circle cx="48" cy="58" r="8" fill="#e06c9f"/>
+                        <circle cx="80" cy="58" r="8" fill="#e06c9f"/>
+                        <path d="M 48 80 Q 64 95 80 80" stroke="#e06c9f" stroke-width="3" fill="none"/>
+                        <text x="64" y="110" font-size="12" text-anchor="middle" fill="#e06c9f">?</text>
+                    </svg>
+                </div>
+                <!-- 宠物状态信息 -->
+                <div id="pet-status" style="position: absolute; top: 8px; right: 8px; background: rgba(255, 255, 255, 0.95); border: 3px solid var(--dark-pink); border-radius: 8px; padding: 8px; font-size: 10px; text-align: center; min-width: 80px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <div style="font-weight: bold; color: var(--dark-pink);">Lv.<span id="pet-level">?</span></div>
+                    <div style="margin: 3px 0;">😊 <span id="pet-mood">--</span>%</div>
+                    <div style="font-size: 8px; color: #666;"><span id="pet-exp">0/100</span></div>
+                </div>
+            </div>
+            
+            <!-- 宠物名称 -->
+            <div style="width: 100%; background: var(--bg-pink); border: 3px solid var(--main-pink); border-radius: 10px; padding: 12px; text-align: center;">
+                <div style="font-size: 14px; font-weight: bold; color: var(--dark-pink); margin-bottom: 5px;">
+                    <span id="pet-name">还没有宠物哦~</span>
+                </div>
+                <div style="font-size: 10px; color: var(--text-color); line-height: 1.5;">
+                    <span id="pet-description">点击右侧"召唤新宠物"按钮，用AI创造你的专属宠物吧！</span>
+                </div>
+            </div>
         </div>
-        <!-- 宠物状态信息 -->
-        <div id="pet-status" style="position: absolute; top: 5px; right: 5px; background: rgba(255, 255, 255, 0.9); border: 2px solid var(--dark-pink); border-radius: 4px; padding: 5px; font-size: 8px; text-align: center;">
-            <div>等级: <span id="pet-level">1</span></div>
-            <div>心情: <span id="pet-mood">😊</span></div>
-            <div>经验: <span id="pet-exp">0/100</span></div>
+        
+        <!-- 右侧：宠物信息和能力 -->
+        <div style="display: flex; flex-direction: column; gap: 15px;">
+            <!-- 宠物能力展示 -->
+            <div style="width: 100%; background: var(--bg-pink); border: 3px solid var(--main-pink); border-radius: 10px; padding: 12px; flex: 1;">
+                <div style="font-size: 12px; font-weight: bold; color: var(--dark-pink); margin-bottom: 10px; text-align: center;">
+                    ✨ 宠物能力 ✨
+                </div>
+                <div id="pet-abilities" style="font-size: 10px; color: var(--text-color);">
+                    <div style="text-align: center; padding: 20px; color: #999;">
+                        暂无宠物数据<br>快去召唤你的第一只宠物吧！
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 召唤新宠物按钮 -->
+            <button class="pixel-btn ai" onclick="openPetGenerateModal()" style="width: 100%; padding: 15px; font-size: 14px; font-weight: bold;">
+                ✨ 召唤新宠物 ✨<br>
+                <span style="font-size: 9px; font-weight: normal;">消耗 🟡1 | AI生成专属宠物</span>
+            </button>
         </div>
     </div>
     
-    <!-- 宠物名称和介绍 -->
-    <div style="width: 100%; background: var(--bg-pink); border: 3px solid var(--main-pink); border-radius: 8px; padding: 10px; margin-bottom: 15px;">
-        <div style="font-size: 12px; font-weight: bold; color: var(--dark-pink); margin-bottom: 5px; text-align: center;">
-            <span id="pet-name">未命名宠物</span>
-        </div>
-        <div style="font-size: 9px; color: var(--text-color); text-align: center; line-height: 1.4;">
-            <span id="pet-description">点击下方按钮生成你的专属宠物！</span>
-        </div>
-    </div>
-    
-    <!-- 宠物生成区域 -->
-    <div style="width: 100%; background: var(--bg-pink); border: 3px solid var(--main-pink); border-radius: 8px; padding: 10px; margin-bottom: 15px;">
-        <div style="font-size: 10px; color: var(--dark-pink); margin-bottom: 10px; text-align: left;">
-            ✨ 宠物生成魔法 ✨
-        </div>
-        <textarea id="pet-prompt-input" class="prompt-input" placeholder="例如：可爱的粉色猫咪宠物、蓝色的海洋生物宠物、梦幻的独角兽宠物、科幻的机器人宠物..." style="width: 100%; min-height: 80px;"></textarea>
-        <div style="font-size: 8px; color: var(--text-color); margin: 10px 0; text-align: center;">
-            消耗：🟡1 | 生成：1个专属宠物（随机能力）
-        </div>
-        <button class="pixel-btn ai" onclick="generatePet()" style="width: 100%;">
-            🧙‍♂️ 召唤宠物
+    <!-- 宠物互动按钮区 -->
+    <div style="width: 100%; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px;">
+        <button class="pixel-btn" onclick="interactWithPet('play')" style="background: var(--accent-blue); padding: 12px; font-size: 12px;">
+            🎮<br><span style="font-size: 10px;">玩耍</span>
         </button>
-    </div>
-    
-    <!-- 宠物互动和管理 -->
-    <div style="width: 100%; display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 15px;">
-        <button class="pixel-btn" onclick="interactWithPet('play')" style="background: var(--accent-blue);">
-            🎮 玩耍
+        <button class="pixel-btn" onclick="interactWithPet('feed')" style="background: var(--accent-yellow); padding: 12px; font-size: 12px;">
+            🍖<br><span style="font-size: 10px;">喂食</span>
         </button>
-        <button class="pixel-btn" onclick="interactWithPet('feed')" style="background: var(--accent-yellow);">
-            🍖 喂食
+        <button class="pixel-btn" onclick="interactWithPet('train')" style="background: var(--main-pink); color: white; padding: 12px; font-size: 12px;">
+            📚<br><span style="font-size: 10px;">训练</span>
         </button>
-        <button class="pixel-btn" onclick="interactWithPet('train')" style="background: var(--main-pink); color: white;">
-            📚 训练
-        </button>
-        <button class="pixel-btn" onclick="renamePet()" style="background: var(--bg-pink);">
-            ✏️ 重命名
+        <button class="pixel-btn" onclick="renamePet()" style="background: var(--bg-pink); padding: 12px; font-size: 12px;">
+            ✏️<br><span style="font-size: 10px;">重命名</span>
         </button>
     </div>
     
     <!-- 宠物列表 -->
-    <div style="width: 100%; background: var(--bg-pink); border: 3px solid var(--main-pink); border-radius: 8px; padding: 10px; margin-bottom: 15px; max-height: 200px; overflow-y: auto;">
-        <div style="font-size: 10px; color: var(--dark-pink); margin-bottom: 10px; text-align: center;">
-            🐾 我的宠物列表 🐾
+    <div style="width: 100%; background: var(--bg-pink); border: 3px solid var(--main-pink); border-radius: 10px; padding: 12px; margin-bottom: 15px;">
+        <div style="font-size: 12px; color: var(--dark-pink); font-weight: bold; margin-bottom: 10px; text-align: center;">
+            🐾 我的宠物收藏 🐾
         </div>
-        <div id="pet-list">
+        <div id="pet-list" style="max-height: 180px; overflow-y: auto;">
             <!-- 宠物列表将在这里动态生成 -->
         </div>
     </div>
     
     <!-- 返回按钮 -->
-    <button class="pixel-btn" onclick="switchScreen('gacha')" style="width: 100%;">
-        ⬅️ 返回扭蛋
+    <button class="pixel-btn" onclick="switchScreen('gacha')" style="width: 100%; padding: 12px;">
+        ⬅️ 返回扭蛋机
     </button>
 </div>
 
@@ -2412,10 +2495,78 @@ ${jsonStr}`;
         const generateTypeText = generateType === 'furniture' ? '家具' : '服装';
         
         try {
-            // 改进的提示词，要求AI返回更严格的JSON格式
-            const systemPrompt = `你是复古像素游戏美术师，专门创作16-bit时代的精致像素艺术。            
+            // 根据生成类型使用不同的提示词
+            let systemPrompt;
+            
+            if (generateType === 'clothes') {
+                // 服装专用提示词 - 恢复精致像素艺术风格 + 位置规范
+                systemPrompt = `你是像素换装游戏的专业美术生成器，擅长创作精致的像素艺术风格服装。
 
- 核心要求：真·像素风格（不是简单色块！）
+【核心要求】精致的像素艺术风格，像《星露谷物语》那样有丰富的细节和设计感！
+
+【像素艺术技法】
+- 使用<path>元素创建复杂形状（如裙子轮廓、袖子、装饰）
+- 使用<rect>元素绘制细节和纹理
+- 可以使用<polygon>、<circle>等元素增加细节
+- 抖动处理：用棋盘格像素创造颜色过渡
+- 抗锯齿：在边缘用中间色像素平滑过渡
+- 轮廓线：用深色像素勾勒轮廓，增加立体感
+- 阴影和高光：用不同深浅的颜色创造层次
+- 装饰细节：蝴蝶结、蕾丝、波点、条纹、图案、纽扣等
+- 纹理：用像素点阵模拟布料质感
+
+【人物底模规范】
+画布尺寸：128×128像素
+viewBox="0 0 128 128"
+背景：透明（不要添加背景矩形）
+
+【人物身体各部位精确坐标 - 服装必须覆盖这些区域】
+1. 头部区域：x=50-78，y=14-43（宽28px，高29px）
+2. 脖子：x=58-70，y=43-45（宽12px，高2px）
+3. 身体：x=52-76，y=45-76（宽24px，高31px）
+4. 手臂：左臂 x=45-54，右臂 x=74-83，y=46-72（宽9px，高26px）
+5. 腿部：左腿 x=52-62，右腿 x=66-76，y=76-107（宽10px，高31px）
+6. 脚部：y=100-112
+
+【服装生成规范】
+1. 头发（slot: "hair"）- 覆盖区域：x=48-80，y=10-44，可以有刘海、马尾、双马尾、发饰
+2. 上衣（slot: "top"）- 身体：x=52-76，y=45-76，可包含手臂：x=45-83，可以有领子、袖子、装饰
+3. 下装（slot: "bottom"）- 覆盖区域：x=52-76，y=76-107，可以有褶皱、图案
+4. 连衣裙（slot: "dress"）- 覆盖区域：x=52-76，y=45-107，可包含手臂，可以有层次、装饰
+5. 鞋子（slot: "shoes"）- 覆盖区域：y=100-112，x=52-76，可以有细节、装饰
+
+【绘制要求】
+- ⚠️ 每个<rect>元素必须包含：x, y, width, height, fill 这5个属性！
+- 可以使用<path>元素创建复杂形状（如裙子轮廓、袖子、装饰）
+- 可以使用<polygon>、<circle>等元素增加细节
+- 每个SVG至少有30-80个元素，创造丰富的细节和层次
+- 颜色选择：使用和谐的色彩搭配，根据主题自由选择
+- 坐标必须准确对应人物身体部位，不要在左上角(0,0)绘制
+- SVG画布背景透明
+- 添加shape-rendering="crispEdges"属性保持像素清晰
+
+【设计风格要求】
+- 要有丰富的装饰：蝴蝶结、蕾丝边、波点、条纹、图案、纽扣、发饰等
+- 要有层次感：使用阴影、高光、不同深浅的颜色
+- 要有设计感：不是简单色块，而是精心设计的服装
+- 要有细节：每个服装都要有独特的细节和特色
+- 参考《星露谷物语》的精致像素艺术风格
+
+主题：${prompt}
+
+返回JSON数组（10个服装，包含不同slot）：
+[
+  {
+    "name": "服装名称",
+    "slot": "hair/top/bottom/dress/shoes",
+    "svg": "<svg viewBox=\\"0 0 128 128\\" xmlns=\\"http://www.w3.org/2000/svg\\" shape-rendering=\\"crispEdges\\">...</svg>"
+  }
+]`;
+            } else {
+                // 家具的原有提示词
+                systemPrompt = `你是复古像素游戏美术师，专门创作16-bit时代的精致像素艺术。            
+
+核心要求：真·像素风格（不是简单色块！）
 1. 像素网格限制：整个64x64画布想象成32x32个小像素格子（每个格子1x1像素）
 2. 小格子构图：所有细节必须用这些小像素格子拼出来，不能直接用大矩形
 3. 像素级细节：要有《星露谷物语》、《泰拉瑞亚》那种一个像素一个像素拼出来的感觉
@@ -2450,11 +2601,12 @@ ${jsonStr}`;
 [
   {
     "name": "草莓床",
-    "svg": "<svg viewBox=\"0 0 64 64\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"10\" y=\"30\" width=\"44\" height=\"20\" fill=\"#FF9ED2\"/></svg>"
+    "svg": "<svg viewBox=\\"0 0 64 64\\" xmlns=\\"http://www.w3.org/2000/svg\\"><rect x=\\"10\\" y=\\"30\\" width=\\"44\\" height=\\"20\\" fill=\\"#FF9ED2\\"/></svg>"
   }
 ]
 
 请只返回JSON，不要有任何其他文本。`;
+            }
             
             const response = await fetch(`${state.apiUrl}/chat/completions`, {
                 method: 'POST',
@@ -2467,7 +2619,7 @@ ${jsonStr}`;
                     model: selectedModel,
                     messages: [
                         { role: "system", content: systemPrompt },
-                        { role: "user", content: `生成10个像素${generateTypeText}，主题：${prompt}` }
+                        { role: "user", content: `生成10个像素${generateTypeText}，主题：${prompt}。⚠️重要：每个<rect>必须包含x, y, width, height, fill这5个属性，缺一不可！可以使用<path>、<polygon>、<circle>等元素创建复杂形状和装饰。使用精致的像素艺术风格，创造丰富的细节、装饰和设计感，像《星露谷物语》那样。` }
                     ],
                     temperature: 0.8,
                     max_tokens: 20000
@@ -2483,7 +2635,12 @@ ${jsonStr}`;
             const data = await response.json();
             let content = data.choices[0].message.content.trim();
             
-            console.log("AI返回内容:", content.slice(0, 500)); // 调试用
+            console.log("========== 扭蛋机AI生成调试 ==========");
+            console.log("生成类型:", generateType);
+            console.log("提示词描述:", prompt);
+            console.log("AI返回内容（前1500字符）:");
+            console.log(content.slice(0, 1500));
+            console.log("=========================================");
             
             // 尝试多种方式提取JSON
             let items = [];
@@ -2491,6 +2648,7 @@ ${jsonStr}`;
             // 方法1：尝试直接解析
             try {
                 items = JSON.parse(content);
+                console.log("✅ 方法1成功：直接解析JSON，找到", items.length, "个物品");
             } catch (e1) {
                 console.log("直接解析失败，尝试清理内容");
                 
@@ -2514,16 +2672,32 @@ ${jsonStr}`;
                             // 方法4：如果还是失败，尝试手动构建
                             console.log("自动修复失败，尝试手动构建");
                             
-                            // 查找所有类似家具对象的文本
-                            const itemRegex = /"name":\s*"([^"]+)",\s*"svg":\s*"([^"]+)"/g;
+                            // 根据类型使用不同的正则
+                            let itemRegex;
+                            if (generateType === 'clothes') {
+                                // 服装需要匹配slot字段
+                                itemRegex = /"name":\s*"([^"]+)"[^}]*"slot":\s*"([^"]+)"[^}]*"svg":\s*"([^"]+)"/g;
+                            } else {
+                                // 家具只需要name和svg
+                                itemRegex = /"name":\s*"([^"]+)"[^}]*"svg":\s*"([^"]+)"/g;
+                            }
+                            
                             let match;
                             const foundItems = [];
                             
                             while ((match = itemRegex.exec(content)) !== null) {
-                                foundItems.push({
-                                    name: match[1],
-                                    svg: match[2].replace(/\\"/g, '"').replace(/\\n/g, '')
-                                });
+                                if (generateType === 'clothes') {
+                                    foundItems.push({
+                                        name: match[1],
+                                        slot: match[2],
+                                        svg: match[3].replace(/\\"/g, '"').replace(/\\n/g, '').replace(/\\\\/g, '\\')
+                                    });
+                                } else {
+                                    foundItems.push({
+                                        name: match[1],
+                                        svg: match[2].replace(/\\"/g, '"').replace(/\\n/g, '').replace(/\\\\/g, '\\')
+                                    });
+                                }
                             }
                             
                             if (foundItems.length >= 5) { // 至少找到5个就算成功
@@ -2551,13 +2725,40 @@ ${jsonStr}`;
                 items = items.slice(0, 10);
             }
             
-            const validItems = items.filter(item => {
-                if (!item.name || !item.svg) return false;
-                if (typeof item.name !== 'string' || typeof item.svg !== 'string') return false;
-                if (item.name.trim() === '' || item.svg.trim() === '') return false;
-                if (!item.svg.includes('<svg') || !item.svg.includes('</svg>')) return false;
+            console.log("开始验证物品...");
+            console.log("原始items数量:", items.length);
+            
+            const validItems = items.filter((item, index) => {
+                console.log(`检查物品 ${index + 1}:`, {
+                    name: item.name,
+                    hasSlot: !!item.slot,
+                    slot: item.slot,
+                    hasSVG: !!item.svg,
+                    svgLength: item.svg ? item.svg.length : 0,
+                    svgPreview: item.svg ? item.svg.slice(0, 100) : ''
+                });
+                
+                if (!item.name || !item.svg) {
+                    console.log(`❌ 物品${index + 1}缺少name或svg`);
+                    return false;
+                }
+                if (typeof item.name !== 'string' || typeof item.svg !== 'string') {
+                    console.log(`❌ 物品${index + 1}的name或svg不是字符串`);
+                    return false;
+                }
+                if (item.name.trim() === '' || item.svg.trim() === '') {
+                    console.log(`❌ 物品${index + 1}的name或svg为空`);
+                    return false;
+                }
+                if (!item.svg.includes('<svg') || !item.svg.includes('</svg>')) {
+                    console.log(`❌ 物品${index + 1}的svg格式不正确`);
+                    return false;
+                }
+                console.log(`✅ 物品${index + 1}有效`);
                 return true;
             });
+            
+            console.log("验证完成，有效物品数量:", validItems.length);
             
             if (validItems.length < 5) {
                 throw new Error(`只有${validItems.length}个有效${generateTypeText}，需要至少5个`);
@@ -2570,8 +2771,18 @@ ${jsonStr}`;
                 
                 // 根据当前扭蛋机类型确定物品类型
                 let itemType;
+                let slot = null;
+                
                 if (generateType === 'clothes') {
                     itemType = ITEM_TYPES.CLOTHES;
+                    // 使用AI生成的slot，如果没有则随机分配
+                    if (item.slot && ['hair', 'top', 'bottom', 'dress', 'shoes'].includes(item.slot)) {
+                        slot = item.slot;
+                    } else {
+                        // 随机分配slot
+                        const slots = ['hair', 'top', 'bottom', 'dress', 'shoes'];
+                        slot = slots[Math.floor(Math.random() * slots.length)];
+                    }
                 } else {
                     // 家具扭蛋机随机分配家具或地板类型
                     const furnitureTypes = [ITEM_TYPES.FURNITURE, ITEM_TYPES.FLOOR];
@@ -2613,9 +2824,92 @@ ${jsonStr}`;
                     svgContent = svgContent.replace('<svg', '<svg viewBox="0 0 128 128"');
                 }
                 
-                // 使用AI生成的slot，如果没有则随机分配
-                const slots = ['hair', 'top', 'bottom', 'dress', 'shoes'];
-                const slot = item.slot || slots[Math.floor(Math.random() * slots.length)];
+                // 🔧 修复缺少width和height的rect元素
+                // 查找所有缺少width或height的rect
+                svgContent = svgContent.replace(
+                    /<rect\s+([^>]*?)(?:\s*\/>|>)/g,
+                    (match, attrs) => {
+                        // 检查是否已经有width和height
+                        if (attrs.includes('width=') && attrs.includes('height=')) {
+                            return match; // 已经有，不需要修复
+                        }
+                        
+                        // 提取x和y值
+                        const xMatch = attrs.match(/x=["']?(\d+)/);
+                        const yMatch = attrs.match(/y=["']?(\d+)/);
+                        
+                        if (!xMatch || !yMatch) {
+                            return match; // 没有x或y，无法修复
+                        }
+                        
+                        const x = parseInt(xMatch[1]);
+                        const y = parseInt(yMatch[1]);
+                        
+                        // 根据slot和位置计算合适的width和height
+                        let defaultWidth = 1;
+                        let defaultHeight = 1;
+                        
+                        if (generateType === 'clothes' && slot) {
+                            // 根据slot类型设置默认尺寸
+                            switch(slot) {
+                                case 'hair':
+                                    if (y >= 10 && y <= 44) {
+                                        defaultWidth = 28;
+                                        defaultHeight = Math.max(1, 44 - y);
+                                    }
+                                    break;
+                                case 'top':
+                                    if (y >= 45 && y <= 76) {
+                                        defaultWidth = 24;
+                                        defaultHeight = Math.max(1, 76 - y);
+                                    } else if ((x >= 45 && x <= 54) || (x >= 74 && x <= 83)) {
+                                        // 袖子
+                                        defaultWidth = 9;
+                                        defaultHeight = 26;
+                                    }
+                                    break;
+                                case 'bottom':
+                                    if (y >= 76 && y <= 107) {
+                                        defaultWidth = 10;
+                                        defaultHeight = Math.max(1, 107 - y);
+                                    }
+                                    break;
+                                case 'dress':
+                                    if (y >= 45 && y <= 107) {
+                                        defaultWidth = 24;
+                                        defaultHeight = Math.max(1, 107 - y);
+                                    }
+                                    break;
+                                case 'shoes':
+                                    if (y >= 100 && y <= 112) {
+                                        defaultWidth = 10;
+                                        defaultHeight = Math.max(1, 112 - y);
+                                    }
+                                    break;
+                            }
+                        } else {
+                            // 家具：使用默认小尺寸
+                            defaultWidth = 2;
+                            defaultHeight = 2;
+                        }
+                        
+                        // 添加width和height属性
+                        let newAttrs = attrs.trim();
+                        if (!newAttrs.endsWith('"') && !newAttrs.endsWith("'")) {
+                            newAttrs += ' ';
+                        }
+                        if (!attrs.includes('width=')) {
+                            newAttrs += `width="${defaultWidth}" `;
+                        }
+                        if (!attrs.includes('height=')) {
+                            newAttrs += `height="${defaultHeight}" `;
+                        }
+                        
+                        return `<rect ${newAttrs.trim()}${match.includes('/>') ? '/>' : '>'}`;
+                    }
+                );
+                
+                console.log(`修复后的SVG预览（前200字符）:`, svgContent.slice(0, 200));
                 
                 newItems[newId] = {
                     name: item.name,
@@ -2877,58 +3171,70 @@ ${jsonStr}`;
         const selectedModel = document.getElementById('selected-model').value;
         
         try {
-            // 专门的服装生成提示词，严格按照修改要求.txt中的规范
-            const systemPrompt = `你是像素换装游戏的专业美术生成器。
+            // 专门的服装生成提示词 - 恢复精致像素艺术风格 + 位置规范
+            const systemPrompt = `你是像素换装游戏的专业美术生成器，擅长创作精致的像素艺术风格服装。
 
-            请基于【指定人物底模】生成服装 SVG：
+【核心要求】精致的像素艺术风格，像《星露谷物语》那样有丰富的细节和设计感！
 
-            底模规范：
-            - 画布：128×128
-            - viewBox="0 0 128 128"
-            - 服装必须完全填充对应的身体区域，不能只在左上角
-            - 上衣：必须精确填充 x=52–76，y=45–76 区域
-            - 下装：必须精确填充 x=52–76，y=64–107 区域
-            - 连衣裙：必须精确填充 x=52–76，y=45–107 区域
-            - 鞋子：必须精确填充 y=100–112 区域
-            - 头发：必须精确填充 y=10–40 区域
-            - 背景必须透明
-            - 仅使用像素矩形绘制
-            - 禁止渐变、禁止模糊
-            - 服装大小可以比人物模型大1-2px，但绝对不能更小
+【像素艺术技法】
+- 使用<path>元素创建复杂形状（如裙子轮廓、袖子、装饰）
+- 使用<rect>元素绘制细节和纹理
+- 可以使用<polygon>、<circle>等元素增加细节
+- 抖动处理：用棋盘格像素创造颜色过渡
+- 抗锯齿：在边缘用中间色像素平滑过渡
+- 轮廓线：用深色像素勾勒轮廓，增加立体感
+- 阴影和高光：用不同深浅的颜色创造层次
+- 装饰细节：蝴蝶结、蕾丝、波点、条纹、图案、纽扣等
+- 纹理：用像素点阵模拟布料质感
 
-            服装部位：随机分配（hair、top、bottom、dress、shoes）
-            主题：${prompt}
+【人物底模规范】
+画布尺寸：128×128像素
+viewBox="0 0 128 128"
+背景：透明（不要添加背景矩形）
+shape-rendering="crispEdges"（保持像素清晰）
 
-            只返回 JSON：
-            [
-              {
-                "name": "...",
-                "slot": "{slot}",
-                "svg": "<svg ...></svg>"
-              },
-              {
-                "name": "...",
-                "slot": "{slot}",
-                "svg": "<svg ...></svg>"
-              },
-              {
-                "name": "...",
-                "slot": "{slot}",
-                "svg": "<svg ...></svg>"
-              },
-              {
-                "name": "...",
-                "slot": "{slot}",
-                "svg": "<svg ...></svg>"
-              },
-              {
-                "name": "...",
-                "slot": "{slot}",
-                "svg": "<svg ...></svg>"
-              }
-            ]
-            
-            请生成5个不同的服装，每个服装分配不同的slot（头发、上衣、下装、连衣裙、鞋子），确保所有服装都符合底模规范，特别是内部元素必须准确填充对应身体区域，不能只在左上角。`;
+【人物身体各部位精确坐标 - 服装必须覆盖这些区域】
+1. 头部区域：x=50-78，y=14-43（宽28px，高29px）
+2. 脖子：x=58-70，y=43-45（宽12px，高2px）
+3. 身体：x=52-76，y=45-76（宽24px，高31px）
+4. 手臂：左臂 x=45-54，右臂 x=74-83，y=46-72（宽9px，高26px）
+5. 腿部：左腿 x=52-62，右腿 x=66-76，y=76-107（宽10px，高31px）
+6. 脚部：y=100-112
+
+【服装生成规范】
+1. 头发（slot: "hair"）- 覆盖区域：x=48-80，y=10-44，可以有刘海、马尾、双马尾、发饰
+2. 上衣（slot: "top"）- 身体：x=52-76，y=45-76，可包含手臂：x=45-83，可以有领子、袖子、装饰
+3. 下装（slot: "bottom"）- 覆盖区域：x=52-76，y=76-107，可以有褶皱、图案
+4. 连衣裙（slot: "dress"）- 覆盖区域：x=52-76，y=45-107，可包含手臂，可以有层次、装饰
+5. 鞋子（slot: "shoes"）- 覆盖区域：y=100-112，x=52-76，可以有细节、装饰
+
+【绘制要求】
+- ⚠️ 每个<rect>元素必须包含：x, y, width, height, fill 这5个属性！
+- 可以使用<path>元素创建复杂形状（如裙子轮廓、袖子、装饰）
+- 可以使用<polygon>、<circle>等元素增加细节
+- 每个SVG至少有30-80个元素，创造丰富的细节和层次
+- 颜色选择：使用和谐的色彩搭配，根据主题自由选择
+- 坐标必须准确对应人物身体部位，不要在左上角(0,0)绘制
+- SVG画布背景透明
+- 添加shape-rendering="crispEdges"属性保持像素清晰
+
+【设计风格要求】
+- 要有丰富的装饰：蝴蝶结、蕾丝边、波点、条纹、图案、纽扣、发饰等
+- 要有层次感：使用阴影、高光、不同深浅的颜色
+- 要有设计感：不是简单色块，而是精心设计的服装
+- 要有细节：每个服装都要有独特的细节和特色
+- 参考《星露谷物语》的精致像素艺术风格
+
+主题：${prompt}
+
+只返回 JSON 数组（5个服装，包含不同slot）：
+[
+  {
+    "name": "服装名称",
+    "slot": "hair/top/bottom/dress/shoes",
+    "svg": "<svg viewBox=\"0 0 128 128\" xmlns=\"http://www.w3.org/2000/svg\" shape-rendering=\"crispEdges\">...</svg>"
+  }
+]`;
             
             const response = await fetch(`${state.apiUrl}/chat/completions`, {
                 method: 'POST',
@@ -2941,7 +3247,7 @@ ${jsonStr}`;
                     model: selectedModel,
                     messages: [
                         { role: "system", content: systemPrompt },
-                        { role: "user", content: `生成5个符合人物模型比例的服装，主题：${prompt}` }
+                        { role: "user", content: `生成5个符合人物模型比例的服装，主题：${prompt}。⚠️重要：每个<rect>必须包含x, y, width, height, fill这5个属性，缺一不可！可以使用<path>、<polygon>、<circle>等元素创建复杂形状和装饰。使用精致的像素艺术风格，创造丰富的细节、装饰和设计感，像《星露谷物语》那样。` }
                     ],
                     temperature: 0.8,
                     max_tokens: 20000
@@ -3073,6 +3379,84 @@ ${jsonStr}`;
                     const slotIndex = index % validSlots.length;
                     slot = validSlots[slotIndex];
                 }
+                
+                // 🔧 修复缺少width和height的rect元素（需要在slot确定之后）
+                svgContent = svgContent.replace(
+                    /<rect\s+([^>]*?)(?:\s*\/>|>)/g,
+                    (match, attrs) => {
+                        // 检查是否已经有width和height
+                        if (attrs.includes('width=') && attrs.includes('height=')) {
+                            return match; // 已经有，不需要修复
+                        }
+                        
+                        // 提取x和y值
+                        const xMatch = attrs.match(/x=["']?(\d+)/);
+                        const yMatch = attrs.match(/y=["']?(\d+)/);
+                        
+                        if (!xMatch || !yMatch) {
+                            return match; // 没有x或y，无法修复
+                        }
+                        
+                        const x = parseInt(xMatch[1]);
+                        const y = parseInt(yMatch[1]);
+                        
+                        // 根据slot和位置计算合适的width和height
+                        let defaultWidth = 1;
+                        let defaultHeight = 1;
+                        
+                        if (slot) {
+                            switch(slot) {
+                                case 'hair':
+                                    if (y >= 10 && y <= 44) {
+                                        defaultWidth = 28;
+                                        defaultHeight = Math.max(1, 44 - y);
+                                    }
+                                    break;
+                                case 'top':
+                                    if (y >= 45 && y <= 76) {
+                                        defaultWidth = 24;
+                                        defaultHeight = Math.max(1, 76 - y);
+                                    } else if ((x >= 45 && x <= 54) || (x >= 74 && x <= 83)) {
+                                        defaultWidth = 9;
+                                        defaultHeight = 26;
+                                    }
+                                    break;
+                                case 'bottom':
+                                    if (y >= 76 && y <= 107) {
+                                        defaultWidth = 10;
+                                        defaultHeight = Math.max(1, 107 - y);
+                                    }
+                                    break;
+                                case 'dress':
+                                    if (y >= 45 && y <= 107) {
+                                        defaultWidth = 24;
+                                        defaultHeight = Math.max(1, 107 - y);
+                                    }
+                                    break;
+                                case 'shoes':
+                                    if (y >= 100 && y <= 112) {
+                                        defaultWidth = 10;
+                                        defaultHeight = Math.max(1, 112 - y);
+                                    }
+                                    break;
+                            }
+                        }
+                        
+                        // 添加width和height属性
+                        let newAttrs = attrs.trim();
+                        if (!newAttrs.endsWith('"') && !newAttrs.endsWith("'")) {
+                            newAttrs += ' ';
+                        }
+                        if (!attrs.includes('width=')) {
+                            newAttrs += `width="${defaultWidth}" `;
+                        }
+                        if (!attrs.includes('height=')) {
+                            newAttrs += `height="${defaultHeight}" `;
+                        }
+                        
+                        return `<rect ${newAttrs.trim()}${match.includes('/>') ? '/>' : '>'}`;
+                    }
+                );
                 
                 newItems[newId] = {
                     name: item.name,
@@ -3428,8 +3812,7 @@ exportBtn.addEventListener('mousedown', function(e) {
     
 // 角色底模SVG（原始HTML中的复杂模型）
 const BASE_CHARACTER_SVG = `<svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-    <!-- 背景 -->
-    <rect x="0" y="0" width="128" height="128" fill="#FFFFFF"/>
+    <!-- 背景透明 -->
     
     <!-- 黑色描边层 (Silhouette) -->
     <!-- 头部轮廓 -->
@@ -4175,18 +4558,21 @@ function renderClothesInventory() {
             
             if (!isSeen) {
                 catalogItem.innerHTML = `
-                    <div style="width:40px; height:40px; background:#eee; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:20px;">?</div>
-                    <div class="catalog-item-name">未发现</div>
-                    <div class="catalog-stats">???</div>
+                    <div style="width:50px; height:50px; background:#eee; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:24px; color:#ccc;">?</div>
+                    <div class="catalog-item-name" style="color:#999;">未发现</div>
+                    <div class="rarity-display" style="background:#ccc; color:#fff; padding:3px 8px; border-radius:5px; font-size:9px; margin-top:5px;">???</div>
                 `;
             } else {
-                const inPoolBadge = item.inPool ? '<div class="in-pool-badge">🎁</div>' : '';
+                const ownershipBadge = isOwned ? '<div style="position: absolute; top: 5px; right: 5px; background: var(--accent-yellow); color: white; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold;">✓</div>' : '';
+                const inventoryCount = state.inventory[id] || 0;
+                const countDisplay = inventoryCount > 1 ? `<div style="position: absolute; top: 5px; left: 5px; background: var(--accent-blue); color: white; border-radius: 10px; padding: 2px 6px; font-size: 9px; font-weight: bold;">×${inventoryCount}</div>` : '';
+                
                 catalogItem.innerHTML = `
+                    ${ownershipBadge}
+                    ${countDisplay}
                     ${item.svg}
-                    ${inPoolBadge}
                     <div class="catalog-item-name">${item.name}</div>
-                    <div class="rarity-display" style="background:${rarityObj.color}">${rarityObj.name}</div>
-                    <div class="catalog-stats">拥有: ${isOwned ? '✅' : '❌'} | 奖池: ${item.inPool ? '✅' : '❌'}</div>
+                    <div class="rarity-display" style="background:${rarityObj.color}; color:white; padding:3px 8px; border-radius:5px; font-size:9px; margin-top:5px; font-weight:bold;">${rarityObj.name}</div>
                 `;
             }
             
@@ -4234,10 +4620,10 @@ function switchScreen(id) {
     if (id === 'gacha') {
         document.querySelector('.nav-tab:nth-child(1)').classList.add('active');
     } else if (id === 'room') {
-        document.querySelector('.nav-tab:nth-child(4)').classList.add('active');
+        document.querySelector('.nav-tab:nth-child(3)').classList.add('active');
         renderRoom(); // 切换到房间时重新渲染，确保角色显示
     } else if (id === 'character') {
-        document.querySelector('.nav-tab:nth-child(5)').classList.add('active');
+        document.querySelector('.nav-tab:nth-child(4)').classList.add('active');
         renderCharacterList(); // 渲染像素小人列表
         renderClothesInventory(); // 渲染服装背包
         // 如果有选中的角色，显示角色，否则显示基础人模
@@ -4247,17 +4633,39 @@ function switchScreen(id) {
             renderBaseModelToMainScreen(); // 进页面时立即渲染穿了衣服的素体
         }
     } else if (id === 'pet') {
-        document.querySelector('.nav-tab:nth-child(6)').classList.add('active');
+        document.querySelector('.nav-tab:nth-child(5)').classList.add('active');
         renderPetList(); // 渲染宠物列表
         // 如果有当前宠物，显示它
         if (state.currentPet) {
             renderPetDisplay(state.currentPet);
+        } else {
+            // 没有宠物时显示默认状态
+            const petAbilities = document.getElementById('pet-abilities');
+            if (petAbilities) {
+                petAbilities.innerHTML = '<div style="text-align: center; padding: 30px 20px; color: #999; font-size: 10px; line-height: 1.6;">暂无宠物数据<br><br>快去召唤你的第一只宠物吧！<br>点击右侧"召唤新宠物"按钮开始~</div>';
+            }
         }
     }
     
     selectedId = null;
     updateUI();
 }
+
+// 打开宠物生成弹窗
+    function openPetGenerateModal() {
+        document.getElementById('pet-generate-modal').style.display = 'flex';
+    }
+
+    // 关闭宠物生成弹窗
+    function closePetGenerateModal() {
+        document.getElementById('pet-generate-modal').style.display = 'none';
+    }
+
+    // 从弹窗生成宠物
+    async function generatePetFromModal() {
+        await generatePet();
+        closePetGenerateModal();
+    }
 
 // 宠物生成函数
     async function generatePet() {
@@ -4378,13 +4786,19 @@ function switchScreen(id) {
             renderPetDisplay(pet);
             renderPetList();
             
-            showToast(`✅ 成功生成宠物: ${pet.name}`);
+            // 清空输入框
+            document.getElementById('pet-prompt-input').value = '';
+            
+            showToast(`✅ 成功召唤宠物: ${pet.name}！`);
             
         } catch (error) {
             console.error('生成宠物失败:', error);
             showToast(`❌ 生成失败: ${error.message}`);
             // 恢复原始内容
             petDisplay.innerHTML = originalContent;
+            // 返还金币
+            state.coins += 1;
+            updateUI();
         }
     }
     
@@ -4499,10 +4913,33 @@ function switchScreen(id) {
         const petName = document.getElementById('pet-name');
         const petDescription = document.getElementById('pet-description');
         const petStatus = document.getElementById('pet-status');
+        const petAbilities = document.getElementById('pet-abilities');
         
-        if (petDisplay) {
-            petDisplay.innerHTML = pet.svg;
-            console.log('宠物显示已更新:', pet.name);
+        if (petDisplay && pet.svg) {
+            console.log('开始渲染宠物:', pet.name);
+            console.log('宠物SVG内容:', pet.svg.substring(0, 100) + '...');
+            
+            // 确保SVG有正确的样式属性
+            let svgContent = pet.svg;
+            
+            // 如果SVG已经有style属性，先移除
+            if (svgContent.includes('style="')) {
+                svgContent = svgContent.replace(/style="[^"]*"/g, '');
+            }
+            
+            // 添加统一的样式
+            svgContent = svgContent.replace('<svg', '<svg style="width: 100%; height: 100%; display: block; image-rendering: pixelated;"');
+            
+            petDisplay.innerHTML = svgContent;
+            console.log('✅ 宠物SVG已插入到显示区域');
+            
+            // 验证SVG是否真的插入了
+            const svgElement = petDisplay.querySelector('svg');
+            if (svgElement) {
+                console.log('✅ SVG元素存在，viewBox:', svgElement.getAttribute('viewBox'));
+            } else {
+                console.error('❌ SVG元素未找到！');
+            }
         }
         
         if (petName) {
@@ -4510,15 +4947,37 @@ function switchScreen(id) {
         }
         
         if (petDescription) {
-            petDescription.textContent = `生成提示: ${pet.prompt || '无描述'}`;
+            petDescription.textContent = `${pet.prompt || '可爱的宠物'}`;
         }
         
         if (petStatus) {
             petStatus.innerHTML = `
-                <div>等级: ${pet.level}</div>
-                <div>心情: ${pet.mood}% ${getMoodEmoji(pet.mood)}</div>
-                <div>经验: ${pet.experience}/${pet.experienceToNext}</div>
+                <div style="font-weight: bold; color: var(--dark-pink);">Lv.${pet.level}</div>
+                <div style="margin: 3px 0;">${getMoodEmoji(pet.mood)} ${pet.mood}%</div>
+                <div style="font-size: 8px; color: #666;">${pet.experience}/${pet.experienceToNext}</div>
             `;
+        }
+        
+        // 渲染宠物能力
+        if (petAbilities && pet.abilities) {
+            let abilitiesHTML = '<div style="display: flex; flex-direction: column; gap: 8px;">';
+            pet.abilities.forEach(ability => {
+                const barWidth = Math.min(100, ability.value * 10);
+                abilitiesHTML += `
+                    <div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+                            <span style="font-weight: bold; color: var(--dark-pink);">${ability.name}</span>
+                            <span style="color: var(--accent-blue);">${ability.value}</span>
+                        </div>
+                        <div style="width: 100%; height: 8px; background: #ffe4ec; border: 2px solid var(--main-pink); border-radius: 4px; overflow: hidden;">
+                            <div style="width: ${barWidth}%; height: 100%; background: linear-gradient(90deg, var(--main-pink), var(--dark-pink)); transition: width 0.3s;"></div>
+                        </div>
+                        <div style="font-size: 8px; color: #999; margin-top: 2px;">${ability.description}</div>
+                    </div>
+                `;
+            });
+            abilitiesHTML += '</div>';
+            petAbilities.innerHTML = abilitiesHTML;
         }
     }
     
@@ -4539,34 +4998,58 @@ function switchScreen(id) {
         petList.innerHTML = '';
         
         if (state.pets.length === 0) {
-            petList.innerHTML = '<div style="text-align: center; padding: 20px; color: #888;">还没有宠物，点击"召唤宠物"生成吧!</div>';
+            petList.innerHTML = '<div style="text-align: center; padding: 30px; color: #999; font-size: 11px;">还没有宠物哦~<br>点击上方"召唤新宠物"按钮开始吧！</div>';
             return;
         }
         
         state.pets.forEach(pet => {
             const petItem = document.createElement('div');
+            const isSelected = state.currentPet?.id === pet.id;
             petItem.className = 'pet-list-item';
             petItem.style.cssText = `
                 display: flex;
                 align-items: center;
-                padding: 8px;
-                margin: 5px 0;
-                background: ${state.currentPet?.id === pet.id ? '#fffce6' : '#ffdef2'};
-                border: 3px solid ${state.currentPet?.id === pet.id ? '#ff9ed2' : '#ff9ed2'};
-                border-radius: 8px;
+                padding: 10px;
+                margin: 8px 0;
+                background: ${isSelected ? 'linear-gradient(135deg, #fff9e6 0%, #ffe4ec 100%)' : '#ffffff'};
+                border: 3px solid ${isSelected ? '#e06c9f' : '#ff9ed2'};
+                border-radius: 10px;
                 cursor: pointer;
-                transition: all 0.2s;
+                transition: all 0.3s;
+                box-shadow: ${isSelected ? '0 3px 6px rgba(224, 108, 159, 0.3)' : '0 2px 4px rgba(224, 108, 159, 0.1)'};
+                transform: ${isSelected ? 'scale(1.02)' : 'scale(1)'};
             `;
             
+            // 先设置 innerHTML
+            petItem.innerHTML = `
+                <div style="width: 50px; height: 50px; margin-right: 12px; overflow: hidden; border-radius: 8px; background: #fff5f7; display: flex; align-items: center; justify-content: center; border: 2px solid var(--main-pink);">
+                    <div style="width: 45px; height: 45px; image-rendering: pixelated;">${pet.svg}</div>
+                </div>
+                <div style="flex: 1;">
+                    <div style="font-size: 12px; font-weight: bold; color: var(--dark-pink); margin-bottom: 3px;">${pet.name}</div>
+                    <div style="font-size: 9px; color: #666;">
+                        <span style="background: #ffe4ec; padding: 2px 6px; border-radius: 3px; margin-right: 5px;">Lv.${pet.level}</span>
+                        <span>${getMoodEmoji(pet.mood)} ${pet.mood}%</span>
+                    </div>
+                </div>
+                ${isSelected ? '<div style="font-size: 16px;">✨</div>' : ''}
+            `;
+            
+            // 然后设置事件（必须在 innerHTML 之后）
             petItem.onclick = () => selectPet(pet);
             
-            petItem.innerHTML = `
-                <div style="width: 40px; height: 40px; margin-right: 10px; overflow: hidden; border-radius: 4px;">${pet.svg}</div>
-                <div style="flex: 1;">
-                    <div style="font-size: 10px; font-weight: bold;">${pet.name}</div>
-                    <div style="font-size: 8px; color: #666;">等级: ${pet.level} | ${getMoodEmoji(pet.mood)} ${pet.mood}%</div>
-                </div>
-            `;
+            petItem.onmouseover = () => {
+                if (!isSelected) {
+                    petItem.style.transform = 'scale(1.02)';
+                    petItem.style.boxShadow = '0 3px 6px rgba(224, 108, 159, 0.2)';
+                }
+            };
+            petItem.onmouseout = () => {
+                if (!isSelected) {
+                    petItem.style.transform = 'scale(1)';
+                    petItem.style.boxShadow = '0 2px 4px rgba(224, 108, 159, 0.1)';
+                }
+            };
             
             petList.appendChild(petItem);
         });
@@ -4574,10 +5057,22 @@ function switchScreen(id) {
     
     // 选择宠物
     function selectPet(pet) {
+        console.log('====== 选择宠物 ======');
+        console.log('宠物ID:', pet.id);
+        console.log('宠物名称:', pet.name);
+        console.log('宠物SVG存在:', !!pet.svg);
+        console.log('宠物SVG长度:', pet.svg ? pet.svg.length : 0);
+        
         state.currentPet = pet;
+        
+        // 先渲染显示，再更新列表
         renderPetDisplay(pet);
         renderPetList();
-        showToast(`已选择宠物: ${pet.name}`);
+        
+        saveData(); // 保存当前选择的宠物
+        showToast(`✨ 已选择宠物: ${pet.name}`);
+        
+        console.log('====== 选择完成 ======');
     }
     
     // 渲染像素小人列表
