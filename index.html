@@ -349,7 +349,7 @@
         #wait-reply-btn img { height: 22px; display: block; margin: auto; }
         .chat-image { max-width: 100%; border-radius: 10px; display: block; }
         .message-bubble.has-image .content { padding: 5px; }
-        #custom-modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); display: none; align-items: center; justify-content: center; z-index: 1000; opacity: 0; transition: opacity 0.2s ease-in-out; }
+        #custom-modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); display: none; align-items: center; justify-content: center; z-index: 20000; opacity: 0; transition: opacity 0.2s ease-in-out; }
         #custom-modal-overlay.visible { display: flex; opacity: 1; }
         #custom-modal { background-color: var(--secondary-bg); width: 280px; border-radius: 14px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); display: flex; flex-direction: column; transform: scale(0.95); transition: transform 0.2s ease-in-out; }
         #custom-modal-overlay.visible #custom-modal { transform: scale(1); }
@@ -6108,6 +6108,183 @@
   background-color: #E0E0E0; 
   color: inherit; 
   cursor: pointer; 
+}
+/* 日记标注功能样式 */
+#char-diary-detail-content {
+    user-select: text;
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+}
+/* 标注弹窗样式 */
+.diary-annotation-popup {
+    position: fixed;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    padding: 15px;
+    width: 300px;
+    max-width: calc(100vw - 40px);
+    z-index: 10002;
+}
+#phone-screen.dark-mode .diary-annotation-popup {
+    background: #1C1C1E;
+    color: #E0E0E0;
+}
+.diary-annotation-popup .annotation-text {
+    font-size: 14px;
+    color: #666;
+    margin-bottom: 10px;
+    word-break: break-word;
+}
+#phone-screen.dark-mode .diary-annotation-popup .annotation-text {
+    color: #B0B0B0;
+}
+.diary-annotation-popup .annotation-input {
+    width: 100%;
+    min-height: 80px;
+    padding: 10px;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    font-size: 14px;
+    resize: vertical;
+    outline: none;
+    box-sizing: border-box;
+    margin-bottom: 10px;
+    background: #fafafa;
+    color: #333;
+}
+#phone-screen.dark-mode .diary-annotation-popup .annotation-input {
+    background: #2C2C2E;
+    border-color: #38383a;
+    color: #E0E0E0;
+}
+.diary-annotation-popup .annotation-input:focus {
+    border-color: #4096ff;
+}
+.diary-annotation-popup .annotation-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+.diary-annotation-popup .annotation-btn {
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    border: none;
+    outline: none;
+}
+.diary-annotation-popup .annotation-btn-cancel {
+    background: #f5f5f5;
+    color: #666;
+}
+#phone-screen.dark-mode .diary-annotation-popup .annotation-btn-cancel {
+    background: #38383a;
+    color: #E0E0E0;
+}
+.diary-annotation-popup .annotation-btn-cancel:hover {
+    background: #e0e0e0;
+}
+#phone-screen.dark-mode .diary-annotation-popup .annotation-btn-cancel:hover {
+    background: #48484a;
+}
+.diary-annotation-popup .annotation-btn-save {
+    background: #4096ff;
+    color: #fff;
+}
+.diary-annotation-popup .annotation-btn-save:hover {
+    background: #1677ff;
+}
+/* 标注高亮样式 */
+#char-diary-detail-content .annotation-highlight {
+    background-color: #fff3cd;
+    border-bottom: 2px solid #ffc107;
+    cursor: pointer;
+    padding: 0 2px;
+    border-radius: 2px;
+}
+#phone-screen.dark-mode #char-diary-detail-content .annotation-highlight {
+    background-color: #4a3a1a;
+    border-bottom-color: #ffc107;
+}
+#char-diary-detail-content .annotation-highlight:hover {
+    background-color: #ffe8a1;
+}
+#phone-screen.dark-mode #char-diary-detail-content .annotation-highlight:hover {
+    background-color: #5a4a2a;
+}
+/* 标注提示框样式 */
+.diary-annotation-tooltip {
+    position: fixed;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+    padding: 12px;
+    max-width: 300px;
+    z-index: 10003;
+    font-size: 14px;
+    color: #333;
+}
+#phone-screen.dark-mode .diary-annotation-tooltip {
+    background: #1C1C1E;
+    color: #E0E0E0;
+}
+/* 标注列表样式 */
+.diary-annotation-list {
+    margin-top: 20px;
+    padding: 15px;
+    background: #f9f9f9;
+    border-radius: 12px;
+}
+#phone-screen.dark-mode .diary-annotation-list {
+    background: #1C1C1E;
+}
+.diary-annotation-item {
+    padding: 12px;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    background: #fff;
+}
+#phone-screen.dark-mode .diary-annotation-item {
+    background: #2C2C2E;
+    border-color: #38383a;
+}
+.diary-annotation-item:first-child {
+    margin-top: 0;
+}
+.diary-annotation-item .annotation-quote {
+    font-size: 13px;
+    color: #666;
+    font-style: italic;
+    margin-bottom: 8px;
+    padding-left: 10px;
+    border-left: 3px solid #ffc107;
+}
+#phone-screen.dark-mode .diary-annotation-item .annotation-quote {
+    color: #B0B0B0;
+}
+.diary-annotation-item .annotation-comment {
+    font-size: 14px;
+    color: #333;
+    margin-bottom: 8px;
+}
+#phone-screen.dark-mode .diary-annotation-item .annotation-comment {
+    color: #E0E0E0;
+}
+.diary-annotation-item .annotation-time {
+    font-size: 12px;
+    color: #999;
+}
+.diary-annotation-item .annotation-delete {
+    color: #ff4d4f;
+    cursor: pointer;
+    font-size: 12px;
+    margin-left: 10px;
+}
+.diary-annotation-item .annotation-delete:hover {
+    text-decoration: underline;
 }
 #char-amap-screen {
     background-color: #f0f2f5;
@@ -18703,6 +18880,184 @@ body.frame-mode-active .cphone-dock-container {
                 opacity: 1 !important;
             }
         }
+    #pet-console-overlay {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.5); z-index: 2000;
+      display: none; justify-content: center; align-items: center;
+      backdrop-filter: blur(5px);
+    }
+    .pet-console-container {
+      background-color: #ffffff;
+      padding: 20px;
+      border-radius: 25px;
+      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.08);
+      width: 320px;
+      border: 10px solid #f8f8f8;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .pet-console-body {
+      display: flex; flex-direction: column; align-items: center; gap: 15px; width: 100%;
+    }
+    /* 装饰条纹 */
+    .console-stripes {
+        position: absolute;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 80px;
+        height: 8px;
+        display: flex;
+        gap: 4px;
+        z-index: 1;
+    }
+    .console-stripe {
+        width: 15px;
+        height: 100%;
+        border-radius: 2px;
+        background-color: #ffe6ea;
+    }
+    .console-screen {
+      width: 260px; height: 260px;
+      background-color: #fafafa;
+      border: 15px solid #f8f8f8;
+      border-radius: 12px;
+      display: flex; flex-direction: column;
+      overflow: hidden;
+      position: relative;
+      margin-top: 20px;
+      box-shadow: none;
+    }
+    .pet-display-area {
+      flex: 1; display: flex; justify-content: center; align-items: center;
+      background: #ffffff;
+      overflow: hidden;
+      position: relative;
+      flex-direction: column;
+    }
+    #pet-avatar-display {
+      width: 120px; height: 120px; object-fit: contain;
+      margin-bottom: 15px;
+      transition: all 0.3s;
+    }
+    #pet-avatar-display:hover {
+        transform: scale(1.1);
+    }
+    .pet-status-bar {
+      height: auto; background: transparent; color: #555;
+      font-size: 16px; font-weight: 600;
+      display: flex; justify-content: center; padding: 5px; align-items: center;
+      text-shadow: none;
+      margin-bottom: 12px;
+    }
+    .console-controls {
+      display: flex; justify-content: space-between; width: 100%; padding: 0 10px;
+      align-items: flex-end;
+      margin-top: 20px;
+      position: relative;
+      height: 100px;
+    }
+    .d-pad {
+      width: 90px; height: 90px; position: relative;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(3, 1fr);
+    }
+    .d-pad div { 
+      background: #f8f8f8; position: absolute; border-radius: 4px; cursor: pointer; 
+      box-shadow: none; width: 100%; height: 100%;
+      transition: all 0.2s;
+    }
+    .d-pad div:active { background-color: #ffe6ea; transform: none; box-shadow: none; }
+    
+    .d-pad-up { grid-row: 1; grid-column: 2; top: 0; left: 0; }
+    .d-pad-down { grid-row: 3; grid-column: 2; bottom: 0; left: 0; }
+    .d-pad-left { grid-row: 2; grid-column: 1; top: 0; left: 0; }
+    .d-pad-right { grid-row: 2; grid-column: 3; top: 0; right: 0; }
+    .d-pad-center { grid-row: 2; grid-column: 2; top: 0; left: 0; background-color: #f0f0f0 !important; }
+
+    .action-buttons {
+      display: flex; gap: 15px; align-items: center; transform: none;
+      margin-bottom: 20px;
+      margin-right: 10px;
+    }
+    .console-btn {
+      width: 45px; height: 45px; border-radius: 50%; border: none;
+      background-color: #ffe6ea;
+      color: #888; font-weight: normal; font-size: 12px; cursor: pointer;
+      box-shadow: none;
+      display: flex; justify-content: center; align-items: center;
+      text-shadow: none;
+      transition: all 0.2s;
+    }
+    .console-btn:active { background-color: #ffccd5; transform: none; box-shadow: none; }
+    .btn-a { background: #ffe6ea; box-shadow: none; }
+    .btn-b { background: #ffe6ea; box-shadow: none; margin-top: 0; }
+
+    .console-extra-controls {
+      display: flex; justify-content: space-between; width: 140px; margin-top: 15px;
+    }
+    .console-extra-controls button {
+      width: 60px; height: 25px; border-radius: 8px;
+      background-color: #f8f8f8; border: none;
+      color: #666; font-size: 10px; cursor: pointer;
+      padding: 0; font-weight: normal;
+      box-shadow: none;
+    }
+    .console-extra-controls button:hover {
+      background: #f0f0f0; transform: none;
+    }
+    
+    #pet-settings-modal, #pet-attr-modal, #pet-interact-modal {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: white; padding: 25px; border-radius: 25px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+      width: 85%;
+      text-align: center;
+      border: 4px solid #f8f8f8;
+      z-index: 2001;
+    }
+    #pet-settings-modal h3, #pet-attr-modal h3, #pet-interact-modal h3 { 
+      margin-top: 0; color: #555; font-size: 18px; margin-bottom: 20px;
+      border-bottom: none; padding-bottom: 0;
+    }
+    #pet-settings-modal input, #pet-settings-modal select {
+      width: 100%; margin-bottom: 15px; padding: 10px;
+      border: 1px solid #f0f0f0; border-radius: 8px;
+      outline: none; color: #666; font-size: 13px;
+      background-color: #fafafa;
+    }
+    #pet-settings-modal input:focus, #pet-settings-modal select:focus {
+      border-color: #ffe6ea;
+    }
+    .modal-btn-primary {
+      background: #f8f8f8; color: #666; border: none; padding: 8px 20px; 
+      border-radius: 20px; cursor: pointer; font-size: 13px;
+      box-shadow: none; transition: all 0.2s;
+      border: 1px solid #eee;
+    }
+    .modal-btn-primary:active { background-color: #ffe6ea; }
+    .modal-btn-secondary {
+      background: #fff; color: #999; border: none; padding: 8px 20px; 
+      border-radius: 20px; cursor: pointer; font-size: 13px;
+      box-shadow: none; transition: all 0.2s;
+    }
+    .modal-btn-secondary:active { color: #666; }
+
+    .pet-footer-text {
+        position: absolute;
+        bottom: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: #999;
+        font-size: 10px;
+        letter-spacing: 1px;
+        width: 100%;
+        text-align: center;
+    }
+
   </style>
   <!-- PWA Manifest (内联方式，不依赖外部文件) -->
   <script>
@@ -18713,9 +19068,7 @@ body.frame-mode-active .cphone-dock-container {
         "short_name": "EPhone",
         "description": "EPhone - 移动端聊天应用",
         "start_url": "/",
-        "display": "standalone",
-        "background_color": "#ffffff",
-        "theme_color": "#007bff",
+        "display": "fullscreen",
         "orientation": "portrait",
         "icons": [
           {
@@ -18754,7 +19107,6 @@ body.frame-mode-active .cphone-dock-container {
   
   <!-- Android Chrome -->
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="theme-color" content="#007bff">
   <meta name="application-name" content="EPhone">
   
   <!-- Icons -->
@@ -19229,6 +19581,7 @@ body.frame-mode-active .cphone-dock-container {
         </div>
         <div id="char-diary-detail-content-wrapper" class="list-container">
           <div id="char-diary-detail-content"> </div>
+          <div class="diary-annotation-list" id="diaryAnnotationList" style="display: none;"></div>
         </div>
       </div>
       <div id="char-usage-screen" class="char-screen">
@@ -19249,10 +19602,19 @@ body.frame-mode-active .cphone-dock-container {
       </div>
       <div id="char-music-screen" class="char-screen">
         <div class="header"> <span class="back-btn" onclick="switchToCharHomeScreen()">‹</span> <span data-lang-key="cphoneMusicTitle">TA的歌单</span>
-          <div class="header-actions"> <span class="action-btn" id="regenerate-char-music-btn" title="重新生成歌单"> <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <div class="header-actions"> 
+            <span class="action-btn" id="open-playlist-manager-btn" title="我的歌单"> 
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1">
+                <path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z"></path>
+              </svg> 
+            </span>
+            <span class="action-btn" id="regenerate-char-music-btn" title="重新生成歌单"> 
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M20 11A8.1 8.1 0 0 0 4.5 9M4 5v4h4"></path>
                 <path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4"></path>
-              </svg> </span> </div>
+              </svg> 
+            </span> 
+          </div>
         </div>
         <div id="char-music-list" class="list-container"> </div>
       </div>
@@ -20073,6 +20435,97 @@ body.frame-mode-active .cphone-dock-container {
           <div class="reading-footer"> <button id="prev-page-btn">上一页</button> <span id="page-indicator">0 / 0</span> <button id="next-page-btn">下一页</button> </div>
         </div>
       </div><input type="file" id="book-upload-input" accept=".txt, text/plain" hidden>
+      
+      <div id="pet-console-overlay" style="display: none;">
+        <div class="pet-console-container">
+          <!-- 顶部装饰条纹 -->
+          <div class="console-stripes">
+              <div class="console-stripe"></div>
+              <div class="console-stripe"></div>
+              <div class="console-stripe"></div>
+              <div class="console-stripe"></div>
+          </div>
+          
+          <div class="pet-console-body">
+            <div class="console-screen">
+              <div class="pet-display-area">
+                <div class="pet-status-bar">
+                    <span id="pet-name-display">点击自定义你的专属宠物～</span>
+                </div>
+                <img id="pet-avatar-display" src="https://picsum.photos/seed/pet-default/140/140" alt="No Pet">
+                <div id="pet-placeholder" class="pet-placeholder" style="color: #999; font-size: 12px; text-align: center; display: none;">
+                  <span>等待宠物...</span>
+                </div>
+              </div>
+            </div>
+            <div class="console-extra-controls" style="width: 100%; justify-content: center; gap: 15px;">
+              <button id="pet-settings-btn">自定义</button>
+              <button id="pet-attr-btn">属性</button>
+              <button id="pet-interact-mode-btn">互动</button>
+              <button id="close-pet-console-btn">关闭</button>
+            </div>
+            
+          </div>
+          
+          <!-- Pet Settings Modal -->
+          <div id="pet-settings-modal" style="display: none;">
+            <h3>自定义宠物 🐾</h3>
+            <div style="margin-bottom: 10px;">
+                <button id="pet-upload-btn" class="modal-btn-primary" style="width: 100%;">点击上传宠物图片</button>
+            </div>
+            <input type="text" id="pet-name-input" placeholder="输入名字">
+            <input type="text" id="pet-species-input" placeholder="输入物种（如：猫、狗、兔子等）">
+            <select id="pet-personality-select">
+              <option value="活泼好动">活泼好动</option>
+              <option value="温顺黏人">温顺黏人</option>
+              <option value="高冷傲娇">高冷傲娇</option>
+              <option value="呆萌可爱">呆萌可爱</option>
+              <option value="调皮捣蛋">调皮捣蛋</option>
+              <option value="custom">自定义</option>
+            </select>
+            <input type="text" id="pet-custom-personality-input" placeholder="输入自定义性格" style="display: none;">
+            <div style="display: flex; gap: 10px; justify-content: center; margin-top: 10px;">
+                <button id="save-pet-settings-btn" class="modal-btn-primary">保存设置</button>
+                <button id="close-pet-settings-btn" class="modal-btn-secondary">取消</button>
+            </div>
+          </div>
+
+          <!-- Pet Attributes Modal -->
+          <div id="pet-attr-modal" style="display: none;">
+            <h3>宠物属性 📊</h3>
+            <div class="attr-list" style="text-align: left; padding: 0 20px;">
+                <div class="attr-item" style="display: flex; justify-content: space-between; margin: 8px 0; border-bottom: 1px solid #f5f5f5; padding-bottom: 5px;"><span>昵称：</span><span id="attr-name-display">未命名</span></div>
+                <div class="attr-item" style="display: flex; justify-content: space-between; margin: 8px 0; border-bottom: 1px solid #f5f5f5; padding-bottom: 5px;"><span>物种：</span><span id="attr-species-display">未设置</span></div>
+                <div class="attr-item" style="display: flex; justify-content: space-between; margin: 8px 0; border-bottom: 1px solid #f5f5f5; padding-bottom: 5px;"><span>性格：</span><span id="attr-personality-display">活泼好动</span></div>
+                <div class="attr-item" style="display: flex; justify-content: space-between; margin: 8px 0; border-bottom: 1px solid #f5f5f5; padding-bottom: 5px;"><span>等级：</span><span id="attr-level-display">Lv.1</span></div>
+                <div class="attr-item" style="display: flex; justify-content: space-between; margin: 8px 0; border-bottom: 1px solid #f5f5f5; padding-bottom: 5px;"><span>经验：</span><span id="attr-exp-display">0 / 100</span></div>
+                <div class="attr-item" style="display: flex; justify-content: space-between; margin: 8px 0; border-bottom: 1px solid #f5f5f5; padding-bottom: 5px;"><span>心情：</span><span>★★★★★</span></div>
+                <div class="attr-item" style="display: flex; justify-content: space-between; margin: 8px 0; border-bottom: 1px solid #f5f5f5; padding-bottom: 5px;"><span>饱腹：</span><span>85%</span></div>
+            </div>
+            <div style="margin-top: 20px;">
+                <button id="close-pet-attr-btn" class="modal-btn-secondary">返回</button>
+            </div>
+          </div>
+
+          <!-- Pet Interact Modal -->
+          <div id="pet-interact-modal" style="display: none;">
+            <h3>互动乐园 🎮</h3>
+            <div style="margin-bottom: 20px;">
+                <img id="interact-pet-img" src="" style="width: 100px; height: 100px; object-fit: contain;">
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: center;">
+                <button class="interact-btn" id="interact-feed-btn" style="padding: 8px 20px; border-radius: 20px; background: #f8f8f8; border: none; cursor: pointer;">喂食</button>
+                <button class="interact-btn" id="interact-play-btn" style="padding: 8px 20px; border-radius: 20px; background: #f8f8f8; border: none; cursor: pointer;">玩耍</button>
+                <button class="interact-btn" id="interact-pet-action-btn" style="padding: 8px 20px; border-radius: 20px; background: #f8f8f8; border: none; cursor: pointer;">抚摸</button>
+            </div>
+            <div style="margin-top: 20px;">
+                <button id="close-pet-interact-btn" class="modal-btn-secondary">返回</button>
+            </div>
+          </div>
+        </div>
+        <input type="file" id="pet-upload-input" accept="image/*" hidden>
+      </div>
+
       <div class="header">
         <div class="default-controls"> <span class="back-btn" id="back-to-list-btn">‹</span>
           <div id="global-lyrics-bar"></div>
@@ -20083,7 +20536,8 @@ body.frame-mode-active .cphone-dock-container {
                 <path d="M16 3H5C3.89543 3 3 3.89543 3 5V19C3 20.1046 3.89543 21 5 21H16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
                 <path d="M12 6L9 9L12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
                 <path d="M21 5V19C21 20.1046 20.1046 21 19 21H16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-              </svg> </span> <span class="action-btn" id="listen-together-btn" title="一起听"><img src="https://i.postimg.cc/dV8sdNcx/210-20250618115221.png" alt="一起听"></span> <span class="action-btn" id="chat-settings-btn" title="聊天设置"><img
+              </svg> </span> <span class="action-btn" id="listen-together-btn" title="一起听"><img src="https://i.postimg.cc/dV8sdNcx/210-20250618115221.png" alt="一起听"></span> 
+              <span class="action-btn" id="chat-settings-btn" title="聊天设置"><img
                 src="https://i.postimg.cc/bvPq64cv/CCA834-BA-5-A90-408-D-94-FA-7-EE156-B6-A765.png" alt="设置"></span> </div>
         </div>
         <div class="selection-controls"> 
@@ -20145,7 +20599,12 @@ body.frame-mode-active .cphone-dock-container {
             <div class="text">被引用的消息内容...</div>
           </div> <span id="cancel-reply-btn">×</span>
         </div>
-        <div id="chat-input-actions-top"> <button id="open-sticker-panel-btn" class="chat-action-icon-btn action-button" title="表情面板">
+        <div id="chat-input-actions-top"> <button id="pet-console-btn" class="chat-action-icon-btn action-button" title="电子宠物"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2a3 3 0 0 1 3 3v.5a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/>
+                <path d="M19 8a3 3 0 0 1 3 3v.5a3 3 0 0 1-6 0V11a3 3 0 0 1 3-3z"/>
+                <path d="M5 8a3 3 0 0 1 3 3v.5a3 3 0 0 1-6 0V11a3 3 0 0 1 3-3z"/>
+                <path d="M12 10a5 5 0 0 1 5 5v2a5 5 0 0 1-10 0v-2a5 5 0 0 1 5-5z"/>
+              </svg></button> <button id="open-sticker-panel-btn" class="chat-action-icon-btn action-button" title="表情面板">
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="10"></circle>
         <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
@@ -20185,6 +20644,10 @@ body.frame-mode-active .cphone-dock-container {
               <circle cx="9" cy="7" r="4"></circle>
               <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
               <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+            </svg></button> <button id="add-group-title-btn" class="chat-action-icon-btn action-button" title="添加群头衔" style="display: none;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+              <path d="M2 17l10 5 10-5"></path>
+              <path d="M2 12l10 5 10-5"></path>
             </svg></button> <button id="send-poll-btn" class="chat-action-icon-btn action-button" title="发起投票"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M8 6h10"></path>
               <path d="M6 6h.01"></path>
@@ -20247,6 +20710,14 @@ body.frame-mode-active .cphone-dock-container {
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M9 11l3 3L22 4"></path>
         <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+    </svg>
+</button>
+<button id="voice-input-btn" class="chat-action-icon-btn action-button" title="语音输入">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+        <line x1="12" y1="19" x2="12" y2="23"></line>
+        <line x1="8" y1="23" x2="16" y2="23"></line>
     </svg>
 </button>
 </div>
@@ -20350,6 +20821,7 @@ body.frame-mode-active .cphone-dock-container {
           <div class="header-left-actions" style="display: flex; align-items: center; gap: 10px;">
             <span class="panel-btn" id="close-playlist-btn" data-lang-key="back">返回</span>
             <span class="panel-btn" id="manage-playlist-btn" data-lang-key="manage">管理</span>
+            <span class="panel-btn" id="open-my-playlists-btn" title="我的歌单">歌单</span>
           </div>
           
           <span data-lang-key="playlistTitle">播放列表</span>
@@ -20366,6 +20838,7 @@ body.frame-mode-active .cphone-dock-container {
         <label class="select-all-label" style="display: flex; align-items: center; gap: 5px;">
             <input type="checkbox" id="select-all-playlist-checkbox"> 全选
         </label>
+        <button id="batch-add-to-playlist-btn" class="action-bar-btn" style="background-color: #4cd964;">加入歌单 (0)</button>
         <button id="upload-selected-to-catbox-btn" class="action-bar-btn" style="background-color: #007bff;">上传Catbox (0)</button>
       </div>
       </div> <input type="file" id="local-song-upload-input" accept="audio/*" multiple style="display: none;"> <input type="file" id="lrc-upload-input" accept=".lrc" style="display: none;">
@@ -20678,7 +21151,7 @@ body.frame-mode-active .cphone-dock-container {
         <div id="participant-avatars-grid"> </div>
       </div>
       <div id="video-call-main" class="video-call-main"> </div>
-      <div class="video-call-controls"> <button id="user-speak-btn" class="control-btn speak-btn"></button> <button id="flip-camera-btn" class="control-btn flip-camera-btn" title="翻转摄像头"></button> <button id="hang-up-btn" class="control-btn hangup-btn"></button> <button id="regenerate-call-btn" class="control-btn regenerate-btn"></button> <button id="join-call-btn"
+      <div class="video-call-controls"> <button id="user-speak-btn" class="control-btn speak-btn"></button> <button id="hang-up-btn" class="control-btn hangup-btn"></button> <button id="regenerate-call-btn" class="control-btn regenerate-btn"></button> <button id="join-call-btn"
           class="control-btn join-btn" style="display: none;"></button> </div>
       
       <!-- 微信风格视频通话界面 -->
@@ -22012,6 +22485,24 @@ body.frame-mode-active .cphone-dock-container {
       <div class="modal-footer"><button class="cancel" id="cancel-member-settings-btn"data-lang-key="cancel">取消</button><button class="save" id="save-member-settings-btn"data-lang-key="save">保存</button></div>
     </div>
   </div>
+  <div id="group-title-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header"><span>添加群头衔</span></div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>选择成员</label>
+          <select id="group-title-member-select" style="width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 16px; box-sizing: border-box;">
+            <option value="">-- 选择成员 --</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="group-title-input">群头衔</label>
+          <input type="text" id="group-title-input" placeholder="输入群头衔（例如：管理员、群主等）" style="width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 16px; box-sizing: border-box;">
+        </div>
+      </div>
+      <div class="modal-footer"><button class="cancel" id="cancel-group-title-btn">取消</button><button class="save" id="save-group-title-btn">保存</button></div>
+    </div>
+  </div>
   <div id="custom-modal-overlay">
     <div id="custom-modal">
       <div class="custom-modal-header" id="custom-modal-title"></div>
@@ -22919,7 +23410,13 @@ body.frame-mode-active .cphone-dock-container {
                   <div id="char-music-progress-fill"></div>
                 </div> <span id="char-music-total-time" class="time-display">0:00</span>
               </div>
-              <div class="char-player-controls"> <button id="char-music-prev-btn" class="control-btn"> <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+              <div class="char-player-controls"> 
+                <button id="char-music-playlist-btn" class="control-btn" title="歌单管理"> 
+                  <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                    <path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z"></path>
+                  </svg> 
+                </button>
+                <button id="char-music-prev-btn" class="control-btn"> <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
                     <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"></path>
                   </svg> </button> <button id="char-music-play-pause-btn" class="control-btn play"> <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor">
                     <path d="M8 5v14l11-7z"></path>
@@ -22930,6 +23427,64 @@ body.frame-mode-active .cphone-dock-container {
           </div> <button id="close-char-music-player-btn" class="char-player-close-btn">×</button>
         </div>
       </div>
+
+<!-- 歌单管理弹窗 -->
+<div id="playlist-manager-modal" class="modal">
+  <div class="modal-content" style="height: 70%;">
+    <div class="modal-header">
+      <span>歌单管理</span>
+      <div class="header-actions" style="gap: 10px;">
+        <button id="create-playlist-btn" class="action-button">创建</button>
+        <button id="export-playlist-btn" class="action-button">导出</button>
+        <button id="import-playlist-btn" class="action-button">导入</button>
+      </div>
+    </div>
+    <div class="modal-body" id="playlist-list" style="padding: 0;">
+      <!-- 歌单列表将在这里动态生成 -->
+    </div>
+    <div class="modal-footer">
+      <button class="cancel" id="close-playlist-manager-btn">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 添加歌曲到歌单弹窗 -->
+<div id="add-to-playlist-modal" class="modal">
+  <div class="modal-content" style="height: 60%;">
+    <div class="modal-header">
+      <span>添加到歌单</span>
+    </div>
+    <div class="modal-body" id="add-to-playlist-list" style="padding: 0;">
+      <!-- 歌单列表将在这里动态生成 -->
+    </div>
+    <div class="modal-footer">
+      <button class="cancel" id="cancel-add-to-playlist-btn">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- 歌单详情弹窗 -->
+<div id="playlist-detail-modal" class="modal">
+  <div class="modal-content" style="height: 70%;">
+    <div class="modal-header">
+      <span id="playlist-detail-title">歌单</span>
+      <div class="header-actions" style="gap: 10px;">
+        <button id="playlist-edit-btn" class="action-button">编辑</button>
+        <button id="playlist-delete-btn" class="action-button" style="color: #ff3b30;">删除</button>
+      </div>
+    </div>
+    <div class="modal-body" id="playlist-song-list" style="padding: 0;">
+      <!-- 歌单中的歌曲列表将在这里动态生成 -->
+    </div>
+    <div class="modal-footer">
+      <button class="cancel" id="close-playlist-detail-btn">返回</button>
+      <button class="save" id="play-playlist-btn">播放歌单</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="import-playlist-input" accept=".json" hidden>
+
 <!-- 新增：亲属卡赠送专属弹窗 -->
 <div id="kinship-creation-modal" class="modal">
   <div class="modal-content" style="height: 70%; display: flex; flex-direction: column;">
@@ -23937,9 +24492,10 @@ self.addEventListener('activate', function(event) {
           }
         })
       );
+    }).then(function() {
+      return self.clients.claim(); // 立即控制所有客户端
     })
   );
-  return self.clients.claim(); // 立即控制所有客户端
 });
 
 // 处理推送通知
@@ -24056,51 +24612,6 @@ self.addEventListener('message', function(event) {
               }
           }
         });
-        
-        // 创建全局通知发送函数
-        window.showNotificationViaSW = async function(title, options = {}) {
-          // 检查通知权限
-          if (!('Notification' in window)) {
-            throw new Error('浏览器不支持通知功能');
-          }
-          
-          let permission = Notification.permission;
-          if (permission === 'default') {
-            permission = await Notification.requestPermission();
-          }
-          
-          if (permission !== 'granted') {
-            throw new Error('通知权限未授予');
-          }
-          
-          // 等待Service Worker就绪
-          try {
-            const reg = await navigator.serviceWorker.ready;
-            
-            // 通过Service Worker发送通知
-            if (reg.active) {
-              reg.active.postMessage({
-                type: 'SHOW_NOTIFICATION',
-                data: {
-                  title: title,
-                  body: options.body || '',
-                  icon: options.icon || 'https://s3plus.meituan.net/opapisdk/op_ticket_885190757_1758510900942_qdqqd_djw0z2.jpeg',
-                  badge: options.badge || 'https://s3plus.meituan.net/opapisdk/op_ticket_885190757_1758510900942_qdqqd_djw0z2.jpeg',
-                  tag: options.tag || 'notification',
-                  requireInteraction: options.requireInteraction || false,
-                  vibrate: options.vibrate,
-                  data: options.data || {}
-                }
-              });
-              return true;
-            } else {
-              throw new Error('Service Worker 未激活');
-            }
-          } catch (error) {
-            console.error('通过Service Worker发送通知失败:', error);
-            throw error;
-          }
-        };
       })
       .catch(error => {
         console.error('❌ Service Worker 注册失败:', error);
@@ -25187,6 +25698,7 @@ document.getElementById('char-city-search-btn').addEventListener('click', async 
           contents: contents,
           generationConfig: {
             temperature: apiTemperature,
+            maxOutputTokens: 2000,
           },
         })
       }
@@ -27662,40 +28174,28 @@ function showChoiceModal(title, options) {
 
 
 var db; // 声明全局变量，但不初始化
-const APP_SECRET = "EPHONE_2026_SUPER_SECRET_KEY_V1"; // 必须与机器人一致
 
-// HMAC-SHA256 验证函数
-function verifyLogin(uid, pwd) {
-    if (!uid || !pwd) return false;
-    
-    // 1. 计算 HMAC-SHA256 (得到原始数据)
-    const rawHash = CryptoJS.HmacSHA256(uid.trim(), APP_SECRET);
-    
-    // 2. 转为 Base64 字符串 (天然包含大小写字母和数字)
-    let base64 = CryptoJS.enc.Base64.stringify(rawHash);
-    
-    // 3. 截取前 12 位 (增加长度)
-    let generated = base64.substring(0, 12);
-    
-    // 4. 强制插入特殊符号 (增强复杂度)
-    // 将字符串转为数组进行替换
-    let chars = generated.split('');
-    chars[2] = '@';  // 第3位强制变为 @
-    chars[7] = '!';  // 第8位强制变为 !
-    
-    // 重新组合
-    const correctPassword = chars.join('');
-    
-    // console.log("正确密码应为:", correctPassword); // 调试用，上线可注释
-    return pwd.trim() === correctPassword;
-}
+// ===== 旧的验证代码已注释（改用远程API验证）=====
+// const APP_SECRET = "EPHONE_2026_SUPER_SECRET_KEY_V1"; 
+// function verifyLogin(uid, pwd) {
+//     if (!uid || !pwd) return false;
+//     const rawHash = CryptoJS.HmacSHA256(uid.trim(), APP_SECRET);
+//     let base64 = CryptoJS.enc.Base64.stringify(rawHash);
+//     let generated = base64.substring(0, 12);
+//     let chars = generated.split('');
+//     chars[2] = '@';
+//     chars[7] = '!';
+//     const correctPassword = chars.join('');
+//     return pwd.trim() === correctPassword;
+// }
+// ===== 旧的验证代码结束 =====
 
 // 动态初始化数据库函数
 function initDatabase(userId) {
     // 数据库名带上用户ID，实现每个人数据隔离
     db = new Dexie('GeminiChatDB');
 
-  db.version(49).stores({
+  db.version(53).stores({
     doubanPosts: '++id, timestamp',
     chats: '&id, isGroup, groupId, isPinned, memos, diary, appUsageLog, lastIntelligentSummaryTimestamp',
     apiConfig: '&id, minimaxGroupId, minimaxApiKey',
@@ -27704,6 +28204,8 @@ function initDatabase(userId) {
     worldBooks: '&id, name, categoryId',
     worldBookCategories: '++id, name',
     musicLibrary: '&id',
+    playlists: '++id, name, createdAt',
+    playlistSongs: '++id, playlistId, songId, [playlistId+songId]',
     personaPresets: '&id',
     qzoneSettings: '&id',
     qzonePosts: '++id, timestamp, authorId',
@@ -27735,7 +28237,9 @@ function initDatabase(userId) {
     funds: '&id, code, name, riskLevel, currentNav, lastDayNav, history',
     auctions: '++id, status, itemName, endTime', // 拍卖记录
     inventory: '++id, name, type, acquiredTime',
-    emails: '++id, sender, senderType, recipient, subject, content, timestamp, isRead'
+    emails: '++id, sender, senderType, recipient, subject, content, timestamp, isRead',
+    userPets: '&id',
+    diaryAnnotations: '++id, diaryId, chatId, text, comment, createdAt' // 日记标注
   }).upgrade(tx => {
 
     return tx.table('worldBooks').toCollection().modify(book => {
@@ -30709,7 +31213,89 @@ async function saveNaiBinding() {
     }
   }
 
-  function showNotification(chatId, messageContent, isTest = false) {
+  // --- Worker 保活机制 (单文件版) ---
+  // 通过 Blob 创建一个内联 Worker，用于在后台保持心跳，防止主线程定时器被挂起
+  let keepAliveWorker = null;
+  try {
+      const workerCode = `
+          self.onmessage = function(e) {
+              if (e.data === 'start') {
+                  console.log('[Worker] 保活心跳已启动');
+                  setInterval(() => {
+                      self.postMessage('tick');
+                  }, 5000); // 5秒心跳
+              }
+          };
+      `;
+      const blob = new Blob([workerCode], {type: 'application/javascript'});
+      const workerUrl = URL.createObjectURL(blob);
+      keepAliveWorker = new Worker(workerUrl);
+      
+      keepAliveWorker.onmessage = function(e) {
+          if (e.data === 'tick') {
+              // 可以在这里执行一些轻量级的后台检查，或者仅仅是为了唤醒主线程
+              // console.log('[Main] 收到保活心跳'); 
+          }
+      };
+      
+      // 启动保活
+      keepAliveWorker.postMessage('start');
+      console.log('✅ 单文件保活 Worker 已启动');
+  } catch (e) {
+      console.warn('❌ 无法启动保活 Worker:', e);
+  }
+
+  // --- 新增：兼容性通知发送函数 (优化版) ---
+  window.showCompatibleNotification = async function(title, options) {
+      // 1. 尝试使用 Service Worker (Android/PWA 必须) - 带超时保险丝
+      if ('serviceWorker' in navigator) {
+          try {
+              // 创建一个带超时的 Promise（1秒保险丝）
+              const timeoutPromise = new Promise((_, reject) => 
+                  setTimeout(() => reject(new Error('SW ready timeout')), 1000)
+              );
+              
+              const registration = await Promise.race([
+                  navigator.serviceWorker.ready,
+                  timeoutPromise
+              ]);
+              
+              if (registration && registration.active) {
+                  // 确保有 tag
+                  if (!options.tag) options.tag = 'notification-' + Date.now();
+                  
+                  // 直接调用 registration.showNotification()（标准做法）
+                  await registration.showNotification(title, options);
+                  
+                  console.log('✅ 通过 Service Worker 成功发送通知');
+                  
+                  // 返回一个模拟对象
+                  return {
+                      close: () => registration.getNotifications({tag: options.tag}).then(ns => ns.forEach(n => n.close())),
+                      isServiceWorker: true
+                  };
+              }
+          } catch (e) {
+              console.warn('⚠️ SW 通知失败或超时，切换到回退方案:', e.message);
+          }
+      }
+      
+      // 2. 回退到 new Notification (PC/旧版/iOS非PWA)
+      try {
+          const n = new Notification(title, options);
+          n.isServiceWorker = false;
+          console.log('✅ 使用 new Notification() 成功发送通知');
+          return n;
+      } catch (e) {
+          console.error('❌ new Notification 也失败:', e);
+          if (e.name === 'TypeError' || e.message.includes('Illegal constructor')) {
+              console.warn('当前环境不支持直接调用 new Notification (可能是 iOS 未添加到主屏幕)');
+          }
+          throw e;
+      }
+  };
+
+  async function showNotification(chatId, messageContent, isTest = false) {
     console.log('🔔 showNotification 被调用', {
         chatId: chatId,
         messageContent: messageContent.substring(0, 50),
@@ -30739,53 +31325,35 @@ async function saveNaiBinding() {
         avatarUrl = chat.settings.aiAvatar || chat.settings.groupAvatar || defaultAvatar;
     }
     
-    // 如果在后台且有通知权限，使用Service Worker发送通知
-    if (isBackground && 'Notification' in window && 'serviceWorker' in navigator) {
-        // 通过Service Worker发送通知（兼容安卓）
-        // 检查权限
+    // 如果在后台且有通知权限，直接发送通知（跳过 postMessage 中间商）
+    if (isBackground && 'Notification' in window) {
         let permission = Notification.permission;
+        
+        // 如果需要请求权限
         if (permission === 'default') {
-            Notification.requestPermission().then(permission => {
-                if (permission === 'granted') {
-                    navigator.serviceWorker.ready.then(reg => {
-                        if (reg.active) {
-                            reg.active.postMessage({
-                                type: 'SHOW_NOTIFICATION',
-                                data: {
-                                    title: titleText,
-                                    body: messageContent,
-                                    icon: avatarUrl,
-                                    tag: chatId ? `chat-${chatId}` : 'ephone-msg',
-                                    badge: 'https://s3plus.meituan.net/opapisdk/op_ticket_885190757_1758510900942_qdqqd_djw0z2.jpeg',
-                                    requireInteraction: false,
-                                    data: { chatId: chatId }
-                                }
-                            });
-                        }
-                    }).catch(err => console.error('Service Worker发送通知失败:', err));
-                }
-            }).catch(err => console.error('请求通知权限失败:', err));
-        } else if (permission === 'granted') {
-            // 权限已授予，直接发送
-            navigator.serviceWorker.ready.then(reg => {
-                if (reg.active) {
-                    reg.active.postMessage({
-                        type: 'SHOW_NOTIFICATION',
-                        data: {
-                            title: titleText,
-                            body: messageContent,
-                            icon: avatarUrl,
-                            tag: chatId ? `chat-${chatId}` : 'ephone-msg',
-                            badge: 'https://s3plus.meituan.net/opapisdk/op_ticket_885190757_1758510900942_qdqqd_djw0z2.jpeg',
-                            requireInteraction: false,
-                            data: { chatId: chatId }
-                        }
-                    });
-                }
-            }).catch(err => {
-                console.error('❌ Service Worker发送通知失败:', err);
-                alert('后台通知失败: ' + err.message + '\n\n请检查：\n1. 是否授予了通知权限\n2. 浏览器是否支持Service Worker');
-            }).then(() => {
+            try {
+                permission = await Notification.requestPermission();
+            } catch (err) {
+                console.error('❌ 请求通知权限失败:', err);
+                updateBackButtonUnreadCount();
+                return;
+            }
+        }
+        
+        // 如果权限已授予，直接调用兼容性通知函数
+        if (permission === 'granted') {
+            try {
+                const notification = await window.showCompatibleNotification(titleText, {
+                    body: messageContent,
+                    icon: avatarUrl,
+                    tag: chatId ? `chat-${chatId}` : 'ephone-msg',
+                    badge: 'https://s3plus.meituan.net/opapisdk/op_ticket_885190757_1758510900942_qdqqd_djw0z2.jpeg',
+                    requireInteraction: false,
+                    silent: false,
+                    vibrate: [200, 100, 200],
+                    data: { chatId: chatId }
+                });
+                
                 console.log('✅ 后台系统通知已发送', {
                     title: titleText,
                     body: messageContent,
@@ -30794,7 +31362,22 @@ async function saveNaiBinding() {
                     permission: Notification.permission,
                     timestamp: new Date().toISOString()
                 });
-            });
+                
+                // 为非 SW 通知添加点击事件
+                if (notification && !notification.isServiceWorker && notification.onclick === null) {
+                    notification.onclick = function() {
+                        window.focus();
+                        if (typeof openChat === 'function' && chatId) {
+                            openChat(chatId);
+                        }
+                        notification.close();
+                    };
+                }
+            } catch (e) {
+                console.error('❌ 后台通知发送失败:', e);
+            }
+        } else {
+            console.warn('⚠️ 通知权限被拒绝，无法发送后台通知');
         }
         
         updateBackButtonUnreadCount();
@@ -32705,9 +33288,11 @@ Promise.all(imageLoadPromises).then(() => {
   }
 
   function updatePlaylistActionBar() {
-    const btn = document.getElementById('upload-selected-to-catbox-btn');
+    const uploadBtn = document.getElementById('upload-selected-to-catbox-btn');
+    const playlistBtn = document.getElementById('batch-add-to-playlist-btn');
     const count = selectedPlaylistItems.size;
-    if (btn) btn.textContent = `上传Catbox (${count})`;
+    if (uploadBtn) uploadBtn.textContent = `上传Catbox (${count})`;
+    if (playlistBtn) playlistBtn.textContent = `加入歌单 (${count})`;
   }
 
   function handleSelectAllPlaylistItems() {
@@ -32730,10 +33315,92 @@ Promise.all(imageLoadPromises).then(() => {
     updatePlaylistActionBar();
   }
 
+  // 批量加入歌单
+  async function executeBatchAddToPlaylist() {
+    if (selectedPlaylistItems.size === 0) {
+      await showCustomAlert('提示', '请先选择要添加的歌曲');
+      return;
+    }
+    
+    // 获取所有歌单
+    const playlists = await db.playlists.toArray();
+    
+    if (playlists.length === 0) {
+      await showCustomAlert('提示', '还没有歌单，请先创建一个歌单');
+      return;
+    }
+    
+    // 使用自定义选择弹窗
+    const modal = document.getElementById('add-to-playlist-modal');
+    const listContainer = document.getElementById('add-to-playlist-list');
+    
+    listContainer.innerHTML = '';
+    
+    for (const playlist of playlists) {
+      const item = document.createElement('div');
+      item.className = 'list-item';
+      item.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div class="item-title">${playlist.name}</div>
+          <span style="color: #999; font-size: 14px;">选择</span>
+        </div>
+      `;
+      
+      item.onclick = async () => {
+        try {
+          let successCount = 0;
+          
+          for (const index of selectedPlaylistItems) {
+            const track = musicState.playlist[index];
+            if (!track) continue;
+            
+            // 保存到musicLibrary
+            const songId = track.id || `song_${Date.now()}_${index}`;
+            await db.musicLibrary.put({
+              id: songId,
+              name: track.name,
+              artist: track.artist,
+              url: track.src,  // 修复：使用 track.src 而不是 track.url
+              cover: track.cover,
+              lrc: track.lrc
+            });
+            
+            // 检查是否已在歌单中
+            const exists = await db.playlistSongs
+              .where(['playlistId', 'songId'])
+              .equals([playlist.id, songId])
+              .count();
+            
+            if (exists === 0) {
+              await db.playlistSongs.add({
+                playlistId: playlist.id,
+                songId: songId
+              });
+              successCount++;
+            }
+          }
+          
+          closeAddToPlaylistModal();
+          await showCustomAlert('成功', `成功添加 ${successCount} 首歌曲到歌单"${playlist.name}"`);
+          
+          // 退出管理模式
+          togglePlaylistManagementMode();
+        } catch (error) {
+          console.error('批量添加到歌单失败:', error);
+          await showCustomAlert('错误', '添加失败：' + error.message);
+        }
+      };
+      
+      listContainer.appendChild(item);
+    }
+    
+    modal.classList.add('visible');
+  }
+
   async function executeBatchUploadToCatbox() {
     // 1. 检查 Catbox 配置
     if (!state.apiConfig.catboxEnable || !state.apiConfig.catboxUserHash) {
-      await showCustomAlert("功能未开启", "请先在“API设置” -> “Catbox.moe”中开启此功能并填写您的 User Hash。");
+      await showCustomAlert("功能未开启", "请先在\"API设置\" -> \"Catbox.moe\"中开启此功能并填写您的 User Hash。");
       return;
     }
 
@@ -33425,7 +34092,9 @@ https://xx.com/4.jpg 疑惑`;
       const member = chat.members.find(m => m.originalName === msg.senderName);
       const senderNameDiv = document.createElement('div');
       senderNameDiv.className = 'sender-name';
-      senderNameDiv.textContent = member ? member.groupNickname : (msg.senderName || '未知成员');
+      const displayName = member ? member.groupNickname : (msg.senderName || '未知成员');
+      const title = member ? (member.groupTitle || '') : '';
+      senderNameDiv.textContent = displayName + (title ? ` [${title}]` : '');
       wrapper.appendChild(senderNameDiv);
     }
 
@@ -33442,7 +34111,10 @@ https://xx.com/4.jpg 疑惑`;
       avatarSrc = chat.settings.myAvatar || (chat.isGroup ? defaultMyGroupAvatar : defaultAvatar);
       avatarFrameSrc = chat.settings.myAvatarFrame || '';
     } else {
-      if (chat.isGroup) {
+      if (msg.customAvatar) {
+        avatarSrc = msg.customAvatar;
+        avatarFrameSrc = ''; 
+      } else if (chat.isGroup) {
         const member = chat.members.find(m => m.originalName === msg.senderName);
         if (member) {
           const characterProfile = state.chats[member.id];
@@ -33626,14 +34298,18 @@ https://xx.com/4.jpg 疑惑`;
                     `;
       } else if (msg.type === 'voice_message') {
         bubble.classList.add('is-voice-message', 'is-card-like');
-        const duration = Math.max(1, Math.round((msg.content || '').length / 5));
-        const durationFormatted = `0:${String(duration).padStart(2, '0')}''`;
+        // 如果有真实录音，使用真实时长，否则根据文字长度估算
+        const duration = msg.duration || Math.max(1, Math.round((msg.content || '').length / 5));
+        const minutes = Math.floor(duration / 60);
+        const seconds = duration % 60;
+        const durationFormatted = minutes > 0 ? `${minutes}:${String(seconds).padStart(2, '0')}''` : `0:${String(seconds).padStart(2, '0')}''`;
         const waveformHTML = '<div></div><div></div><div></div><div></div><div></div>';
+        const audioDataAttr = msg.audioData ? `data-audio="${encodeURIComponent(msg.audioData)}"` : '';
 
         if (isUser) {
 
           contentHtml = `
-            <div class="voice-message-body" data-text="${encodeURIComponent(msg.content)}">
+            <div class="voice-message-body" data-text="${encodeURIComponent(msg.content)}" ${audioDataAttr}>
                 <div class="voice-waveform">${waveformHTML}</div>
                 <span class="voice-duration">${durationFormatted}</span>
             </div>
@@ -34104,6 +34780,7 @@ const MAX_DOM_NODES = 60;
 
 
     document.getElementById('show-announcement-board-btn').style.display = isGroup ? 'flex' : 'none';
+    document.getElementById('add-group-title-btn').style.display = isGroup ? 'flex' : 'none';
 
 
     const patBtn = document.getElementById('pat-btn');
@@ -34459,6 +35136,10 @@ ${stickerContext}
 
 
 
+  async function triggerPetResponse(chat, userContent, apiConfig) {
+      // Function removed as we now use single API call
+  }
+
   async function triggerAiResponse() {
     if (!state.activeChatId) return;
     const chatId = state.activeChatId;
@@ -34512,6 +35193,71 @@ ${stickerContext}
       }
 
       const lastMessage = chat.history.slice(-1)[0];
+      
+      // Check for Pet Trigger (@PetName)
+      const petData = window.getPetData ? window.getPetData() : null;
+      let petTriggerContext = '';
+      if (petData && lastMessage && lastMessage.role === 'user' && typeof lastMessage.content === 'string' && lastMessage.content.includes('@' + petData.name)) {
+          console.log(`[Pet System] User mentioned @${petData.name}, injecting pet context...`);
+          const speciesInfo = petData.species ? `- 物种: "${petData.species}"\n` : '';
+          petTriggerContext = `
+# 【宠物互动触发 - 严格格式要求】
+
+用户在消息中提到了你的宠物 @${petData.name}。请你和你的宠物一起回应用户。
+
+## 宠物信息
+- 名字: "${petData.name}"
+${speciesInfo}- 性格: "${petData.personality}"
+- 等级: Lv.${petData.level}
+
+## ⚠️ 核心格式规则（必须严格遵守）
+
+### 规则1：每句话必须是独立指令
+**绝对禁止**把多句话放在一个 content 里！
+- ❌ 错误示例: \`{"type": "pet_reply", "content": "你好！很高兴见到你！今天天气真好。", "petName": "${petData.name}"}\`
+- ✅ 正确示例: 
+  \`\`\`json
+  [
+    {"type": "pet_reply", "content": "你好！", "petName": "${petData.name}"},
+    {"type": "pet_reply", "content": "很高兴见到你！", "petName": "${petData.name}"},
+    {"type": "pet_reply", "content": "今天天气真好。", "petName": "${petData.name}"}
+  ]
+  \`\`\`
+
+### 规则2：明确区分宠物和角色
+- **宠物说的话** → 必须使用 \`pet_reply\` 指令
+  - 格式: \`{"type": "pet_reply", "content": "单句话", "petName": "${petData.name}"}\`
+  - 显示效果: 头像显示宠物图片，名字显示 "${petData.name}"
+  
+- **角色说的话** → 必须使用 \`text\` 指令
+  - 格式: \`{"type": "text", "content": "单句话"}\`
+  - 显示效果: 头像显示角色图片，名字显示角色名字
+
+### 规则3：禁止混淆
+- ❌ 禁止在 pet_reply 的 content 里包含角色的话
+- ❌ 禁止在 text 的 content 里包含宠物的话
+- ❌ 禁止把宠物和角色的话混在一个指令里
+
+## 互动规则
+1. **顺序**: 宠物和角色可以任意顺序说话（宠物先/角色先/轮流）
+2. **数量**: 宠物和角色都可以说多句话，但每句话必须是独立指令
+3. **格式**: 每句话单独一个指令，每个指令的 content 只能是一句话
+
+## ✅ 完整示例（正确格式）
+\`\`\`json
+[
+  {"type": "pet_reply", "content": "汪汪！主人叫我吗？", "petName": "${petData.name}"},
+  {"type": "text", "content": "是的，${petData.name}，我们一起出去玩吧"},
+  {"type": "pet_reply", "content": "太好了！", "petName": "${petData.name}"},
+  {"type": "text", "content": "那我们走吧"},
+  {"type": "pet_reply", "content": "我最喜欢和主人一起玩了！", "petName": "${petData.name}"}
+]
+\`\`\`
+
+**记住：每句话 = 一个独立指令，绝对不能合并！**
+`;
+      }
+
       const isVideoCallRequest = lastMessage && lastMessage.role === 'system' && lastMessage.content.includes('视频通话请求');
 
       if (isVideoCallRequest) {
@@ -36251,6 +36997,7 @@ ${sharedContext}
 ${callTranscriptContext}
 ${synthMusicInstruction}
 ${narratorInstruction}
+${petTriggerContext}
 ---
 
 # 【Part 3: 行为与指令系统 (你的能力)】
@@ -38899,6 +39646,45 @@ case 'decline_transfer': {
             }
             break;
 
+          case 'pet_reply':
+            // Handle pet reply separately
+            // We create a separate message object for the pet
+            const petData = window.getPetData ? window.getPetData() : null;
+            if (petData && msgData.content) {
+                const petMessage = {
+                    role: 'assistant',
+                    senderName: msgData.petName || petData.name,
+                    content: msgData.content,
+                    timestamp: currentMessageTimestamp, // Use normal timestamp logic
+                    customAvatar: petData.image,
+                    isPetMessage: true
+                };
+                
+                // Add to history
+                chat.history.push(petMessage);
+                
+                // Add experience
+                if (window.addPetExperience) {
+                    window.addPetExperience(10);
+                }
+                
+                // We don't set aiMessage here because this is a separate message
+                // However, we need to ensure it gets rendered.
+                // Since this loop handles one message at a time, we can just push it to history
+                // and if we are viewing the chat, we append it.
+                
+                if (isViewingThisChat) {
+                    setTimeout(() => {
+                        appendMessage(petMessage, chat);
+                        const messagesContainer = document.getElementById('chat-messages');
+                        if (messagesContainer) messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    }, 500);
+                }
+            }
+            // We don't want to create a main AI message for this type, so we continue
+            aiMessage = null;
+            break;
+
           default:
             console.warn("收到了未知的AI指令类型:", msgData.type);
             break;
@@ -38906,6 +39692,12 @@ case 'decline_transfer': {
 
         if (aiMessage) {
           chat.history.push(aiMessage);
+          
+          // Add pet experience for AI message
+          if (window.addPetExperience) {
+              window.addPetExperience(10);
+          }
+
           if (!isViewingThisChat) {
             chat.unreadCount = (chat.unreadCount || 0) + 1;
           }
@@ -39467,6 +40259,7 @@ async function sendUserTransfer() {
             <div class="artist">${track.artist}</div>
         </div>
         <div class="playlist-item-actions">
+            <span class="playlist-action-btn add-to-my-playlist-btn" data-index="${index}" title="加入我的歌单">歌单</span>
             <span class="playlist-action-btn album-art-btn" data-index="${index}">专辑</span>
             <span class="playlist-action-btn lyrics-btn" data-index="${index}">词</span>
             <span class="playlist-action-btn bg-btn" data-index="${index}">背景</span>
@@ -44701,6 +45494,7 @@ ${linkedContents}
   function toggleCallButtons(isGroup) {
     document.getElementById('video-call-btn').style.display = isGroup ? 'none' : 'flex';
     document.getElementById('group-video-call-btn').style.display = isGroup ? 'flex' : 'none';
+    document.getElementById('add-group-title-btn').style.display = isGroup ? 'flex' : 'none';
   }
 
 
@@ -54633,6 +55427,7 @@ window.toggleReadingFullscreen = toggleReadingFullscreen;
     renderCharacterSelector();
     showScreen('character-selection-screen');
   }
+  window.openCharacterSelector = openCharacterSelector;
 
 
   function renderCharacterSelector() {
@@ -55412,6 +56207,34 @@ ${recentHistoryWithUser}
 
     const userDisplayNameForAI = (state.qzoneSettings.nickname === '{{user}}' || !state.qzoneSettings.nickname) ? '用户' : state.qzoneSettings.nickname;
 
+    // 查找最近一篇有标注的日记（用于生成回复）
+    let previousDiaryWithAnnotations = null;
+    let previousDiaryAnnotations = [];
+    try {
+      const allAnnotations = await db.diaryAnnotations
+        .where('chatId').equals(activeCharacterId)
+        .toArray();
+      
+      if (allAnnotations.length > 0) {
+        const sortedAnnotations = allAnnotations
+          .filter(ann => !ann.isAI && ann.comment && ann.comment.trim())
+          .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        
+        if (sortedAnnotations.length > 0) {
+          const latestAnnotation = sortedAnnotations[0];
+          const latestDiaryId = latestAnnotation.diaryId;
+          const diary = chat.diary?.find(d => d.id === latestDiaryId);
+          
+          if (diary && !diary.aiReply) {
+            previousDiaryWithAnnotations = diary;
+            previousDiaryAnnotations = allAnnotations.filter(ann => ann.diaryId === latestDiaryId && !ann.isAI && ann.comment && ann.comment.trim());
+          }
+        }
+      }
+    } catch (error) {
+      console.error('查找之前日记标注失败:', error);
+    }
+
     const longTermMemoryContext = chat.longTermMemory && chat.longTermMemory.length > 0 ?
       chat.longTermMemory.map(mem => `- (记录于 ${formatTimeAgo(mem.timestamp)}) ${mem.content}`).join('\n') :
       '无';
@@ -55421,26 +56244,47 @@ ${recentHistoryWithUser}
     const recentHistoryWithUser = filteredHistory.map(msg => `${msg.role === 'user' ? userDisplayNameForAI : chat.name}: ${String(msg.content).substring(0, 30)}...`).join('\n');
     const worldBookContext = (chat.settings.linkedWorldBookIds || []).map(bookId => state.worldBooks.find(wb => wb.id === bookId)).filter(Boolean).map(book => `\n## 世界书《${book.name}》设定:\n${book.content.filter(e=>e.enabled).map(e=>`- ${e.content}`).join('\n')}`).join('');
 
+    // 构建回复部分的prompt
+    let replyPromptSection = '';
+    if (previousDiaryWithAnnotations && previousDiaryAnnotations.length > 0) {
+      replyPromptSection = `
+
+# 额外任务：回复之前的日记标注
+你之前写过一篇日记，内容如下：
+${previousDiaryWithAnnotations.content}
+
+有人对你日记中的以下内容进行了标注和评论：
+${previousDiaryAnnotations.map(ann => `  - "${ann.text}"
+    评论：${ann.comment}`).join('\n')}
+
+请你作为角色，针对这些标注和评论，写一段回复。回复应该：
+1. 自然地表达你对这些评论的思考和感受
+2. 可以是对评论的回应、感谢、解释或进一步的思考
+3. 要符合你的角色性格
+4. 长度控制在100-200字左右
+5. 使用第一人称"我"来写
+6. 直接输出回复内容，不要添加任何格式标记、引号或其他装饰性文字`;
+    }
 
     const systemPrompt = `          
 # 你的任务
-你是一个虚拟生活模拟器和故事作家。你的任务是扮演角色“${chat.name}”，并根据其人设、记忆和最近的互动，虚构出【1篇】TA今天可能会写的日记。
+你是一个虚拟生活模拟器和故事作家。你的任务是扮演角色"${chat.name}"，并根据其人设、记忆和最近的互动，虚构出【1篇】TA今天可能会写的日记。${replyPromptSection}
 
 # 核心规则
 1.  **【【【时间铁律 (最高优先级)】】】**:
     -   今天的日期是 **${new Date().toLocaleDateString('zh-CN')}**。
     -   你生成的日记标题日期【必须】是今天或今天以前的日期。
     -   【绝对禁止】生成任何未来的日期！
-2.  **【【【沉浸感铁律】】】**: 日记必须使用【第一人称视角 ("我")】来写，并且要充满角色的个人情感、思考和秘密。在日记中描述自己的行为或想法时，【绝对禁止】使用第三人称“他”或“她” (TA)。
+2.  **【【【沉浸感铁律】】】**: 日记必须使用【第一人称视角 ("我")】来写，并且要充满角色的个人情感、思考和秘密。在日记中描述自己的行为或想法时，【绝对禁止】使用第三人称"他"或"她" (TA)。
 3.  **【【【长度铁律】】】**: 日记的正文长度【必须不少于300字】。
-4.  **【【【格式铁律 (最高优先级)】】】**: 你的回复【必须且只能】是一个JSON数组，且数组中【只包含一个】对象，格式【必须】如下:
+4.  **【【【格式铁律 (最高优先级)】】】**: 你的回复【必须且只能】是一个JSON对象，格式【必须】如下:
     \`\`\`json
-    [
-      {
+    {
+      "diary": {
         "title": "这篇日记的标题，例如：9月20日 晴",
         "content": "这里是日记的详细正文，必须支持换行符\\n，并且必须巧妙地使用下面的【日记专属Markdown语法】来丰富文本表现力。"
-      }
-    ]
+      }${previousDiaryWithAnnotations ? ',\n      "reply": "这里是对之前日记标注的回复内容，100-200字左右，使用第一人称，直接输出文字不要添加引号或格式标记"' : ''}
+    }
     \`\`\`
 5.  **【【【日记专属Markdown语法 (必须使用！)】】】**:
     -   \`**加粗文字**\`: 用于强调。
@@ -55457,7 +56301,7 @@ ${recentHistoryWithUser}
 - **你的长期记忆**:
 ${longTermMemoryContext}
 ${worldBookContext}
-- **你最近和“${userDisplayNameForAI}”的对话摘要**:
+- **你最近和"${userDisplayNameForAI}"的对话摘要**:
 ${recentHistoryWithUser}
 
 现在，请开始撰写这篇充满真情实感、并熟练运用了Markdown语法的日记。`;
@@ -55482,6 +56326,7 @@ ${recentHistoryWithUser}
             content: systemPrompt
           }, ...messagesForApi],
           temperature: state.globalSettings.apiTemperature || 0.95,
+          max_tokens: previousDiaryWithAnnotations ? 3000 : 2000
         })
       });
       if (!response.ok) throw new Error(`API 错误: ${response.statusText}`);
@@ -55489,34 +56334,591 @@ ${recentHistoryWithUser}
       const aiResponseContent = getGeminiResponseText(data);
 
 
-      const jsonMatch = aiResponseContent.match(/(\[[\s\S]*\])/);
-      if (!jsonMatch || !jsonMatch[0]) {
-        throw new Error(`AI返回的内容中未找到有效的JSON数组。原始返回: ${aiResponseContent}`);
+      // 尝试提取JSON对象
+      let jsonMatch = aiResponseContent.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        // 如果没有找到对象，尝试找数组（兼容旧格式）
+        jsonMatch = aiResponseContent.match(/(\[[\s\S]*\])/);
+        if (!jsonMatch || !jsonMatch[0]) {
+          throw new Error(`AI返回的内容中未找到有效的JSON。原始返回: ${aiResponseContent}`);
+        }
       }
       const cleanedJsonString = jsonMatch[0];
-      let newDiaryEntry;
+      let parsedData;
       try {
-        newDiaryEntry = JSON.parse(cleanedJsonString)[0];
+        parsedData = JSON.parse(cleanedJsonString);
       } catch (e) {
         throw new Error(`解析AI返回的JSON时出错: ${e.message}\n\nAI原始返回内容:\n${aiResponseContent}`);
+      }
+      
+      // 兼容新旧格式
+      let newDiaryEntry;
+      let aiReply = null;
+      if (parsedData.diary) {
+        // 新格式：包含diary和reply的对象
+        newDiaryEntry = parsedData.diary;
+        aiReply = parsedData.reply ? parsedData.reply.trim() : null;
+      } else if (Array.isArray(parsedData) && parsedData[0]) {
+        // 旧格式：数组格式
+        newDiaryEntry = parsedData[0];
+      } else {
+        throw new Error(`AI返回的JSON格式不正确。原始返回: ${aiResponseContent}`);
       }
 
 
       if (!chat.diary) chat.diary = [];
 
+      const newDiaryId = Date.now();
       chat.diary.push({
-        id: Date.now(),
+        id: newDiaryId,
         title: newDiaryEntry.title,
         content: newDiaryEntry.content,
         timestamp: Date.now()
       });
 
       await db.chats.put(chat);
+      
+      // 如果有AI回复，保存到之前的日记
+      if (aiReply && previousDiaryWithAnnotations) {
+        previousDiaryWithAnnotations.aiReply = aiReply;
+        previousDiaryWithAnnotations.aiReplyTimestamp = Date.now();
+        await db.chats.put(chat);
+        
+        // 如果当前正在查看之前的日记，重新渲染以显示AI回复
+        if (activeDiaryForViewing && activeDiaryForViewing.id === previousDiaryWithAnnotations.id) {
+          const formattedContent = parseMarkdown(previousDiaryWithAnnotations.content)
+            .split('\n')
+            .map(p => `<p>${p || '&nbsp;'}</p>`)
+            .join('');
+          await renderDiaryContentWithAnnotations(previousDiaryWithAnnotations.id, activeCharacterId, formattedContent, previousDiaryWithAnnotations.content);
+        }
+      }
+      
       await renderCharDiaryList();
+      
+      // 自动打开新生成的日记
+      await viewDiary(newDiaryId);
 
     } catch (error) {
       console.error("生成新日记失败:", error);
       await showCustomAlert("生成失败", `错误: ${error.message}`);
+    }
+  }
+  
+  // 修复不完整JSON字符串的辅助函数
+  function fixIncompleteJSONString(jsonStr) {
+    if (!jsonStr || typeof jsonStr !== 'string') return jsonStr;
+    
+    try {
+      // 先尝试直接解析，如果成功就不需要修复
+      JSON.parse(jsonStr);
+      return jsonStr;
+    } catch (e) {
+      // JSON不完整，尝试修复
+    }
+    
+    let fixed = jsonStr;
+    
+    // 检查未闭合的字符串引号
+    let inString = false;
+    let escapeNext = false;
+    let quotePositions = [];
+    
+    for (let i = 0; i < fixed.length; i++) {
+      const char = fixed[i];
+      
+      if (escapeNext) {
+        escapeNext = false;
+        continue;
+      }
+      
+      if (char === '\\') {
+        escapeNext = true;
+        continue;
+      }
+      
+      if (char === '"') {
+        if (!inString) {
+          inString = true;
+          quotePositions.push(i);
+        } else {
+          inString = false;
+        }
+      }
+    }
+    
+    // 如果字符串未闭合，尝试闭合
+    if (inString) {
+      // 找到最后一个引号的位置
+      const lastQuoteIndex = fixed.lastIndexOf('"');
+      if (lastQuoteIndex >= 0) {
+        // 检查是否在text或comment字段中
+        const beforeQuote = fixed.substring(0, lastQuoteIndex);
+        if (beforeQuote.includes('"text"') || beforeQuote.includes('"comment"')) {
+          // 尝试在合适的位置闭合字符串
+          // 如果字符串在末尾，直接添加闭合引号
+          if (lastQuoteIndex === fixed.length - 1 || fixed.substring(lastQuoteIndex + 1).trim().length === 0) {
+            fixed += '"';
+          } else {
+            // 字符串中间有内容，尝试找到合适的位置
+            const afterQuote = fixed.substring(lastQuoteIndex + 1);
+            // 如果后面是逗号或结束符，说明字符串应该在这里结束
+            if (afterQuote.match(/^\s*[,}\]\]]/)) {
+              // 字符串应该已经闭合了，可能是其他问题
+            } else {
+              // 尝试在当前位置闭合
+              fixed = fixed.substring(0, lastQuoteIndex + 1) + '"' + fixed.substring(lastQuoteIndex + 1);
+            }
+          }
+        }
+      }
+    }
+    
+    // 检查并修复未闭合的括号
+    const openBraces = (fixed.match(/\{/g) || []).length;
+    const closeBraces = (fixed.match(/\}/g) || []).length;
+    const openBrackets = (fixed.match(/\[/g) || []).length;
+    const closeBrackets = (fixed.match(/\]/g) || []).length;
+    
+    // 先闭合数组
+    for (let i = 0; i < openBrackets - closeBrackets; i++) {
+      fixed += ']';
+    }
+    // 再闭合对象
+    for (let i = 0; i < openBraces - closeBraces; i++) {
+      fixed += '}';
+    }
+    
+    return fixed;
+  }
+  
+  // 以下函数已废弃：AI回复现在和生成新日记一起调用，不再单独调用API
+  // 生成并保存AI对用户标注的回复到原日记（已废弃，保留以防需要）
+  async function generateAndSaveDiaryReply(diaryId, chatId) {
+    try {
+      // 获取该日记的所有标注
+      const allAnnotations = await db.diaryAnnotations
+        .where('chatId').equals(chatId)
+        .filter(ann => ann.diaryId === diaryId)
+        .toArray();
+      
+      // 只获取用户标注（非AI生成的）
+      const userAnnotations = allAnnotations.filter(ann => !ann.isAI && ann.comment && ann.comment.trim());
+      
+      if (userAnnotations.length === 0) return;
+      
+      // 找到对应的日记内容
+      const chat = state.chats[chatId];
+      if (!chat || !chat.diary) return;
+      
+      const diary = chat.diary.find(d => d.id === diaryId);
+      if (!diary) return;
+      
+      // 如果已经有AI回复，不再重复生成
+      if (diary.aiReply) return;
+      
+      const {
+        proxyUrl,
+        apiKey,
+        model
+      } = state.apiConfig;
+      if (!proxyUrl || !apiKey || !model) return;
+      
+      const userDisplayNameForAI = (state.qzoneSettings.nickname === '{{user}}' || !state.qzoneSettings.nickname) ? '用户' : state.qzoneSettings.nickname;
+      
+      const prompt = `${chat.settings.aiPersona}
+
+这是我写的一篇日记的内容：
+${diary.content}
+
+有人对我日记中的以下内容进行了标注和评论：
+${userAnnotations.map(ann => `  - "${ann.text}"
+    评论：${ann.comment}`).join('\n')}
+
+请你作为角色，针对这些标注和评论，写一段回复。回复应该：
+1. 自然地表达你对这些评论的思考和感受
+2. 可以是对评论的回应、感谢、解释或进一步的思考
+3. 要符合你的角色性格
+4. 长度控制在100-200字左右
+5. 使用第一人称"我"来写
+
+请直接输出回复内容，不要添加任何格式标记、引号或其他装饰性文字。`;
+
+      const messagesForApi = [{
+        role: 'user',
+        content: prompt
+      }];
+      
+      let isGemini = proxyUrl.includes('generativelanguage');
+      let geminiConfig = toGeminiRequestData(model, apiKey, prompt, messagesForApi);
+      
+      const response = isGemini ?
+        await fetch(geminiConfig.url, geminiConfig.data) :
+        await fetch(`${proxyUrl}/v1/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: [{
+              role: 'system',
+              content: chat.settings.aiPersona
+            }, ...messagesForApi],
+            temperature: state.globalSettings.apiTemperature || 0.8,
+            max_tokens: 1000
+          })
+        });
+
+      if (!response.ok) {
+        console.warn('生成AI回复失败:', response.statusText);
+        return;
+      }
+
+      const data = await response.json();
+      let aiReply = getGeminiResponseText(data).trim();
+      
+      // 清理可能的markdown标记和引号
+      aiReply = aiReply.replace(/^```[\w]*\n?/i, '').replace(/\n?```$/i, '');
+      aiReply = aiReply.replace(/^["']|["']$/g, '');
+      aiReply = aiReply.trim();
+      
+      if (!aiReply) {
+        console.warn('AI回复为空，跳过保存');
+        return;
+      }
+      
+      // 保存回复到日记对象
+      diary.aiReply = aiReply;
+      diary.aiReplyTimestamp = Date.now();
+      
+      await db.chats.put(chat);
+      
+      // 更新 activeDiaryForViewing 以反映最新的数据
+      if (activeDiaryForViewing && activeDiaryForViewing.id === diaryId) {
+        activeDiaryForViewing.aiReply = diary.aiReply;
+        activeDiaryForViewing.aiReplyTimestamp = diary.aiReplyTimestamp;
+        
+        // 重新渲染以显示AI回复
+        const formattedContent = parseMarkdown(diary.content)
+          .split('\n')
+          .map(p => `<p>${p || '&nbsp;'}</p>`)
+          .join('');
+        await renderDiaryContentWithAnnotations(diaryId, chatId, formattedContent, diary.content);
+      }
+      
+      console.log(`AI回复已保存到日记 ${diaryId}`);
+    } catch (error) {
+      console.error('生成AI回复失败:', error);
+      // 不显示错误提示，避免干扰用户体验
+    }
+  }
+  
+  // AI回复用户的标注
+  async function generateAIReplyToDiaryAnnotations(newDiaryId, chatId, newDiaryContent) {
+    try {
+      // 获取该角色所有日记的标注
+      const allAnnotations = await db.diaryAnnotations
+        .where('chatId').equals(chatId)
+        .toArray();
+      
+      if (allAnnotations.length === 0) return;
+      
+      // 找到最近一篇有标注的日记（排除刚生成的这篇）
+      const sortedAnnotations = allAnnotations
+        .filter(ann => ann.diaryId !== newDiaryId)
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      
+      if (sortedAnnotations.length === 0) return;
+      
+      const latestAnnotation = sortedAnnotations[0];
+      const latestDiaryId = latestAnnotation.diaryId;
+      
+      // 获取该日记的所有标注
+      const diaryAnnotations = allAnnotations.filter(ann => ann.diaryId === latestDiaryId);
+      const userAnnotations = diaryAnnotations.filter(ann => ann.comment && ann.comment.trim());
+      
+      if (userAnnotations.length === 0) return;
+      
+      // 找到对应的日记内容
+      const chat = state.chats[chatId];
+      if (!chat || !chat.diary) return;
+      
+      const diary = chat.diary.find(d => d.id === latestDiaryId);
+      if (!diary) return;
+      
+      const {
+        proxyUrl,
+        apiKey,
+        model
+      } = state.apiConfig;
+      if (!proxyUrl || !apiKey || !model) return;
+      
+      const userDisplayNameForAI = (state.qzoneSettings.nickname === '{{user}}' || !state.qzoneSettings.nickname) ? '用户' : state.qzoneSettings.nickname;
+      
+      const prompt = `${chat.settings.aiPersona}
+
+这是我写的一篇日记的内容：
+${diary.content}
+
+有人对我日记中的以下内容进行了标注：
+${userAnnotations.map(ann => `  - "${ann.text}"
+    评论：${ann.comment}`).join('\n')}
+
+请你作为角色，针对这些标注评论，在【新生成的日记】中自然地回应（可以是感谢、解释、共鸣或进一步的思考，但要符合角色性格，20-40字左右）。
+
+注意：
+1. 你不需要在日记中明确提到"标注"或"评论"这些词
+2. 要自然地融入你的思考和情感中
+3. 回应要符合你的角色性格
+4. 可以在日记的任意位置自然地回应，不需要单独成段
+
+**输出格式要求（非常重要）**：
+请严格按照以下JSON格式输出，确保：
+1. 只输出JSON对象，不要添加任何markdown标记、代码块标记、解释文字或其他内容
+2. text字段的值必须是新日记中的原文片段（用于定位），长度不超过10字（非常重要，越短越好，防止截断）
+3. comment字段的值是你的回应，长度20-40字
+4. 如果text或comment中包含引号，必须使用反斜杠转义：\\"
+5. 如果包含换行符，必须使用 \\n 转义
+6. 确保JSON完整且格式正确，不要被截断
+
+格式示例：
+{"replies":[{"text":"今天天气真好","comment":"是啊，我也觉得心情特别舒畅"}]}
+
+现在请输出JSON：`;
+
+      const messagesForApi = [{
+        role: 'user',
+        content: prompt
+      }];
+      
+      let isGemini = proxyUrl.includes('generativelanguage');
+      let geminiConfig = toGeminiRequestData(model, apiKey, prompt, messagesForApi);
+      
+      const response = isGemini ?
+        await fetch(geminiConfig.url, geminiConfig.data) :
+        await fetch(`${proxyUrl}/v1/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: [{
+              role: 'system',
+              content: chat.settings.aiPersona
+            }, ...messagesForApi],
+            temperature: state.globalSettings.apiTemperature || 0.8,
+            max_tokens: 2000
+          })
+        });
+
+      if (!response.ok) {
+        console.warn('生成AI回复标注失败:', response.statusText);
+        return;
+      }
+
+      const data = await response.json();
+      const responseContent = getGeminiResponseText(data).trim();
+      
+      let replies = [];
+      try {
+        let jsonStr = responseContent;
+        
+        // 移除 markdown 代码块标记
+        if (jsonStr.startsWith('```json')) {
+          jsonStr = jsonStr.replace(/^```json\s*/i, '').replace(/\s*```\s*$/, '');
+        } else if (jsonStr.startsWith('```')) {
+          jsonStr = jsonStr.replace(/^```\s*/, '').replace(/\s*```\s*$/, '');
+        }
+        
+        // 尝试提取 JSON 对象
+        const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          jsonStr = jsonMatch[0];
+        }
+        
+        // 清理可能的换行和多余空格
+        jsonStr = jsonStr.trim();
+        
+        // 尝试修复不完整的JSON字符串
+        jsonStr = fixIncompleteJSONString(jsonStr);
+        
+        // 尝试解析 JSON
+        const parsed = JSON.parse(jsonStr);
+        replies = parsed.replies || [];
+        
+        // 验证 replies 格式
+        if (!Array.isArray(replies)) {
+          console.warn('AI返回的replies不是数组格式');
+          replies = [];
+        }
+      } catch (e) {
+        console.warn('解析AI回复标注JSON失败:', e);
+        console.warn('原始返回内容:', responseContent);
+
+        // 尝试修复截断的JSON
+        if (e instanceof SyntaxError) {
+            const closings = ['"}', '"]}', ']}', '}'];
+            for (const closing of closings) {
+                try {
+                    let tempStr = responseContent.trim();
+                    if (tempStr.startsWith('```json')) {
+                        tempStr = tempStr.replace(/^```json\s*/i, '').replace(/\s*```\s*$/, '');
+                    } else if (tempStr.startsWith('```')) {
+                        tempStr = tempStr.replace(/^```\s*/, '').replace(/\s*```\s*$/, '');
+                    }
+                    const jsonStart = tempStr.indexOf('{');
+                    if (jsonStart !== -1) {
+                         tempStr = tempStr.substring(jsonStart);
+                    }
+                    const fixedStr = tempStr + closing;
+                    const parsed = JSON.parse(fixedStr);
+                    if (parsed && Array.isArray(parsed.replies)) {
+                        replies = parsed.replies;
+                        console.log('通过追加闭合符号修复JSON成功:', closing);
+                        break;
+                    }
+                } catch (err) {}
+            }
+        }
+        
+        // 如果JSON解析失败，尝试从文本中提取可能的回复
+        if (replies.length === 0) {
+        try {
+          // 使用更宽松的正则表达式提取 text 和 comment
+          // 处理转义字符和换行
+          const replyPattern = /"text"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"comment"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+          let match;
+          while ((match = replyPattern.exec(responseContent)) !== null) {
+            try {
+              // 手动解析转义字符
+              const text = match[1]
+                .replace(/\\"/g, '"')
+                .replace(/\\n/g, '\n')
+                .replace(/\\t/g, '\t')
+                .replace(/\\\\/g, '\\');
+              const comment = match[3]
+                .replace(/\\"/g, '"')
+                .replace(/\\n/g, '\n')
+                .replace(/\\t/g, '\t')
+                .replace(/\\\\/g, '\\');
+              
+              if (text && comment) {
+                replies.push({ text, comment });
+              }
+            } catch (parseError) {
+              console.warn('解析单个回复失败:', parseError);
+            }
+          }
+          
+          if (replies.length > 0) {
+            console.log('从文本中提取到回复:', replies);
+          } else {
+            // 如果正则提取失败，尝试从不完整的JSON中提取
+            // 尝试提取text和comment字段，即使JSON不完整
+            const textMatch = responseContent.match(/"text"\s*:\s*"([^"]*)/);
+            const commentMatch = responseContent.match(/"comment"\s*:\s*"([^"]*)/);
+            
+            if (textMatch && commentMatch) {
+              // 提取text和comment的值（可能不完整）
+              let text = textMatch[1];
+              let comment = commentMatch[1];
+              
+              // 如果text或comment被截断，尝试从原始内容中提取更多
+              // 找到text字段后的内容
+              const textStart = responseContent.indexOf('"text"');
+              const textValueStart = responseContent.indexOf('"', textStart + 6) + 1;
+              const commentStart = responseContent.indexOf('"comment"');
+              const commentValueStart = responseContent.indexOf('"', commentStart + 9) + 1;
+              
+              // 尝试提取完整的值（直到下一个引号或字符串结束）
+              if (textValueStart > 0 && commentValueStart > textValueStart) {
+                // text值在comment之前
+                const textEnd = responseContent.indexOf('"', textValueStart);
+                if (textEnd > textValueStart) {
+                  text = responseContent.substring(textValueStart, textEnd);
+                } else {
+                  // text值被截断，使用到comment开始之前的内容
+                  text = responseContent.substring(textValueStart, commentStart).replace(/",?\s*$/, '');
+                }
+                
+                // comment值
+                const commentEnd = responseContent.indexOf('"', commentValueStart);
+                if (commentEnd > commentValueStart) {
+                  comment = responseContent.substring(commentValueStart, commentEnd);
+                } else {
+                  // comment值被截断，使用剩余内容
+                  comment = responseContent.substring(commentValueStart).replace(/",?\s*$/, '');
+                }
+              }
+              
+              if (text && comment) {
+                replies = [{
+                  text: text.trim(),
+                  comment: comment.trim()
+                }];
+                console.log('从不完整JSON中提取到回复:', replies);
+              }
+            }
+            
+            // 如果还是失败，尝试更简单的方法（只匹配第一个完整匹配）
+            if (replies.length === 0) {
+              const simpleMatch = responseContent.match(/"text"\s*:\s*"([^"]+)"\s*,\s*"comment"\s*:\s*"([^"]+)"/);
+              if (simpleMatch && simpleMatch[1] && simpleMatch[2]) {
+                replies = [{
+                  text: simpleMatch[1],
+                  comment: simpleMatch[2]
+                }];
+                console.log('使用简单方法提取到回复:', replies);
+              }
+            }
+          }
+        } catch (extractError) {
+          console.warn('无法从文本中提取回复:', extractError);
+        }
+        }
+        
+        // 如果仍然无法解析，直接返回（不显示错误，避免干扰用户）
+        if (replies.length === 0) {
+          console.warn('无法解析AI回复，跳过生成回复标注');
+          return;
+        }
+      }
+      
+      if (replies.length > 0) {
+        // 保存AI回复标注
+        for (const reply of replies) {
+          if (reply.text && reply.comment) {
+            const annotation = {
+              diaryId: newDiaryId,
+              chatId: chatId,
+              text: reply.text,
+              comment: reply.comment,
+              createdAt: new Date().toISOString(),
+              isAI: true // 标记为AI生成的回复
+            };
+            
+            await db.diaryAnnotations.add(annotation);
+          }
+        }
+        
+        // 如果当前正在查看这篇新日记，重新渲染以显示AI回复的标注
+        if (activeDiaryForViewing && activeDiaryForViewing.id === newDiaryId) {
+          const formattedContent = parseMarkdown(newDiaryContent)
+            .split('\n')
+            .map(p => `<p>${p || '&nbsp;'}</p>`)
+            .join('');
+          await renderDiaryContentWithAnnotations(newDiaryId, chatId, formattedContent, newDiaryContent);
+        }
+        
+        console.log(`AI回复了用户的标注: ${replies.length}条`);
+      }
+    } catch (error) {
+      console.error('生成AI回复标注失败:', error);
+      // 不显示错误提示，避免干扰用户体验
     }
   }
 
@@ -55583,8 +56985,9 @@ ${recentHistoryWithUser}
         .split('\n')
         .map(p => `<p>${p || '&nbsp;'}</p>`)
         .join('');
-      contentEl.innerHTML = formattedContent;
-
+      
+      // 渲染带标注的内容
+      await renderDiaryContentWithAnnotations(diaryId, activeCharacterId, formattedContent, entry.content);
 
       const existingFavorite = await db.favorites.where({
         type: 'char_diary',
@@ -55593,10 +56996,364 @@ ${recentHistoryWithUser}
       favBtn.classList.toggle('active', !!existingFavorite);
 
       switchToCharScreen('char-diary-detail-screen');
+      
+      // 初始化标注功能
+      initDiaryAnnotation();
     }
   }
 
  
+  // ========== 日记标注功能 ==========
+  let diaryAnnotationTimer = null;
+  
+  // 初始化标注功能
+  function initDiaryAnnotation() {
+    const detailContent = document.getElementById('char-diary-detail-content');
+    if (!detailContent) return;
+    
+    // 清除之前的计时器
+    if (diaryAnnotationTimer) {
+      clearTimeout(diaryAnnotationTimer);
+    }
+    
+    // 监听选区变化
+    document.addEventListener('selectionchange', function handleSelectionChange() {
+      if (diaryAnnotationTimer) {
+        clearTimeout(diaryAnnotationTimer);
+      }
+      
+      diaryAnnotationTimer = setTimeout(() => {
+        const selection = window.getSelection();
+        const text = selection.toString().trim();
+        
+        if (text.length > 0 && detailContent && selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          if (detailContent.contains(range.commonAncestorContainer) || 
+              detailContent.contains(selection.anchorNode)) {
+            showDiaryAnnotationPopup(range, text);
+          }
+        }
+      }, 300);
+    });
+    
+    // 点击外部关闭弹窗
+    document.addEventListener('mousedown', function handleMouseDown(e) {
+      const popup = document.getElementById('diaryAnnotationPopup');
+      if (popup && !popup.contains(e.target) && 
+          !e.target.closest('.annotation-highlight') &&
+          !(detailContent && detailContent.contains(e.target))) {
+        closeDiaryAnnotationPopup();
+      }
+    });
+  }
+  
+  // 显示标注弹窗
+  function showDiaryAnnotationPopup(range, selectedText) {
+    const oldPopup = document.getElementById('diaryAnnotationPopup');
+    if (oldPopup) oldPopup.remove();
+    
+    const popup = document.createElement('div');
+    popup.id = 'diaryAnnotationPopup';
+    popup.className = 'diary-annotation-popup';
+    popup.dataset.selectedText = selectedText;
+    
+    popup.innerHTML = `
+      <div class="annotation-text">已选择：${selectedText.length > 30 ? selectedText.substring(0, 30) + '...' : selectedText}</div>
+      <textarea class="annotation-input" id="diaryAnnotationInput" placeholder="添加标注评论..."></textarea>
+      <div class="annotation-buttons">
+        <button class="annotation-btn annotation-btn-cancel" onclick="closeDiaryAnnotationPopup()">取消</button>
+        <button class="annotation-btn annotation-btn-save" onclick="saveDiaryAnnotation()">保存</button>
+      </div>
+    `;
+    
+    document.body.appendChild(popup);
+    
+    // 定位弹窗
+    const rect = range.getBoundingClientRect();
+    popup.style.left = (rect.left + rect.width / 2 - 150) + 'px';
+    popup.style.top = (rect.bottom + 10) + 'px';
+    
+    // 边界检查
+    const popupRect = popup.getBoundingClientRect();
+    if (popupRect.left < 10) popup.style.left = '10px';
+    if (popupRect.right > window.innerWidth - 10) popup.style.left = (window.innerWidth - popupRect.width - 10) + 'px';
+    
+    if (popupRect.bottom > window.innerHeight - 10) {
+      popup.style.top = (rect.top - popupRect.height - 10) + 'px';
+    }
+    
+    setTimeout(() => {
+      document.getElementById('diaryAnnotationInput')?.focus();
+    }, 100);
+  }
+  
+  // 关闭标注弹窗
+  window.closeDiaryAnnotationPopup = function() {
+    const popup = document.getElementById('diaryAnnotationPopup');
+    if (popup) popup.remove();
+    window.getSelection().removeAllRanges();
+  };
+  
+  // 保存标注
+  window.saveDiaryAnnotation = async function() {
+    const input = document.getElementById('diaryAnnotationInput');
+    const comment = input?.value.trim() || '';
+    const detailContent = document.getElementById('char-diary-detail-content');
+    const diaryId = activeDiaryForViewing?.id;
+    const chatId = activeCharacterId;
+    const popup = document.getElementById('diaryAnnotationPopup');
+    
+    if (!diaryId || !chatId) {
+      closeDiaryAnnotationPopup();
+      return;
+    }
+    
+    let selectedText = popup?.dataset.selectedText;
+    if (!selectedText) {
+      const selection = window.getSelection();
+      if (selection.rangeCount > 0) {
+        selectedText = selection.toString().trim();
+      }
+    }
+    
+    if (!selectedText) {
+      closeDiaryAnnotationPopup();
+      return;
+    }
+    
+    try {
+      const annotation = {
+        diaryId: diaryId,
+        chatId: chatId,
+        text: selectedText,
+        comment: comment,
+        createdAt: new Date().toISOString()
+      };
+      
+      await db.diaryAnnotations.add(annotation);
+      
+      // 重新渲染内容
+      const originalContent = activeDiaryForViewing.content;
+      const formattedContent = parseMarkdown(originalContent)
+        .split('\n')
+        .map(p => `<p>${p || '&nbsp;'}</p>`)
+        .join('');
+      await renderDiaryContentWithAnnotations(diaryId, chatId, formattedContent, originalContent);
+      
+      closeDiaryAnnotationPopup();
+    } catch (error) {
+      console.error('保存标注失败:', error);
+      alert('保存标注失败: ' + error.message);
+    }
+  };
+  
+  // 获取标注数据
+  async function getDiaryAnnotations(diaryId, chatId) {
+    try {
+      const annotations = await db.diaryAnnotations
+        .where('diaryId').equals(diaryId)
+        .filter(ann => ann.chatId === chatId)
+        .toArray();
+      return annotations;
+    } catch (error) {
+      console.error('获取标注失败:', error);
+      return [];
+    }
+  }
+  
+  // 渲染带标注的日记内容
+  async function renderDiaryContentWithAnnotations(diaryId, chatId, formattedContent, originalContent) {
+    const detailContent = document.getElementById('char-diary-detail-content');
+    if (!detailContent) return;
+    
+    detailContent.dataset.diaryId = diaryId;
+    detailContent.dataset.chatId = chatId;
+    detailContent.dataset.originalContent = originalContent;
+    
+    const annotations = await getDiaryAnnotations(diaryId, chatId);
+    
+    if (annotations.length === 0) {
+      detailContent.innerHTML = formattedContent;
+    } else {
+      let html = formattedContent;
+      
+      // 按创建时间排序
+      const sortedAnnotations = [...annotations].sort((a, b) => {
+        return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+      });
+      
+      // 从后往前替换，避免位置偏移
+      for (let i = sortedAnnotations.length - 1; i >= 0; i--) {
+        const ann = sortedAnnotations[i];
+        const escapedText = escapeHtmlForDiary(ann.text);
+        const highlightHtml = `<span class="annotation-highlight" data-annotation-id="${ann.id}" title="${escapeHtmlForDiary(ann.comment || '无评论')}">${escapedText}</span>`;
+        const lastIndex = html.lastIndexOf(escapedText);
+        if (lastIndex !== -1) {
+          html = html.substring(0, lastIndex) + highlightHtml + html.substring(lastIndex + escapedText.length);
+        }
+      }
+      
+      detailContent.innerHTML = html;
+      
+      // 为标注添加点击事件和样式区分
+      detailContent.querySelectorAll('.annotation-highlight').forEach(highlight => {
+        const annId = parseInt(highlight.dataset.annotationId);
+        const annotation = annotations.find(a => a.id === annId);
+        if (annotation && annotation.isAI) {
+          // AI回复的标注使用不同的样式
+          highlight.style.borderLeft = '3px solid #4096ff';
+          highlight.style.paddingLeft = '4px';
+        }
+        
+        highlight.addEventListener('click', function(e) {
+          e.stopPropagation();
+          if (annotation) {
+            showDiaryAnnotationTooltip(e, annotation);
+          }
+        });
+      });
+    }
+    
+    // 显示AI回复（如果存在）
+    const chat = state.chats[chatId];
+    if (chat && chat.diary) {
+      const diary = chat.diary.find(d => d.id === diaryId);
+      if (diary && diary.aiReply) {
+        // 移除旧的AI回复区域（如果存在）
+        const oldReplyArea = detailContent.querySelector('.diary-ai-reply-area');
+        if (oldReplyArea) oldReplyArea.remove();
+        
+        // 创建AI回复区域
+        const replyArea = document.createElement('div');
+        replyArea.className = 'diary-ai-reply-area';
+        replyArea.style.cssText = `
+          margin-top: 40px;
+          padding-top: 30px;
+          border-top: 2px solid #e5e5e7;
+          position: relative;
+        `;
+        
+        const replyHeader = document.createElement('div');
+        replyHeader.style.cssText = `
+          font-size: 13px;
+          color: #666;
+          margin-bottom: 12px;
+          font-weight: 500;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        `;
+        replyHeader.innerHTML = '🤖 AI的回复';
+        
+        const replyContent = document.createElement('div');
+        replyContent.className = 'diary-ai-reply-content';
+        replyContent.style.cssText = `
+          background-color: #f5f5f7;
+          border-radius: 12px;
+          padding: 16px 18px;
+          color: #1d1d1f;
+          line-height: 1.6;
+          font-size: 15px;
+          white-space: pre-wrap;
+          word-wrap: break-word;
+        `;
+        replyContent.textContent = diary.aiReply;
+        
+        replyArea.appendChild(replyHeader);
+        replyArea.appendChild(replyContent);
+        detailContent.appendChild(replyArea);
+      }
+    }
+    
+    // 更新标注列表
+    await updateDiaryAnnotationList(diaryId, chatId);
+  }
+  
+  // 更新标注列表
+  async function updateDiaryAnnotationList(diaryId, chatId) {
+    const annotationList = document.getElementById('diaryAnnotationList');
+    if (!annotationList) return;
+    
+    const annotations = await getDiaryAnnotations(diaryId, chatId);
+    
+    if (annotations.length === 0) {
+      annotationList.style.display = 'none';
+    } else {
+      annotationList.style.display = 'block';
+      annotationList.innerHTML = '';
+      
+      // 只显示用户标注（AI回复现在单独显示在日记正文下方，不在标注列表中显示）
+      const userAnnotations = annotations.filter(ann => !ann.isAI);
+      
+      if (userAnnotations.length > 0) {
+        const userSection = document.createElement('div');
+        userSection.style.marginBottom = '15px';
+        userSection.innerHTML = '<div style="font-size: 13px; color: #666; margin-bottom: 8px; font-weight: 500;">📝 你的标注</div>';
+        annotationList.appendChild(userSection);
+        
+        userAnnotations.forEach(ann => {
+          const item = document.createElement('div');
+          item.className = 'diary-annotation-item';
+          item.innerHTML = `
+            <div class="annotation-quote">"${escapeHtmlForDiary(ann.text)}"</div>
+            <div class="annotation-comment">${escapeHtmlForDiary(ann.comment || '无评论')}</div>
+            <div class="annotation-time">${new Date(ann.createdAt).toLocaleString('zh-CN')}</div>
+            <span class="annotation-delete" onclick="deleteDiaryAnnotation(${ann.id}, ${diaryId}, '${chatId}')">删除</span>
+          `;
+          annotationList.appendChild(item);
+        });
+      }
+    }
+  }
+  
+  // 显示标注提示
+  function showDiaryAnnotationTooltip(event, annotation) {
+    const oldTooltip = document.getElementById('diaryAnnotationTooltip');
+    if (oldTooltip) oldTooltip.remove();
+    
+    const tooltip = document.createElement('div');
+    tooltip.id = 'diaryAnnotationTooltip';
+    tooltip.className = 'diary-annotation-tooltip';
+    tooltip.textContent = annotation.comment || '无评论';
+    
+    document.body.appendChild(tooltip);
+    
+    const rect = event.target.getBoundingClientRect();
+    tooltip.style.left = (rect.left + rect.width / 2 - tooltip.offsetWidth / 2) + 'px';
+    tooltip.style.top = (rect.top - tooltip.offsetHeight - 8) + 'px';
+    
+    setTimeout(() => {
+      tooltip.remove();
+    }, 3000);
+  }
+  
+  // 删除标注
+  window.deleteDiaryAnnotation = async function(annotationId, diaryId, chatId) {
+    if (!confirm('确定要删除这条标注吗？')) return;
+    
+    try {
+      await db.diaryAnnotations.delete(annotationId);
+      
+      // 重新渲染内容
+      const originalContent = activeDiaryForViewing.content;
+      const formattedContent = parseMarkdown(originalContent)
+        .split('\n')
+        .map(p => `<p>${p || '&nbsp;'}</p>`)
+        .join('');
+      await renderDiaryContentWithAnnotations(diaryId, chatId, formattedContent, originalContent);
+    } catch (error) {
+      console.error('删除标注失败:', error);
+      alert('删除标注失败: ' + error.message);
+    }
+  };
+  
+  // HTML转义
+  function escapeHtmlForDiary(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+  
   async function toggleDiaryFavorite() {
     if (!activeDiaryForViewing || !activeCharacterId) return;
 
@@ -58095,9 +59852,31 @@ ${recentHistoryWithUser}
                 <div class="music-item-name">${track.name}</div>
                 <div class="music-item-artist">${track.artist}</div>
             </div>
+            <button class="add-to-playlist-btn" style="padding: 5px 10px; background: var(--accent-color); color: white; border: none; border-radius: 5px; font-size: 12px; cursor: pointer;">
+                加入歌单
+            </button>
         `;
 
-      itemEl.addEventListener('click', () => playCharSong(index, playlist));
+      itemEl.querySelector('.music-item-info').addEventListener('click', () => playCharSong(index, playlist));
+      
+      // 添加到歌单按钮
+      itemEl.querySelector('.add-to-playlist-btn').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        
+        // 先保存到musicLibrary
+        const songId = track.id || `song_${Date.now()}_${index}`;
+        await db.musicLibrary.put({
+          id: songId,
+          name: track.name,
+          artist: track.artist,
+          url: track.src || track.url,  // 修复：角色音乐使用 src 字段
+          cover: track.cover,
+          lrc: track.lrcContent || track.lrc
+        });
+        
+        openAddToPlaylistModal(songId);
+      });
+      
       listEl.appendChild(itemEl);
     });
   }
@@ -58193,6 +59972,431 @@ function closeCharMusicPlayer() {
    
     document.getElementById('char-music-restore-btn').style.display = 'none';
 }
+
+// ==================== 歌单管理功能 ====================
+let currentPlaylistId = null;
+let currentSongForPlaylist = null;
+
+// 打开歌单管理器
+async function openPlaylistManager() {
+    const modal = document.getElementById('playlist-manager-modal');
+    const listContainer = document.getElementById('playlist-list');
+    
+    // 加载所有歌单
+    const playlists = await db.playlists.toArray();
+    
+    listContainer.innerHTML = '';
+    
+    if (playlists.length === 0) {
+        listContainer.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">还没有歌单，点击"创建"按钮创建一个吧</div>';
+    } else {
+        for (const playlist of playlists) {
+            // 获取歌单中的歌曲数量
+            const songCount = await db.playlistSongs.where('playlistId').equals(playlist.id).count();
+            
+            const item = document.createElement('div');
+            item.className = 'list-item';
+            item.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <div class="item-title">${playlist.name}</div>
+                        <div class="item-content">${songCount} 首歌曲</div>
+                    </div>
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="9 18 15 12 9 6"></polyline>
+                    </svg>
+                </div>
+            `;
+            item.onclick = () => openPlaylistDetail(playlist.id);
+            listContainer.appendChild(item);
+        }
+    }
+    
+    modal.classList.add('visible');
+}
+
+// 关闭歌单管理器
+function closePlaylistManager() {
+    document.getElementById('playlist-manager-modal').classList.remove('visible');
+}
+
+// 创建新歌单
+async function createPlaylist() {
+    const name = prompt('请输入歌单名称：');
+    if (!name || !name.trim()) return;
+    
+    try {
+        await db.playlists.add({
+            name: name.trim(),
+            createdAt: Date.now()
+        });
+        
+        await showCustomAlert('成功', '歌单创建成功！');
+        openPlaylistManager(); // 刷新列表
+    } catch (error) {
+        console.error('创建歌单失败:', error);
+        await showCustomAlert('错误', '创建歌单失败：' + error.message);
+    }
+}
+
+// 打开歌单详情
+async function openPlaylistDetail(playlistId) {
+    currentPlaylistId = playlistId;
+    
+    const playlist = await db.playlists.get(playlistId);
+    if (!playlist) {
+        await showCustomAlert('错误', '歌单不存在');
+        return;
+    }
+    
+    const modal = document.getElementById('playlist-detail-modal');
+    document.getElementById('playlist-detail-title').textContent = playlist.name;
+    
+    // 加载歌单中的歌曲
+    const playlistSongs = await db.playlistSongs.where('playlistId').equals(playlistId).toArray();
+    const listContainer = document.getElementById('playlist-song-list');
+    
+    listContainer.innerHTML = '';
+    
+    if (playlistSongs.length === 0) {
+        listContainer.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">歌单为空</div>';
+    } else {
+        for (const ps of playlistSongs) {
+            // 从musicLibrary获取歌曲信息
+            const song = await db.musicLibrary.get(ps.songId);
+            if (!song) continue;
+            
+            const item = document.createElement('div');
+            item.className = 'list-item';
+            item.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="flex: 1;">
+                        <div class="item-title">${song.name || '未知歌曲'}</div>
+                        <div class="item-content">${song.artist || '未知歌手'}</div>
+                    </div>
+                    <button class="form-button-secondary" style="padding: 5px 15px; margin: 0; background: #ffebee; color: #d32f2f; border: none;">移除</button>
+                </div>
+            `;
+            
+            // 点击播放歌曲
+            item.querySelector('.item-title').onclick = async () => {
+                // 添加到一起听的播放列表
+                musicState.playlist.push({
+                    name: song.name,
+                    artist: song.artist,
+                    src: song.url,
+                    cover: song.cover,
+                    lrc: song.lrc,
+                    isLocal: false
+                });
+                
+                await saveGlobalPlaylist();
+                updatePlaylistUI();
+                
+                // 播放这首歌（索引是最后一首）
+                const newIndex = musicState.playlist.length - 1;
+                playSong(newIndex, false);
+                
+                // 关闭歌单详情，打开播放列表
+                document.getElementById('playlist-detail-modal').classList.remove('visible');
+                document.getElementById('music-playlist-panel').classList.add('visible');
+                
+                await showCustomAlert('成功', '已添加到播放列表并开始播放');
+            };
+            
+            // 移除按钮
+            item.querySelector('button').onclick = async (e) => {
+                e.stopPropagation();
+                if (confirm(`确定要从歌单中移除"${song.name}"吗？`)) {
+                    await db.playlistSongs.delete(ps.id);
+                    openPlaylistDetail(playlistId); // 刷新
+                }
+            };
+            
+            listContainer.appendChild(item);
+        }
+    }
+    
+    // 关闭歌单管理器
+    closePlaylistManager();
+    
+    modal.classList.add('visible');
+}
+
+// 关闭歌单详情
+function closePlaylistDetailModal() {
+    document.getElementById('playlist-detail-modal').classList.remove('visible');
+    currentPlaylistId = null;
+}
+
+// 编辑歌单名称
+async function editPlaylistName() {
+    if (!currentPlaylistId) return;
+    
+    const playlist = await db.playlists.get(currentPlaylistId);
+    const newName = prompt('请输入新的歌单名称：', playlist.name);
+    
+    if (!newName || !newName.trim()) return;
+    
+    try {
+        await db.playlists.update(currentPlaylistId, { name: newName.trim() });
+        document.getElementById('playlist-detail-title').textContent = newName.trim();
+        await showCustomAlert('成功', '歌单名称已更新');
+    } catch (error) {
+        console.error('更新歌单名称失败:', error);
+        await showCustomAlert('错误', '更新失败：' + error.message);
+    }
+}
+
+// 删除歌单
+async function deletePlaylist() {
+    if (!currentPlaylistId) return;
+    
+    const playlist = await db.playlists.get(currentPlaylistId);
+    
+    if (!confirm(`确定要删除歌单"${playlist.name}"吗？此操作不可恢复。`)) {
+        return;
+    }
+    
+    try {
+        // 删除歌单中的所有歌曲
+        await db.playlistSongs.where('playlistId').equals(currentPlaylistId).delete();
+        // 删除歌单
+        await db.playlists.delete(currentPlaylistId);
+        
+        await showCustomAlert('成功', '歌单已删除');
+        closePlaylistDetailModal();
+        openPlaylistManager();
+    } catch (error) {
+        console.error('删除歌单失败:', error);
+        await showCustomAlert('错误', '删除失败：' + error.message);
+    }
+}
+
+// 播放歌单
+async function playPlaylist() {
+    if (!currentPlaylistId) return;
+    
+    const playlistSongs = await db.playlistSongs.where('playlistId').equals(currentPlaylistId).toArray();
+    
+    if (playlistSongs.length === 0) {
+        await showCustomAlert('提示', '歌单为空，无法播放');
+        return;
+    }
+    
+    // 将所有歌曲添加到一起听的播放列表
+    let addedCount = 0;
+    
+    for (const ps of playlistSongs) {
+        const song = await db.musicLibrary.get(ps.songId);
+        if (song) {
+            musicState.playlist.push({
+                name: song.name,
+                artist: song.artist,
+                src: song.url,
+                cover: song.cover,
+                lrc: song.lrc,
+                isLocal: false
+            });
+            addedCount++;
+        }
+    }
+    
+    if (addedCount > 0) {
+        await saveGlobalPlaylist();
+        updatePlaylistUI();
+        
+        // 播放第一首新添加的歌
+        const firstNewIndex = musicState.playlist.length - addedCount;
+        playSong(firstNewIndex, false);
+        
+        // 关闭歌单详情，打开播放列表
+        closePlaylistDetailModal();
+        document.getElementById('music-playlist-panel').classList.add('visible');
+        
+        await showCustomAlert('成功', `已将 ${addedCount} 首歌曲添加到播放列表`);
+    }
+}
+
+// 打开"添加到歌单"弹窗（从音乐库调用）
+async function openAddToPlaylistModal(songId) {
+    currentSongForPlaylist = songId;
+    
+    const modal = document.getElementById('add-to-playlist-modal');
+    const listContainer = document.getElementById('add-to-playlist-list');
+    
+    // 加载所有歌单
+    const playlists = await db.playlists.toArray();
+    
+    listContainer.innerHTML = '';
+    
+    if (playlists.length === 0) {
+        listContainer.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">还没有歌单，请先创建一个歌单</div>';
+    } else {
+        for (const playlist of playlists) {
+            // 检查歌曲是否已在歌单中
+            const exists = await db.playlistSongs
+                .where(['playlistId', 'songId'])
+                .equals([playlist.id, songId])
+                .count();
+            
+            const item = document.createElement('div');
+            item.className = 'list-item';
+            item.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div class="item-title">${playlist.name}</div>
+                    <span style="color: ${exists > 0 ? '#4cd964' : '#999'}; font-size: 14px;">
+                        ${exists > 0 ? '✓ 已添加' : '添加'}
+                    </span>
+                </div>
+            `;
+            
+            if (exists === 0) {
+                item.onclick = async () => {
+                    try {
+                        await db.playlistSongs.add({
+                            playlistId: playlist.id,
+                            songId: songId
+                        });
+                        await showCustomAlert('成功', `已添加到歌单"${playlist.name}"`);
+                        closeAddToPlaylistModal();
+                    } catch (error) {
+                        console.error('添加到歌单失败:', error);
+                        await showCustomAlert('错误', '添加失败：' + error.message);
+                    }
+                };
+            }
+            
+            listContainer.appendChild(item);
+        }
+    }
+    
+    modal.classList.add('visible');
+}
+
+// 关闭"添加到歌单"弹窗
+function closeAddToPlaylistModal() {
+    document.getElementById('add-to-playlist-modal').classList.remove('visible');
+    currentSongForPlaylist = null;
+}
+
+// 导出歌单
+async function exportPlaylists() {
+    try {
+        const playlists = await db.playlists.toArray();
+        
+        if (playlists.length === 0) {
+            await showCustomAlert('提示', '没有可导出的歌单');
+            return;
+        }
+        
+        // 构建导出数据
+        const exportData = [];
+        
+        for (const playlist of playlists) {
+            const playlistSongs = await db.playlistSongs.where('playlistId').equals(playlist.id).toArray();
+            const songs = [];
+            
+            for (const ps of playlistSongs) {
+                const song = await db.musicLibrary.get(ps.songId);
+                if (song) {
+                    songs.push({
+                        id: song.id,
+                        name: song.name,
+                        artist: song.artist,
+                        url: song.url,
+                        cover: song.cover,
+                        lrc: song.lrc
+                    });
+                }
+            }
+            
+            exportData.push({
+                name: playlist.name,
+                createdAt: playlist.createdAt,
+                songs: songs
+            });
+        }
+        
+        // 下载JSON文件
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `歌单导出_${new Date().getTime()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        
+        await showCustomAlert('成功', '歌单已导出');
+    } catch (error) {
+        console.error('导出歌单失败:', error);
+        await showCustomAlert('错误', '导出失败：' + error.message);
+    }
+}
+
+// 导入歌单
+async function importPlaylists(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    try {
+        const text = await file.text();
+        const importData = JSON.parse(text);
+        
+        if (!Array.isArray(importData)) {
+            throw new Error('文件格式不正确');
+        }
+        
+        let successCount = 0;
+        
+        for (const playlistData of importData) {
+            // 创建歌单
+            const playlistId = await db.playlists.add({
+                name: playlistData.name + ' (导入)',
+                createdAt: Date.now()
+            });
+            
+            // 添加歌曲
+            if (playlistData.songs && Array.isArray(playlistData.songs)) {
+                for (const song of playlistData.songs) {
+                    // 检查歌曲是否已存在
+                    let existingSong = await db.musicLibrary.get(song.id);
+                    
+                    if (!existingSong) {
+                        // 添加到音乐库
+                        await db.musicLibrary.put({
+                            id: song.id,
+                            name: song.name,
+                            artist: song.artist,
+                            url: song.url,
+                            cover: song.cover,
+                            lrc: song.lrc
+                        });
+                    }
+                    
+                    // 添加到歌单
+                    await db.playlistSongs.add({
+                        playlistId: playlistId,
+                        songId: song.id
+                    });
+                }
+            }
+            
+            successCount++;
+        }
+        
+        await showCustomAlert('成功', `成功导入 ${successCount} 个歌单`);
+        openPlaylistManager(); // 刷新列表
+    } catch (error) {
+        console.error('导入歌单失败:', error);
+        await showCustomAlert('错误', '导入失败：' + error.message);
+    }
+    
+    event.target.value = ''; // 清空input
+}
+
+// 将openAddToPlaylistModal函数暴露为全局函数，以便从音乐库调用
+window.openAddToPlaylistModal = openAddToPlaylistModal;
 
 
   function updateCharMusicProgress() {
@@ -71637,24 +73841,8 @@ if (enableNotifyBtn) {
                 enableNotifyBtn.style.backgroundColor = "#4cd964";
                 enableNotifyBtn.style.color = "white";
                 
-                // 立即发一条试试（通过Service Worker）
-                try {
-                    if ('serviceWorker' in navigator) {
-                        const reg = await navigator.serviceWorker.ready;
-                        if (reg.active) {
-                            reg.active.postMessage({
-                                type: 'SHOW_NOTIFICATION',
-                                data: {
-                                    title: "EPhone",
-                                    body: "系统通知授权成功！",
-                                    tag: 'permission-granted'
-                                }
-                            });
-                        }
-                    }
-                } catch (error) {
-                    console.error('发送测试通知失败:', error);
-                }
+                // 立即发一条试试
+                window.showCompatibleNotification("EPhone", { body: "系统通知授权成功！" });
             } else {
                 alert("权限被拒绝。请在手机系统设置中允许本应用发送通知。");
             }
@@ -71995,33 +74183,26 @@ if (testSystemNotifyBtn) {
             }
         }
         
-        // 立即发送前台测试通知（通过Service Worker）
+        // 立即发送前台测试通知
         try {
-            // 检查权限
-            let permission = Notification.permission;
-            if (permission === 'default') {
-                permission = await Notification.requestPermission();
-            }
-            
-            if (permission === 'granted' && 'serviceWorker' in navigator) {
-                const reg = await navigator.serviceWorker.ready;
-                if (reg.active) {
-                    reg.active.postMessage({
-                        type: 'SHOW_NOTIFICATION',
-                        data: {
-                            title: '前台通知测试',
-                            body: '这是一条前台测试通知。如果您看到这条消息，说明前台通知功能正常工作！',
-                            tag: 'test-notification',
-                            requireInteraction: false
-                        }
-                    });
-                    console.log('✅ 前台测试通知已发送');
-                } else {
-                    throw new Error('Service Worker 未激活');
+            window.showCompatibleNotification('前台通知测试', {
+                body: '这是一条前台测试通知。如果您看到这条消息，说明前台通知功能正常工作！',
+                tag: 'test-notification',
+                requireInteraction: false,
+                silent: false
+            }).then(notification => {
+                if (notification) {
+                    if (!notification.isServiceWorker) {
+                        notification.onclick = () => {
+                            window.focus();
+                            notification.close();
+                        };
+                    }
+                    setTimeout(() => notification.close(), 5000);
                 }
-            } else {
-                throw new Error('通知权限未授予或浏览器不支持Service Worker');
-            }
+            });
+            
+            console.log('✅ 前台测试通知已发送');
         } catch (error) {
             console.error('❌ 发送前台测试通知失败:', error);
             alert('发送测试通知失败：' + error.message);
@@ -72054,39 +74235,41 @@ if (testSystemNotifyBtn) {
                 });
                 
                 try {
-                    // 检查权限
-                    let permission = Notification.permission;
-                    if (permission === 'default') {
-                        permission = await Notification.requestPermission();
-                    }
-                    
-                    if (permission === 'granted' && 'serviceWorker' in navigator) {
-                        const reg = await navigator.serviceWorker.ready;
-                        if (reg.active) {
-                            reg.active.postMessage({
-                                type: 'SHOW_NOTIFICATION',
-                                data: {
-                                    title: '后台通知测试 🔔',
-                                    body: '如果你在锁屏/其他应用看到这条通知，说明后台通知功能完全正常！🎉',
-                                    tag: 'background-test',
-                                    icon: 'https://s3plus.meituan.net/opapisdk/op_ticket_885190757_1758510900942_qdqqd_djw0z2.jpeg',
-                                    badge: 'https://s3plus.meituan.net/opapisdk/op_ticket_885190757_1758510900942_qdqqd_djw0z2.jpeg',
-                                    requireInteraction: false,
-                                    vibrate: [200, 100, 200]
-                                }
-                            });
-                            console.log('✅ 后台测试通知已发送（通过Service Worker）');
-                            console.log('⚠️ 如果10秒内没收到通知，可能原因：');
-                            console.log('  1. 页面还在前台（请确保已切换到其他应用）');
-                            console.log('  2. iOS需要将网页添加到主屏幕');
-                            console.log('  3. 系统勿扰模式已开启');
-                            console.log('  4. 浏览器后台被系统冻结');
-                        } else {
-                            throw new Error('Service Worker 未激活');
+                    window.showCompatibleNotification('后台通知测试 🔔', {
+                        body: '如果你在锁屏/其他应用看到这条通知，说明后台通知功能完全正常！🎉',
+                        tag: 'background-test',
+                        icon: 'https://s3plus.meituan.net/opapisdk/op_ticket_885190757_1758510900942_qdqqd_djw0z2.jpeg',
+                        badge: 'https://s3plus.meituan.net/opapisdk/op_ticket_885190757_1758510900942_qdqqd_djw0z2.jpeg',
+                        requireInteraction: false,
+                        silent: false,
+                        vibrate: [200, 100, 200]
+                    }).then(notification => {
+                        if (notification) {
+                            if (!notification.isServiceWorker) {
+                                notification.onclick = function() {
+                                    console.log('✅ 用户点击了测试通知');
+                                    window.focus();
+                                    notification.close();
+                                };
+                                
+                                notification.onshow = function() {
+                                    console.log('✅ 通知已显示（onshow触发）');
+                                };
+                                
+                                notification.onerror = function(e) {
+                                    console.error('❌ 通知显示出错（onerror触发）:', e);
+                                };
+                            }
+                            
+                            setTimeout(() => notification.close(), 10000);
+                            console.log('✅ 后台测试通知已发送（API调用成功）');
                         }
-                    } else {
-                        throw new Error('通知权限未授予或浏览器不支持Service Worker');
-                    }
+                    });
+                    console.log('⚠️ 如果10秒内没收到通知，可能原因：');
+                    console.log('  1. 页面还在前台（请确保已切换到其他应用）');
+                    console.log('  2. iOS需要将网页添加到主屏幕');
+                    console.log('  3. 系统勿扰模式已开启');
+                    console.log('  4. 浏览器后台被系统冻结');
                 } catch (error) {
                     console.error('❌ 发送后台测试通知失败:', error);
                     console.error('错误详情:', {
@@ -73375,6 +75558,7 @@ ${recentHistoryWithUser}
     document.getElementById('manage-playlist-btn').addEventListener('click', togglePlaylistManagementMode);
     document.getElementById('select-all-playlist-checkbox').addEventListener('change', handleSelectAllPlaylistItems);
     document.getElementById('upload-selected-to-catbox-btn').addEventListener('click', executeBatchUploadToCatbox);
+    document.getElementById('batch-add-to-playlist-btn').addEventListener('click', executeBatchAddToPlaylist);
     document.getElementById('add-song-url-btn').addEventListener('click', addSongFromURL);
     document.getElementById('add-song-local-btn').addEventListener('click', () => document.getElementById('local-song-upload-input').click());
     document.getElementById('local-song-upload-input').addEventListener('change', addSongFromLocal);
@@ -73478,6 +75662,11 @@ ${recentHistoryWithUser}
         chat.history.push(msg);
         await db.chats.put(chat);
         renderChatList();
+        
+        // Add pet experience
+        if (window.addPetExperience) {
+            window.addPetExperience(10);
+        }
 
       })();
 
@@ -73489,6 +75678,131 @@ ${recentHistoryWithUser}
       document.body.classList.remove('chat-actions-expanded');
     });
     document.getElementById('wait-reply-btn').addEventListener('click', triggerAiResponse);
+
+    // 语音录制和识别功能
+    const voiceBtn = document.getElementById('voice-input-btn');
+    if (voiceBtn) {
+        let recognition = null;
+        let isRecording = false;
+        let recognizedText = '';
+
+        // 检查浏览器是否支持语音识别
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.continuous = true; // 持续识别
+            recognition.interimResults = true; // 返回中间结果
+            recognition.lang = 'zh-CN'; // 中文识别
+
+            recognition.onstart = () => {
+                isRecording = true;
+                recognizedText = '';
+                voiceBtn.style.color = '#ff3b30';
+                const svg = voiceBtn.querySelector('svg');
+                if (svg) svg.style.color = '#ff3b30';
+            };
+
+            recognition.onresult = (event) => {
+                // 收集所有识别结果
+                let fullTranscript = '';
+                
+                for (let i = 0; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    fullTranscript += transcript + ' ';
+                }
+                
+                recognizedText = fullTranscript.trim();
+            };
+
+            recognition.onerror = (event) => {
+                console.error('语音识别错误:', event.error);
+                isRecording = false;
+                voiceBtn.style.color = '';
+                const svg = voiceBtn.querySelector('svg');
+                if (svg) svg.style.color = 'var(--text-color)';
+                
+                if (event.error === 'not-allowed') {
+                    alert('请允许麦克风权限以使用语音输入。');
+                } else if (event.error === 'no-speech') {
+                    // 没有说话，静默处理
+                }
+            };
+
+            recognition.onend = async () => {
+                isRecording = false;
+                voiceBtn.style.color = '';
+                const svg = voiceBtn.querySelector('svg');
+                if (svg) svg.style.color = 'var(--text-color)';
+
+                // 如果有识别结果，发送语音样式气泡（但内容是文字）
+                if (recognizedText.trim() && state.activeChatId) {
+                    const chat = state.chats[state.activeChatId];
+                    
+                    if (!chat) {
+                        recognizedText = '';
+                        return;
+                    }
+
+                    const content = recognizedText.trim();
+                    
+                    // 启动后台保活系统
+                    startBackgroundOnce();
+                    playSilentAudio();
+
+                    // 发送语音消息类型，但内容是识别出的文字
+                    const msg = {
+                        role: 'user',
+                        type: 'voice_message',
+                        content: content,
+                        timestamp: Date.now()
+                    };
+
+                    // 如果有引用上下文
+                    if (currentReplyContext) {
+                        msg.quote = currentReplyContext;
+                    }
+
+                    appendMessage(msg, chat);
+
+                    (async () => {
+                        chat.history.push(msg);
+                        await db.chats.put(chat);
+                        renderChatList();
+                        
+                        // Add pet experience
+                        if (window.addPetExperience) {
+                            window.addPetExperience(10);
+                        }
+                    })();
+
+                    const chatInput = document.getElementById('chat-input');
+                    chatInput.value = '';
+                    chatInput.style.height = 'auto';
+                    chatInput.focus();
+                    cancelReplyMode();
+                    document.body.classList.remove('chat-actions-expanded');
+                }
+                
+                recognizedText = '';
+            };
+
+            voiceBtn.addEventListener('click', () => {
+                if (isRecording) {
+                    recognition.stop();
+                } else {
+                    if (!state.activeChatId) {
+                        alert('请先选择一个聊天');
+                        return;
+                    }
+                    recognition.start();
+                }
+            });
+        } else {
+            // 不支持语音识别，隐藏按钮
+            voiceBtn.style.display = 'none';
+        }
+    }
+
     chatInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -73608,6 +75922,14 @@ ${recentHistoryWithUser}
 
 
     document.getElementById('save-api-settings-btn').addEventListener('click', async () => {
+      const currentProxyUrl = document.getElementById('proxy-url').value.trim();
+      const currentSecondaryProxyUrl = document.getElementById('secondary-proxy-url').value.trim();
+      const blacklistedSites = ['https://www.api520.pro/v1', 'https://www.api521.pro/v1'];
+      
+      if (blacklistedSites.includes(currentProxyUrl) || blacklistedSites.includes(currentSecondaryProxyUrl)) {
+        alert('该站点已被拉黑，请更换 API 地址。');
+        return;
+      }
 
       state.apiConfig.proxyUrl = document.getElementById('proxy-url').value.trim();
       state.apiConfig.apiKey = document.getElementById('api-key').value.trim();
@@ -73733,6 +76055,12 @@ ${recentHistoryWithUser}
       const url = document.getElementById(urlInputId).value.trim();
       const key = document.getElementById(keyInputId).value.trim();
       if (!url || !key) return alert('请先填写对应的反代地址和密钥');
+
+      const blacklistedSites = ['https://www.api520.pro/v1', 'https://www.api521.pro/v1'];
+      if (blacklistedSites.includes(url)) {
+        alert('该站点已被拉黑，无法获取模型。');
+        return;
+      }
 
       try {
         let isGemini = url === GEMINI_API_URL;
@@ -73968,26 +76296,23 @@ ${recentHistoryWithUser}
         const chat = state.chats[state.activeChatId];
         if (!chat) return;
 
-
+        // 切换显示/隐藏文字转录
         toggleVoiceTranscript(voiceBody);
-
 
         const bubble = voiceBody.closest('.message-bubble');
         const transcriptEl = bubble ? bubble.querySelector('.voice-transcript') : null;
 
-
+        // 如果是AI的语音消息且显示了文字，尝试播放TTS
         if (voiceBody.dataset.voiceId && transcriptEl && transcriptEl.style.display === 'block') {
-
 
           if (chat.isGroup) {
             console.log("这是一条群聊语音消息，已禁止发起TTS请求。");
             return;
           }
           if (chat.settings.enableTts === false) {
-            console.log(`“${chat.name}”的TTS功能已关闭，已禁止发起TTS请求。`);
+            console.log(`"${chat.name}"的TTS功能已关闭，已禁止发起TTS请求。`);
             return;
           }
-
 
           playTtsAudio(voiceBody);
         }
@@ -77152,6 +79477,29 @@ if (isGroup) {
     document.getElementById('playlist-body').addEventListener('click', async (e) => {
       const target = e.target;
 
+      // 处理"加入我的歌单"按钮
+      const addToPlaylistBtn = target.closest('.add-to-my-playlist-btn');
+      if (addToPlaylistBtn) {
+        const index = parseInt(addToPlaylistBtn.dataset.index);
+        if (!isNaN(index)) {
+          const track = musicState.playlist[index];
+          
+          // 先保存到musicLibrary
+          const songId = track.id || `song_${Date.now()}_${index}`;
+          await db.musicLibrary.put({
+            id: songId,
+            name: track.name,
+            artist: track.artist,
+            url: track.src,  // 修复：使用 track.src 而不是 track.url
+            cover: track.cover,
+            lrc: track.lrc
+          });
+          
+          // 打开添加到歌单弹窗
+          openAddToPlaylistModal(songId);
+        }
+        return;
+      }
 
       const albumArtBtn = target.closest('.album-art-btn');
       if (albumArtBtn) {
@@ -78325,6 +80673,29 @@ if (isGroup) {
     document.getElementById('regenerate-char-usage-btn').addEventListener('click', handleGenerateAppUsage);
     document.getElementById('regenerate-char-music-btn').addEventListener('click', handleGenerateSimulatedMusic);
     document.getElementById('close-char-music-player-btn').addEventListener('click', closeCharMusicPlayer);
+    
+    // 歌单管理功能
+    if (document.getElementById('char-music-playlist-btn')) {
+      document.getElementById('char-music-playlist-btn').addEventListener('click', openPlaylistManager);
+    }
+    if (document.getElementById('open-playlist-manager-btn')) {
+      document.getElementById('open-playlist-manager-btn').addEventListener('click', openPlaylistManager);
+    }
+    document.getElementById('open-my-playlists-btn').addEventListener('click', openPlaylistManager);
+    document.getElementById('close-playlist-manager-btn').addEventListener('click', closePlaylistManager);
+    document.getElementById('create-playlist-btn').addEventListener('click', createPlaylist);
+    document.getElementById('export-playlist-btn').addEventListener('click', exportPlaylists);
+    document.getElementById('import-playlist-btn').addEventListener('click', () => document.getElementById('import-playlist-input').click());
+    document.getElementById('import-playlist-input').addEventListener('change', importPlaylists);
+    document.getElementById('cancel-add-to-playlist-btn').addEventListener('click', closeAddToPlaylistModal);
+    document.getElementById('close-playlist-detail-btn').addEventListener('click', () => {
+      closePlaylistDetailModal();
+      openPlaylistManager();
+    });
+    document.getElementById('play-playlist-btn').addEventListener('click', playPlaylist);
+    document.getElementById('playlist-edit-btn').addEventListener('click', editPlaylistName);
+    document.getElementById('playlist-delete-btn').addEventListener('click', deletePlaylist);
+    
     document.getElementById('regenerate-douban-btn').addEventListener('click', handleGenerateDoubanPosts);
     document.getElementById('regenerate-douban-btn').addEventListener('click', handleGenerateDoubanPosts);
     document.getElementById('douban-detail-back-btn').addEventListener('click', () => showScreen('douban-screen'));
@@ -79463,6 +81834,100 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+
+  // 群头衔功能
+  document.getElementById('add-group-title-btn')?.addEventListener('click', () => {
+    const chat = state.chats[state.activeChatId];
+    if (!chat || !chat.isGroup) return;
+    
+    const modal = document.getElementById('group-title-modal');
+    const memberSelect = document.getElementById('group-title-member-select');
+    const titleInput = document.getElementById('group-title-input');
+    
+    // 清空并填充成员列表
+    memberSelect.innerHTML = '<option value="">-- 选择成员 --</option>';
+    
+    // 添加"我"选项
+    const myOption = document.createElement('option');
+    myOption.value = '__me__';
+    myOption.textContent = chat.settings.myNickname || '我';
+    memberSelect.appendChild(myOption);
+    
+    // 添加群成员
+    if (chat.members && chat.members.length > 0) {
+      chat.members.forEach(member => {
+        const option = document.createElement('option');
+        option.value = member.originalName || member.id;
+        option.textContent = member.groupNickname || member.originalName || '未知成员';
+        memberSelect.appendChild(option);
+      });
+    }
+    
+    // 清空输入框
+    titleInput.value = '';
+    
+    // 显示弹窗
+    modal.classList.add('visible');
+  });
+  
+  document.getElementById('cancel-group-title-btn')?.addEventListener('click', () => {
+    document.getElementById('group-title-modal').classList.remove('visible');
+  });
+  
+  // 点击 overlay 关闭弹窗
+  document.getElementById('group-title-modal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'group-title-modal') {
+      document.getElementById('group-title-modal').classList.remove('visible');
+    }
+  });
+  
+  document.getElementById('save-group-title-btn')?.addEventListener('click', async () => {
+    const chat = state.chats[state.activeChatId];
+    if (!chat || !chat.isGroup) return;
+    
+    const memberSelect = document.getElementById('group-title-member-select');
+    const titleInput = document.getElementById('group-title-input');
+    const selectedValue = memberSelect.value;
+    const title = titleInput.value.trim();
+    
+    if (!selectedValue) {
+      alert('请选择成员');
+      return;
+    }
+    
+    if (!title) {
+      alert('请输入群头衔');
+      return;
+    }
+    
+    // 保存头衔
+    if (selectedValue === '__me__') {
+      // 给自己添加头衔（存储在聊天设置中）
+      if (!chat.settings) chat.settings = {};
+      chat.settings.myGroupTitle = title;
+    } else {
+      // 给群成员添加头衔
+      const member = chat.members.find(m => (m.originalName || m.id) === selectedValue);
+      if (member) {
+        member.groupTitle = title;
+      } else {
+        alert('找不到该成员');
+        return;
+      }
+    }
+    
+    // 保存到数据库
+    await db.chats.put(chat);
+    
+    // 刷新消息显示（重新打开聊天）
+    if (state.activeChatId === chat.id) {
+      await openChat(chat.id);
+    }
+    
+    // 关闭弹窗
+    document.getElementById('group-title-modal').classList.remove('visible');
+  });
+
 const kinshipCancelBtn = document.getElementById('cancel-kinship-creation-btn');
     if (kinshipCancelBtn) {
         // 先移除可能存在的旧监听器，防止重复
@@ -80074,18 +82539,11 @@ function renderLoginOverlay() {
 
     document.body.prepend(overlay);
 
-    // 3. 绑定逻辑
-    const tryLoginHandler = () => {
-        const btn = document.getElementById('btn-login-submit');
-        // 简单的 CSS 动画切换
-        btn.innerHTML = `<span class="pulse">CONNECTING...</span>`;
-        setTimeout(tryLogin, 300);
-    };
-
-    document.getElementById('btn-login-submit').onclick = tryLoginHandler;
+    // 3. 绑定逻辑（使用新的远程验证）
+    document.getElementById('btn-login-submit').onclick = ephoneVerify;
     
     document.getElementById('login-pwd').onkeypress = function(e) {
-        if (e.key === 'Enter') tryLoginHandler();
+        if (e.key === 'Enter') ephoneVerify();
     };
     
     document.getElementById('login-uid').onkeypress = function(e) {
@@ -80103,40 +82561,54 @@ function renderLoginOverlay() {
     setTimeout(() => document.getElementById('login-uid').focus(), 100);
 }
 
-    // 2. 验证与启动函数
-    function tryLogin() {
+    // 2. 新的远程验证函数
+    async function ephoneVerify() {
         // 获取元素
-        const uidEl = document.getElementById('login-uid');
-        const pwdEl = document.getElementById('login-pwd');
+        const accountEl = document.getElementById('login-uid');
+        const passwordEl = document.getElementById('login-pwd');
         const msgEl = document.getElementById('login-msg');
 
-        // 安全检查：如果元素不存在（比如还没渲染），直接返回，防止报错
-        if (!uidEl || !pwdEl) {
+        // 安全检查：如果元素不存在，直接返回
+        if (!accountEl || !passwordEl) {
             console.error("找不到登录输入框，请刷新页面");
             return;
         }
 
-        const uid = uidEl.value.trim();
-        const pwd = pwdEl.value.trim();
+        const account = accountEl.value.trim();
+        const password = passwordEl.value.trim();
 
-        if (!uid || !pwd) {
+        if (!account || !password) {
             msgEl.textContent = "请输入完整的账号和密码";
+            msgEl.style.color = "#ff453a";
             return;
         }
 
-        // 验证逻辑
-        if (verifyLogin(uid, pwd)) {
-            msgEl.style.color = "#32d74b";
-            msgEl.textContent = "验证通过，正在进入...";
+        // 显示连接状态
+        const btn = document.getElementById('btn-login-submit');
+        btn.innerHTML = `<span class="pulse">VERIFYING...</span>`;
 
-            try {
+        try {
+            // 调用远程验证API
+            const res = await fetch('https://puppy-subscription-api.zeabur.app/api/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ account: account, password: password })
+            });
+
+            const data = await res.json();
+
+            if (data.success) {
+                // 验证成功
+                msgEl.style.color = "#32d74b";
+                msgEl.textContent = "验证通过，正在进入...";
+
                 // 保存登录状态
-                localStorage.setItem('ephone_saved_uid', uid);
+                localStorage.setItem('ephone_auth', 'true');
+                localStorage.setItem('ephone_saved_uid', account);
 
-                // 【关键修改】使用固定数据库名，找回你的旧数据
-                // 确保 script.js 上方的 initDatabase 函数里写的是 db = new Dexie('GeminiChatDB');
-                initDatabase(uid);
-                
+                // 初始化数据库
+                initDatabase(account);
+
                 // 移除遮罩
                 const overlay = document.getElementById('login-overlay');
                 if (overlay) {
@@ -80144,21 +82616,27 @@ function renderLoginOverlay() {
                     overlay.style.opacity = '0';
                     setTimeout(() => overlay.remove(), 500);
                 }
- const phoneScreen = document.getElementById('phone-screen');
-                if (phoneScreen) phoneScreen.style.display = 'flex'; 
-                
+
+                const phoneScreen = document.getElementById('phone-screen');
+                if (phoneScreen) phoneScreen.style.display = 'flex';
+
                 // 启动 App
-                init(); 
-                
-            } catch (e) {
-                console.error(e);
+                init();
+                if (window.initPetSystem) window.initPetSystem();
+
+            } else {
+                // 验证失败
                 msgEl.style.color = "#ff453a";
-                msgEl.textContent = "初始化失败，请重试";
+                msgEl.textContent = "验证失败: " + (data.message || "账号或密码错误");
+                btn.style.background = "#ff453a";
+                btn.innerHTML = `LOGIN`;
+                setTimeout(() => btn.style.background = "#007aff", 500);
             }
-        } else {
+        } catch (e) {
+            console.error("验证请求失败:", e);
             msgEl.style.color = "#ff453a";
-            msgEl.textContent = "账号或密码错误";
-            const btn = document.getElementById('btn-login-submit');
+            msgEl.textContent = "网络错误，请检查连接";
+            btn.innerHTML = `LOGIN`;
             btn.style.background = "#ff453a";
             setTimeout(() => btn.style.background = "#007aff", 500);
         }
@@ -80168,17 +82646,20 @@ function renderLoginOverlay() {
     // ▼▼▼ 自动登录判断 (主入口) ▼▼▼
     // ==========================================
     
-    // 检查本地是否已登录
+    // 检查本地是否已验证通过
+    const isAuthenticated = localStorage.getItem('ephone_auth');
     const savedUid = localStorage.getItem('ephone_saved_uid');
 
-    if (savedUid) {
+    if (isAuthenticated === 'true' && savedUid) {
         console.log(`[Auto Login] 检测到已登录账号: ${savedUid}`);
         try {
             // 已登录：直接初始化数据库并启动，不显示登录框
             initDatabase(savedUid);
             init(); 
+            if (window.initPetSystem) window.initPetSystem(); 
         } catch (e) {
             console.error("自动登录出错，重置状态:", e);
+            localStorage.removeItem('ephone_auth');
             localStorage.removeItem('ephone_saved_uid');
             renderLoginOverlay();
         }
@@ -80201,6 +82682,7 @@ function renderLoginOverlay() {
             newBtn.addEventListener('click', async () => {
                 // 使用原生的 confirm，防止 showCustomConfirm 没加载
                 if (confirm("确定要退出登录吗？")) {
+                    localStorage.removeItem('ephone_auth');
                     localStorage.removeItem('ephone_saved_uid');
                     window.location.reload();
                 }
@@ -81663,44 +84145,335 @@ async function saveSplitStickersToMyEmojis() {
         // 更新全局引用
         window.screeningRoomContext.toggleFloatingChat = toggleFloatingChat;
     })();
+
+    // ========== Pet Console Logic ==========
+    window.initPetSystem = function() {
+        const petConsoleBtn = document.getElementById('pet-console-btn');
+        const petConsoleOverlay = document.getElementById('pet-console-overlay');
+        const closePetConsoleBtn = document.getElementById('close-pet-console-btn');
+        const petSettingsBtn = document.getElementById('pet-settings-btn');
+        const petSettingsModal = document.getElementById('pet-settings-modal');
+        const closePetSettingsBtn = document.getElementById('close-pet-settings-btn');
+        
+        const petAttrBtn = document.getElementById('pet-attr-btn');
+        const petAttrModal = document.getElementById('pet-attr-modal');
+        const closePetAttrBtn = document.getElementById('close-pet-attr-btn');
+        const attrNameDisplay = document.getElementById('attr-name-display');
+        const attrPersonalityDisplay = document.getElementById('attr-personality-display');
+
+        const petInteractModeBtn = document.getElementById('pet-interact-mode-btn');
+        const petInteractModal = document.getElementById('pet-interact-modal');
+        const closePetInteractBtn = document.getElementById('close-pet-interact-btn');
+        const interactPetImg = document.getElementById('interact-pet-img');
+        const interactFeedBtn = document.getElementById('interact-feed-btn');
+        const interactPlayBtn = document.getElementById('interact-play-btn');
+        const interactPetActionBtn = document.getElementById('interact-pet-action-btn');
+
+        const petUploadBtn = document.getElementById('pet-upload-btn');
+        const petUploadInput = document.getElementById('pet-upload-input');
+        const savePetSettingsBtn = document.getElementById('save-pet-settings-btn');
+        const petNameInput = document.getElementById('pet-name-input');
+        const petSpeciesInput = document.getElementById('pet-species-input');
+        const petPersonalitySelect = document.getElementById('pet-personality-select');
+        const petCustomPersonalityInput = document.getElementById('pet-custom-personality-input');
+        const petAvatarDisplay = document.getElementById('pet-avatar-display');
+        const petPlaceholder = document.getElementById('pet-placeholder');
+        const petNameDisplay = document.getElementById('pet-name-display');
+        // const petMoodDisplay = document.getElementById('pet-mood-display'); // Removed in new design
+        // const petInteractBtn = document.getElementById('pet-interact-btn'); // Removed
+        // const petFeedBtn = document.getElementById('pet-feed-btn'); // Removed
+
+        // State
+        let petData = {
+            id: 'default',
+            name: '未命名',
+            species: '',
+            personality: '活泼好动',
+            image: 'https://picsum.photos/seed/pet-default/140/140',
+            mood: '开心',
+            level: 1,
+            experience: 0
+        };
+
+        // Load from Dexie with fallback to localStorage migration
+        async function loadPetData() {
+            try {
+                // Ensure DB is ready
+                if (!db || !db.userPets) return;
+                
+                const saved = await db.userPets.get('default');
+                if (saved) {
+                    petData = { ...petData, ...saved };
+                } else {
+                    // Migration logic
+                    const local = localStorage.getItem('petData');
+                    if (local) {
+                        try {
+                            const parsed = JSON.parse(local);
+                            petData = { ...petData, ...parsed };
+                            // Ensure ID is set
+                            petData.id = 'default';
+                            // Save to Dexie
+                            await db.userPets.put(petData);
+                            // Clear localStorage to free up space
+                            localStorage.removeItem('petData');
+                            console.log('Pet data migrated to Dexie');
+                        } catch (e) {
+                            console.error('Migration failed', e);
+                        }
+                    } else {
+                        // Initialize in Dexie
+                        await db.userPets.put(petData);
+                    }
+                }
+                updatePetDisplay();
+            } catch (e) {
+                console.error('Failed to load pet data', e);
+            }
+        }
+        
+        // Call load
+        loadPetData();
+
+        const attrLevelDisplay = document.getElementById('attr-level-display');
+        const attrExpDisplay = document.getElementById('attr-exp-display');
+
+        function updatePetDisplay() {
+            if (petNameDisplay) {
+                petNameDisplay.textContent = petData.name && petData.name !== '未命名' ? `你好呀，${petData.name}～` : '点击自定义你的专属宠物～';
+            }
+            
+            if (petAvatarDisplay) {
+                petAvatarDisplay.src = petData.image;
+                petAvatarDisplay.style.display = 'block';
+            }
+            if (petPlaceholder) petPlaceholder.style.display = 'none';
+            
+            // Update modal displays
+            if (attrNameDisplay) attrNameDisplay.textContent = petData.name || '未命名';
+            const attrSpeciesDisplay = document.getElementById('attr-species-display');
+            if (attrSpeciesDisplay) attrSpeciesDisplay.textContent = petData.species || '未设置';
+            if (attrPersonalityDisplay) attrPersonalityDisplay.textContent = petData.personality || '活泼好动';
+            if (interactPetImg) interactPetImg.src = petData.image;
+            
+            // Update Level and Exp
+            if (attrLevelDisplay) attrLevelDisplay.textContent = `Lv.${petData.level}`;
+            if (attrExpDisplay) attrExpDisplay.textContent = `${petData.experience} / 100`;
+        }
+
+        // Expose for experience updates and other access
+        window.getPetData = () => petData;
+        window.addPetExperience = async function(amount) {
+            petData.experience += amount;
+            let leveledUp = false;
+            // Simple leveling: 100 exp per level
+            while (petData.experience >= 100) {
+                petData.experience -= 100;
+                petData.level += 1;
+                leveledUp = true;
+            }
+            
+            try {
+                await db.userPets.put(petData);
+                updatePetDisplay();
+                if (leveledUp) {
+                    // You could add a toast notification here
+                    console.log(`Pet leveled up to ${petData.level}!`);
+                }
+            } catch (e) {
+                console.error('Failed to update pet experience', e);
+            }
+        };
+
+        if (petConsoleBtn) {
+            petConsoleBtn.addEventListener('click', () => {
+                if (petConsoleOverlay) petConsoleOverlay.style.display = 'flex';
+                updatePetDisplay();
+            });
+        }
+
+        if (closePetConsoleBtn) {
+            closePetConsoleBtn.addEventListener('click', () => {
+                if (petConsoleOverlay) petConsoleOverlay.style.display = 'none';
+                // Close all sub-modals
+                if (petSettingsModal) petSettingsModal.style.display = 'none';
+                if (petAttrModal) petAttrModal.style.display = 'none';
+                if (petInteractModal) petInteractModal.style.display = 'none';
+            });
+        }
+
+        // Settings Modal
+        if (petSettingsBtn) {
+            petSettingsBtn.addEventListener('click', () => {
+                if (petSettingsModal) petSettingsModal.style.display = 'block';
+                if (petNameInput) petNameInput.value = petData.name !== '未命名' ? petData.name : '';
+                if (petSpeciesInput) petSpeciesInput.value = petData.species || '';
+                if (petPersonalitySelect) {
+                    // Check if personality is a custom one (not in the predefined list)
+                    const predefinedPersonalities = ['活泼好动', '温顺黏人', '高冷傲娇', '呆萌可爱', '调皮捣蛋'];
+                    if (predefinedPersonalities.includes(petData.personality)) {
+                        petPersonalitySelect.value = petData.personality;
+                        if (petCustomPersonalityInput) {
+                            petCustomPersonalityInput.style.display = 'none';
+                            petCustomPersonalityInput.value = '';
+                        }
+                    } else {
+                        petPersonalitySelect.value = 'custom';
+                        if (petCustomPersonalityInput) {
+                            petCustomPersonalityInput.style.display = 'block';
+                            petCustomPersonalityInput.value = petData.personality;
+                        }
+                    }
+                }
+            });
+        }
+
+        // Handle personality select change
+        if (petPersonalitySelect) {
+            petPersonalitySelect.addEventListener('change', () => {
+                if (petCustomPersonalityInput) {
+                    if (petPersonalitySelect.value === 'custom') {
+                        petCustomPersonalityInput.style.display = 'block';
+                        petCustomPersonalityInput.focus();
+                    } else {
+                        petCustomPersonalityInput.style.display = 'none';
+                        petCustomPersonalityInput.value = '';
+                    }
+                }
+            });
+        }
+
+        if (closePetSettingsBtn) {
+            closePetSettingsBtn.addEventListener('click', () => {
+                if (petSettingsModal) petSettingsModal.style.display = 'none';
+            });
+        }
+
+        // Attributes Modal
+        if (petAttrBtn) {
+            petAttrBtn.addEventListener('click', () => {
+                if (petAttrModal) petAttrModal.style.display = 'block';
+                updatePetDisplay();
+            });
+        }
+
+        if (closePetAttrBtn) {
+            closePetAttrBtn.addEventListener('click', () => {
+                if (petAttrModal) petAttrModal.style.display = 'none';
+            });
+        }
+
+        // Interact Modal
+        if (petInteractModeBtn) {
+            petInteractModeBtn.addEventListener('click', () => {
+                if (petInteractModal) petInteractModal.style.display = 'block';
+                updatePetDisplay();
+            });
+        }
+
+        if (closePetInteractBtn) {
+            closePetInteractBtn.addEventListener('click', () => {
+                if (petInteractModal) petInteractModal.style.display = 'none';
+            });
+        }
+
+        if (petUploadBtn) {
+            petUploadBtn.addEventListener('click', () => {
+                if (petUploadInput) petUploadInput.click();
+            });
+        }
+
+        if (petUploadInput) {
+            petUploadInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        petData.image = e.target.result;
+                        // Update preview immediately if needed, but mainly on save
+                        if (petAvatarDisplay) petAvatarDisplay.src = petData.image;
+                    };
+                    reader.readAsDataURL(file);
+                }
+            });
+        }
+
+        if (savePetSettingsBtn) {
+            savePetSettingsBtn.addEventListener('click', () => {
+                const newName = petNameInput.value.trim();
+                if (newName) petData.name = newName;
+                
+                const newSpecies = petSpeciesInput ? petSpeciesInput.value.trim() : '';
+                if (newSpecies) petData.species = newSpecies;
+                
+                if (petPersonalitySelect) {
+                    if (petPersonalitySelect.value === 'custom') {
+                        const customPersonality = petCustomPersonalityInput ? petCustomPersonalityInput.value.trim() : '';
+                        if (customPersonality) {
+                            petData.personality = customPersonality;
+                        } else {
+                            alert('请输入自定义性格！');
+                            return;
+                        }
+                    } else {
+                        petData.personality = petPersonalitySelect.value;
+                    }
+                }
+                
+                // Save to Dexie
+                db.userPets.put(petData).then(() => {
+                    updatePetDisplay();
+                    if (petSettingsModal) petSettingsModal.style.display = 'none';
+                    const speciesText = petData.species ? `一只${petData.species}，` : '';
+                    alert(`设置保存成功！你的宠物${petData.name}是${speciesText}性格${petData.personality}的小可爱～`);
+                }).catch(err => {
+                    console.error('Save failed', err);
+                    alert('保存失败，请重试');
+                });
+            });
+        }
+
+        // New Interaction Logic
+        function animatePet(animationType) {
+            const pet = interactPetImg;
+            if (!pet) return;
+            
+            pet.style.transition = 'all 0.3s';
+            
+            if (animationType === 'scale') {
+                pet.style.transform = 'scale(1.2)';
+                setTimeout(() => pet.style.transform = 'scale(1)', 500);
+            } else if (animationType === 'rotate') {
+                pet.style.transform = 'rotate(10deg)';
+                setTimeout(() => pet.style.transform = 'rotate(-10deg)', 300);
+                setTimeout(() => pet.style.transform = 'rotate(0)', 600);
+            } else if (animationType === 'jump') {
+                pet.style.transform = 'translateY(-10px)';
+                setTimeout(() => pet.style.transform = 'translateY(0)', 400);
+            }
+        }
+
+        if (interactFeedBtn) {
+            interactFeedBtn.addEventListener('click', () => {
+                animatePet('scale');
+                alert(`${petData.name}吃饱啦，摇着尾巴感谢你～`);
+            });
+        }
+
+        if (interactPlayBtn) {
+            interactPlayBtn.addEventListener('click', () => {
+                animatePet('rotate');
+                alert(`${petData.name}玩得超开心！下次还要一起呀～`);
+            });
+        }
+
+        if (interactPetActionBtn) {
+            interactPetActionBtn.addEventListener('click', () => {
+                animatePet('jump');
+                alert(`${petData.name}舒服地呼噜呼噜～ 最喜欢被你摸啦～`);
+            });
+        }
+    };
   </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
