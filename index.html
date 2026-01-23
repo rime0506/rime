@@ -1118,6 +1118,8 @@
             container.innerHTML = '';
             
             let unreadCount = 0;
+            // 记录当前轮次是否已弹窗
+            let hasNotifiedThisTurn = false;
 
             if (list.length === 0) {
                 container.innerHTML = '<div class="empty-tip">暂无新通知</div>';
@@ -1127,12 +1129,11 @@
                     // 1. 统计未读
                     if (!item.is_read) unreadCount++;
 
-                    // 2. 检测新消息并弹窗 (排除首次加载，避免刷新页面时狂弹)
-                    if (!isFirstLoad && !item.is_read && !knownNotifIds.has(item.id)) {
+                    // 2. 持续提醒逻辑：只要有未读且非首次加载，每轮都弹窗（但每轮只弹最新的那一条）
+                    if (!isFirstLoad && !item.is_read && !hasNotifiedThisTurn) {
                         sendSystemNotification(item.title, item.content);
+                        hasNotifiedThisTurn = true; // 标记本轮已弹，防止轰炸
                     }
-                    // 记录ID
-                    knownNotifIds.add(item.id);
 
                     // 3. 渲染DOM
                     const div = document.createElement('div');
