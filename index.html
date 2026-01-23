@@ -2,8 +2,48 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Ins风桌面</title>
+    
+    <!-- PWA 配置 (单文件内嵌) -->
+    <link rel="manifest" id="manifest-link">
+    <script>
+        // 动态生成 Manifest 以支持单文件 PWA
+        const manifest = {
+            "name": "Ins风桌面",
+            "short_name": "Ins桌面",
+            "start_url": ".",
+            "display": "standalone",
+            "background_color": "#ffffff",
+            "theme_color": "#ffffff",
+            "orientation": "portrait",
+            "icons": [
+                {
+                    "src": "https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png",
+                    "sizes": "192x192",
+                    "type": "image/png"
+                },
+                {
+                    "src": "https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png",
+                    "sizes": "512x512",
+                    "type": "image/png"
+                }
+            ]
+        };
+        const stringManifest = JSON.stringify(manifest);
+        const blob = new Blob([stringManifest], {type: 'application/manifest+json'});
+        const manifestURL = URL.createObjectURL(blob);
+        document.querySelector('#manifest-link').setAttribute('href', manifestURL);
+    </script>
+    
+    <!-- iOS 全屏支持 -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Ins桌面">
+    
+    <!-- iOS 图标 -->
+    <link rel="apple-touch-icon" href="https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png">
+    
     <style>
         * {
             margin: 0;
@@ -917,6 +957,10 @@
                     <span class="slider"></span>
                 </label>
             </div>
+            <div class="setting-item">
+                <div class="setting-item-text">刷新间隔(秒)</div>
+                <input type="number" id="notif-interval" value="30" style="border:none; background:#eee; padding:8px; width:60px; border-radius:8px; text-align:center;" onchange="updateInterval(this.value)">
+            </div>
         </div>
     </div>
 
@@ -958,6 +1002,9 @@
             localStorage.setItem('user_id', currentUserId);
         }
         
+        // 全局定时器变量
+        let notifTimer = null;
+
         // 页面加载初始化
         window.onload = async function() {
             await restoreSetting(); // 异步恢复DEXie数据
@@ -966,26 +1013,53 @@
             // 初始化通知设置
             const notifEnabled = localStorage.getItem('notification_enabled') === 'true';
             document.getElementById('notif-switch').checked = notifEnabled;
+            
+            // 初始化间隔设置
+            const savedInterval = localStorage.getItem('notification_interval') || 30;
+            document.getElementById('notif-interval').value = savedInterval;
+
             if (notifEnabled) {
-                fetchNotifications(); // 开启状态下获取通知
-                // 轮询 (简单实现，每30秒查一次)
-                setInterval(fetchNotifications, 30000);
+                startNotificationLoop(savedInterval);
             }
         }
 
         // --- 通知系统逻辑 ---
         // TODO: 部署到 Zeabur 后，请将下面的地址替换为 Zeabur 提供的后端域名 (例如 https://xxx.zeabur.app/api)
         // 本地测试请保持 http://localhost:5000/api
-const API_BASE = 'https://rime2713.zeabur.app/api';
+        const API_BASE = 'http://localhost:5000/api'; 
+
+        // 启动轮询
+        function startNotificationLoop(seconds) {
+            if (notifTimer) clearInterval(notifTimer);
+            fetchNotifications(); // 立即查一次
+            notifTimer = setInterval(fetchNotifications, seconds * 1000);
+        }
+
+        // 更新间隔时间
+        function updateInterval(val) {
+            const seconds = parseInt(val);
+            if (seconds < 5) {
+                alert("间隔不能小于5秒哦");
+                document.getElementById('notif-interval').value = 5;
+                return;
+            }
+            localStorage.setItem('notification_interval', seconds);
+            // 如果当前已开启通知，则重启定时器
+            if (document.getElementById('notif-switch').checked) {
+                startNotificationLoop(seconds);
+            }
+        }
 
         // 切换通知权限
         function toggleNotification(checkbox) {
             const enabled = checkbox.checked;
             localStorage.setItem('notification_enabled', enabled);
             if (enabled) {
-                fetchNotifications();
+                const interval = document.getElementById('notif-interval').value;
+                startNotificationLoop(interval);
                 alert('系统通知已开启！');
             } else {
+                if (notifTimer) clearInterval(notifTimer);
                 document.getElementById('notif-badge').style.display = 'none';
             }
         }
