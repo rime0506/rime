@@ -433,6 +433,213 @@
             display: none;
             z-index: 999;
         }
+
+        /* --- 新增：通知系统相关样式 --- */
+        /* 通知红点 */
+        .notification-badge {
+            position: absolute;
+            top: -2px;
+            right: -2px;
+            width: 10px;
+            height: 10px;
+            background: #ff4d4f;
+            border-radius: 50%;
+            border: 2px solid #fff;
+            display: none; /* 默认隐藏 */
+            z-index: 20;
+        }
+
+        /* 设置页面 (系统设置) */
+        .setting-page {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #f2f2f7; /* iOS 设置背景色 */
+            z-index: 100;
+            display: none;
+            flex-direction: column;
+            animation: slideUp 0.3s ease;
+        }
+        @keyframes slideUp {
+            from { transform: translateY(100%); }
+            to { transform: translateY(0); }
+        }
+        .setting-header {
+            background: #fff;
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            border-bottom: 1px solid #e5e5e5;
+        }
+        .setting-title {
+            flex: 1;
+            text-align: center;
+            font-size: 17px;
+            font-weight: 600;
+            color: #000;
+            margin-left: -24px; /* 补偿返回按钮宽度 */
+        }
+        .setting-group {
+            margin-top: 24px;
+            background: #fff;
+            border-top: 1px solid #e5e5e5;
+            border-bottom: 1px solid #e5e5e5;
+        }
+        .setting-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            margin-left: 16px; /* 分割线不通栏 */
+            border-bottom: 1px solid #e5e5e5;
+        }
+        .setting-item:last-child {
+            border-bottom: none;
+        }
+        .setting-item-text {
+            font-size: 16px;
+            color: #000;
+        }
+        /* iOS 风格开关 */
+        .ios-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 30px;
+        }
+        .ios-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #e5e5e5;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 2px;
+            bottom: 2px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        input:checked + .slider {
+            background-color: #34c759;
+        }
+        input:checked + .slider:before {
+            transform: translateX(20px);
+        }
+
+        /* 通知中心弹窗 */
+        .notification-center {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 200;
+            display: none;
+            backdrop-filter: blur(5px);
+        }
+        .notification-box {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 80%;
+            background: #fff;
+            border-radius: 20px 20px 0 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            animation: slideUpBox 0.3s ease;
+        }
+        @keyframes slideUpBox {
+            from { transform: translateY(100%); }
+            to { transform: translateY(0); }
+        }
+        .notif-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .notif-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+        }
+        .close-notif {
+            font-size: 24px;
+            color: #999;
+            cursor: pointer;
+            padding: 5px;
+        }
+        .notif-list {
+            flex: 1;
+            overflow-y: auto;
+            padding-bottom: 20px;
+        }
+        .notif-item {
+            padding: 16px;
+            background: #f9f9f9;
+            border-radius: 12px;
+            margin-bottom: 10px;
+            position: relative;
+            transition: background 0.2s;
+            cursor: pointer;
+        }
+        .notif-item.unread {
+            background: #FFF7FA;
+            border: 1px solid #ffdde8;
+        }
+        .notif-item.unread::after {
+            content: '';
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            width: 8px;
+            height: 8px;
+            background: #ff4d4f;
+            border-radius: 50%;
+        }
+        .notif-time {
+            font-size: 11px;
+            color: #999;
+            margin-bottom: 6px;
+        }
+        .notif-content-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 4px;
+        }
+        .notif-desc {
+            font-size: 13px;
+            color: #666;
+            line-height: 1.5;
+        }
+        .empty-tip {
+            text-align: center;
+            color: #999;
+            margin-top: 60px;
+            font-size: 14px;
+        }
     </style>
     <!-- 引入DEXie.js -->
     <script src="https://cdn.jsdelivr.net/npm/dexie@3.2.4/dist/dexie.min.js"></script>
@@ -440,12 +647,14 @@
 <body id="desktop-body">
     <div class="phone" id="home-page">
         <!-- 顶部磨砂小组件 -->
-        <div class="top-widget">
+        <div class="top-widget" onclick="showNotificationCenter()">
             <div class="icon" id="widget-icon"></div>
             <div class="text" id="widget-text">
                 <div class="title" id="widget-title">{`{ lovely Day ¸.*・~ ★`}</div>
                 <div class="subtext" id="widget-subtext">世界破破烂烂小猫缝缝补补 🐾</div>
             </div>
+            <!-- 通知红点 -->
+            <div class="notification-badge" id="notif-badge"></div>
         </div>
 
         <!-- 应用网格 -->
@@ -465,7 +674,7 @@
                 </div>
 
                 <!-- 应用图标 -->
-                <div class="app-icon" id="icon-setting">
+                <div class="app-icon" id="icon-setting" onclick="showSettingPage()">
                     <div class="icon"></div>
                     <div class="name">设置</div>
                 </div>
@@ -693,6 +902,37 @@
         </div>
     </div>
 
+    <!-- 系统设置页面 -->
+    <div class="setting-page" id="setting-page">
+        <div class="setting-header">
+            <div class="back-btn" onclick="hideSettingPage()" style="margin:0; background:none; font-size:24px; color:#007aff;">‹ 设置</div>
+            <div class="setting-title">设置</div>
+            <div style="width:50px;"></div>
+        </div>
+        <div class="setting-group">
+            <div class="setting-item">
+                <div class="setting-item-text">通知</div>
+                <label class="ios-switch">
+                    <input type="checkbox" id="notif-switch" onchange="toggleNotification(this)">
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- 通知中心弹窗 -->
+    <div class="notification-center" id="notification-center">
+        <div class="notification-box">
+            <div class="notif-header">
+                <div class="notif-title">通知中心</div>
+                <div class="close-notif" onclick="hideNotificationCenter()">×</div>
+            </div>
+            <div class="notif-list" id="notif-list">
+                <!-- 动态插入通知项 -->
+            </div>
+        </div>
+    </div>
+
     <!-- 保存提示 -->
     <div class="save-tip" id="save-tip">保存成功！</div>
 
@@ -711,10 +951,129 @@
         });
 
         let currentSelectIcon = '';
+        // 模拟用户ID，实际项目中可能来自登录
+        let currentUserId = localStorage.getItem('user_id');
+        if (!currentUserId) {
+            currentUserId = 'user_' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('user_id', currentUserId);
+        }
+        
         // 页面加载初始化
         window.onload = async function() {
             await restoreSetting(); // 异步恢复DEXie数据
             syncPreview();
+            
+            // 初始化通知设置
+            const notifEnabled = localStorage.getItem('notification_enabled') === 'true';
+            document.getElementById('notif-switch').checked = notifEnabled;
+            if (notifEnabled) {
+                fetchNotifications(); // 开启状态下获取通知
+                // 轮询 (简单实现，每30秒查一次)
+                setInterval(fetchNotifications, 30000);
+            }
+        }
+
+        // --- 通知系统逻辑 ---
+        // TODO: 部署到 Zeabur 后，请将下面的地址替换为 Zeabur 提供的后端域名 (例如 https://xxx.zeabur.app/api)
+        // 本地测试请保持 http://localhost:5000/api
+const API_BASE = 'https://rime2713.zeabur.app/api';
+
+        // 切换通知权限
+        function toggleNotification(checkbox) {
+            const enabled = checkbox.checked;
+            localStorage.setItem('notification_enabled', enabled);
+            if (enabled) {
+                fetchNotifications();
+                alert('系统通知已开启！');
+            } else {
+                document.getElementById('notif-badge').style.display = 'none';
+            }
+        }
+
+        // 显示设置页面
+        function showSettingPage() {
+            document.getElementById('setting-page').style.display = 'flex';
+        }
+        function hideSettingPage() {
+            document.getElementById('setting-page').style.display = 'none';
+        }
+
+        // 显示通知中心
+        function showNotificationCenter() {
+            const enabled = localStorage.getItem('notification_enabled') === 'true';
+            if (!enabled) return; // 未开启不显示
+
+            document.getElementById('notification-center').style.display = 'block';
+            fetchNotifications(); // 打开时刷新一下
+        }
+        function hideNotificationCenter() {
+            document.getElementById('notification-center').style.display = 'none';
+        }
+
+        // 获取通知
+        async function fetchNotifications() {
+            const enabled = localStorage.getItem('notification_enabled') === 'true';
+            if (!enabled) return;
+
+            try {
+                const res = await fetch(`${API_BASE}/notifications?user_id=${currentUserId}`);
+                if (!res.ok) return;
+                const list = await res.json();
+                renderNotifications(list);
+            } catch (err) {
+                console.error('获取通知失败:', err);
+            }
+        }
+
+        // 渲染通知列表
+        function renderNotifications(list) {
+            const container = document.getElementById('notif-list');
+            container.innerHTML = '';
+            
+            let unreadCount = 0;
+
+            if (list.length === 0) {
+                container.innerHTML = '<div class="empty-tip">暂无新通知</div>';
+            } else {
+                list.forEach(item => {
+                    if (!item.is_read) unreadCount++;
+
+                    const div = document.createElement('div');
+                    div.className = `notif-item ${!item.is_read ? 'unread' : ''}`;
+                    // 格式化时间戳
+                    const date = new Date(item.timestamp * 1000);
+                    const timeStr = `${date.getMonth()+1}-${date.getDate()} ${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
+                    
+                    div.innerHTML = `
+                        <div class="notif-time">${timeStr}</div>
+                        <div class="notif-content-title">${item.title}</div>
+                        <div class="notif-desc">${item.content}</div>
+                    `;
+                    div.onclick = () => markRead(item.id, item.is_read);
+                    container.appendChild(div);
+                });
+            }
+
+            // 更新红点
+            const badge = document.getElementById('notif-badge');
+            badge.style.display = unreadCount > 0 ? 'block' : 'none';
+        }
+
+        // 标记已读
+        async function markRead(id, isRead) {
+            if (isRead) return; // 已经是已读
+
+            try {
+                await fetch(`${API_BASE}/notifications/${id}/read`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ user_id: currentUserId })
+                });
+                // 重新获取刷新列表
+                fetchNotifications();
+            } catch (err) {
+                console.error('标记已读失败:', err);
+            }
         }
 
         // 核心：折叠展开切换
