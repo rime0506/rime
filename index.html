@@ -1004,6 +1004,9 @@
         
         // 全局定时器变量
         let notifTimer = null;
+        // 记录已知的通知ID，用于判断新消息
+        let knownNotifIds = new Set();
+        let isFirstLoad = true;
 
         // 页面加载初始化
         window.onload = async function() {
@@ -1055,9 +1058,19 @@
             const enabled = checkbox.checked;
             localStorage.setItem('notification_enabled', enabled);
             if (enabled) {
+                // 请求浏览器系统通知权限
+                if ("Notification" in window) {
+                    Notification.requestPermission().then(permission => {
+                        if (permission === "granted") {
+                            new Notification("系统通知已开启", { body: "即使在后台，您也能收到新消息提醒了~" });
+                        } else {
+                            alert("请在浏览器弹窗中点击【允许】，否则无法收到系统通知哦！");
+                        }
+                    });
+                }
+                
                 const interval = document.getElementById('notif-interval').value;
                 startNotificationLoop(interval);
-                alert('系统通知已开启！');
             } else {
                 if (notifTimer) clearInterval(notifTimer);
                 document.getElementById('notif-badge').style.display = 'none';
@@ -1109,9 +1122,19 @@
             if (list.length === 0) {
                 container.innerHTML = '<div class="empty-tip">暂无新通知</div>';
             } else {
+                // 按时间倒序，最新的在最上面
                 list.forEach(item => {
+                    // 1. 统计未读
                     if (!item.is_read) unreadCount++;
 
+                    // 2. 检测新消息并弹窗 (排除首次加载，避免刷新页面时狂弹)
+                    if (!isFirstLoad && !item.is_read && !knownNotifIds.has(item.id)) {
+                        sendSystemNotification(item.title, item.content);
+                    }
+                    // 记录ID
+                    knownNotifIds.add(item.id);
+
+                    // 3. 渲染DOM
                     const div = document.createElement('div');
                     div.className = `notif-item ${!item.is_read ? 'unread' : ''}`;
                     // 格式化时间戳
@@ -1127,10 +1150,34 @@
                     container.appendChild(div);
                 });
             }
+            
+            // 首次加载标记置为false
+            isFirstLoad = false;
 
             // 更新红点
             const badge = document.getElementById('notif-badge');
             badge.style.display = unreadCount > 0 ? 'block' : 'none';
+        }
+
+        // 发送系统通知
+        function sendSystemNotification(title, body) {
+            if (!("Notification" in window)) return;
+            
+            if (Notification.permission === "granted") {
+                new Notification(title, { 
+                    body: body,
+                    icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png' // 使用应用图标
+                });
+            } else if (Notification.permission !== "denied") {
+                Notification.requestPermission().then(permission => {
+                    if (permission === "granted") {
+                        new Notification(title, { 
+                            body: body,
+                            icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png'
+                        });
+                    }
+                });
+            }
         }
 
         // 标记已读
