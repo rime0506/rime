@@ -1007,6 +1007,8 @@
         // 记录已知的通知ID，用于判断新消息
         let knownNotifIds = new Set();
         let isFirstLoad = true;
+        // 缓存最新一条通知，用于定时弹窗文案
+        let latestNotification = null;
 
         // 页面加载初始化
         window.onload = async function() {
@@ -1031,11 +1033,26 @@
         // 本地测试请保持 http://localhost:5000/api
         const API_BASE = 'http://localhost:5000/api'; 
 
-        // 启动轮询
+        // 启动轮询（核心修改：改为定时无条件弹窗）
         function startNotificationLoop(seconds) {
             if (notifTimer) clearInterval(notifTimer);
-            fetchNotifications(); // 立即查一次
-            notifTimer = setInterval(fetchNotifications, seconds * 1000);
+
+            const loopTask = () => {
+                // --- 核心修改点：无条件定时弹窗 ---
+                // 无论是否有新消息，直接弹出。如果有缓存的最新消息就显示最新消息，否则显示默认文案
+                const title = latestNotification ? latestNotification.title : "系统通知";
+                const body = latestNotification ? latestNotification.content : "通知服务正在运行中，暂无历史消息...";
+                const timeStr = new Date().toLocaleTimeString();
+                
+                // 发送弹窗 (加上当前时间证明是实时触发的)
+                sendSystemNotification(title, `${body} (定时提醒 ${timeStr})`);
+
+                // 顺便去后端查一下最新数据，更新列表和红点
+                fetchNotifications();
+            };
+            
+            loopTask(); // 立即执行一次
+            notifTimer = setInterval(loopTask, seconds * 1000);
         }
 
         // 更新间隔时间
@@ -1118,24 +1135,22 @@
             container.innerHTML = '';
             
             let unreadCount = 0;
-            // 记录当前轮次是否已弹窗
-            let hasNotifiedThisTurn = false;
 
             if (list.length === 0) {
                 container.innerHTML = '<div class="empty-tip">暂无新通知</div>';
+                latestNotification = null;
             } else {
-                // 按时间倒序，最新的在最上面
+                // 确保列表是按时间倒序的
+                list.sort((a, b) => b.timestamp - a.timestamp);
+                
+                // 更新最新的一条通知缓存
+                latestNotification = list[0];
+
                 list.forEach(item => {
                     // 1. 统计未读
                     if (!item.is_read) unreadCount++;
 
-                    // 2. 持续提醒逻辑：只要有未读且非首次加载，每轮都弹窗（但每轮只弹最新的那一条）
-                    if (!isFirstLoad && !item.is_read && !hasNotifiedThisTurn) {
-                        sendSystemNotification(item.title, item.content);
-                        hasNotifiedThisTurn = true; // 标记本轮已弹，防止轰炸
-                    }
-
-                    // 3. 渲染DOM
+                    // 2. 渲染DOM
                     const div = document.createElement('div');
                     div.className = `notif-item ${!item.is_read ? 'unread' : ''}`;
                     // 格式化时间戳
