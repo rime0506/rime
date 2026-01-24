@@ -354,6 +354,10 @@ def check_auto_messages():
                                 WHERE auto_reply_enabled = 1 
                                 AND auto_reply_interval > 0''').fetchall()
             
+            if rows:
+                print(f"[AutoCheck] ========================================")
+                print(f"[AutoCheck] 🔍 检查 {len(rows)} 个角色...")
+            
             for row in rows:
                 char_id = row['id']
                 char_name = row['name']
@@ -366,16 +370,19 @@ def check_auto_messages():
                     print(f"[AutoCheck] ⚠️ {char_name} 的user_id为空，跳过")
                     continue
                 
+                # 确保 user_id 是字符串类型（关键修复！）
+                user_id = str(user_id)
+                
                 # 计算时间差（分钟）
                 time_diff = (now - last_time) / 60
                 
+                print(f"[AutoCheck] 角色: {char_name}")
+                print(f"[AutoCheck]   user_id: {user_id} (类型: {type(user_id).__name__})")
+                print(f"[AutoCheck]   间隔: {interval_minutes}分钟, 已过: {time_diff:.1f}分钟")
+                
                 # 如果超过间隔时间，立即推送
                 if time_diff >= interval_minutes:
-                    print(f"[AutoCheck] ========================================")
-                    print(f"[AutoCheck] ✓ {char_name} 需要发消息！")
-                    print(f"[AutoCheck]   间隔: {interval_minutes}分钟, 已过: {time_diff:.1f}分钟")
-                    print(f"[AutoCheck]   user_id: {user_id}")
-                    print(f"[AutoCheck]   char_id: {char_id}")
+                    print(f"[AutoCheck] ✓✓✓ {char_name} 需要发消息！")
                     
                     # 更新最后发送时间
                     c.execute('UPDATE characters SET last_message_time = ? WHERE id = ?',
@@ -398,12 +405,16 @@ def check_auto_messages():
                     message_preview = f"{char_name} 想和你聊天了~"
                     send_web_push(user_id, char_name, char_id, message_preview)
                     print(f"[AutoCheck] ✓✓✓ Web Push后台通知已发送！")
-                    print(f"[AutoCheck] ========================================")
+            
+            if rows:
+                print(f"[AutoCheck] ========================================")
             
             conn.close()
             
         except Exception as e:
             print(f"[AutoCheck] ✗ Error: {e}")
+            import traceback
+            traceback.print_exc()
 
 # Web Push 推送函数
 def send_web_push(user_id, char_name, char_id, message=None):
