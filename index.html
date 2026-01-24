@@ -3084,30 +3084,31 @@
 
         // 发送系统通知
         function sendSystemNotification(title, body) {
-            console.log(`[Notification] ========================================`);
-            console.log(`[Notification] 🔔 尝试发送通知: "${title}" - "${body}"`);
+            console.log(`[Notification] Attempting to send: "${title}" - "${body}"`);
             
             // 检查浏览器是否支持通知
             if (!("Notification" in window)) {
-                console.error('[Notification] ✗ 浏览器不支持通知');
+                console.warn('[Notification] Browser does not support notifications');
                 showDebugToast('浏览器不支持通知');
                 return;
             }
             
-            // 检查权限状态
-            const permission = Notification.permission;
-            console.log(`[Notification] 权限状态: ${permission}`);
+            // 检查页面可见性（可选：只在后台时通知）
+            const isPageHidden = document.hidden || document.visibilityState === 'hidden';
+            console.log(`[Notification] Page visibility - hidden: ${isPageHidden}, state: ${document.visibilityState}`);
             
-            if (permission === "granted") {
+            // 检查权限状态
+            console.log(`[Notification] Permission status: ${Notification.permission}`);
+            
+            if (Notification.permission === "granted") {
                 try {
-                    console.log(`[Notification] ✓ 权限已授予，立即发送通知...`);
                     const notification = new Notification(title, { 
                         body: body,
                         icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png',
                         badge: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png',
-                        tag: 'chat-message-' + Date.now(), // 每次都用新tag，避免被替换
-                        requireInteraction: false,
-                        silent: false
+                        tag: 'chat-message', // 相同tag的通知会被替换，避免通知过多
+                        requireInteraction: false, // 自动关闭
+                        silent: false // 有声音提示
                     });
                     
                     notification.onclick = function() {
@@ -3115,37 +3116,37 @@
                         this.close();
                     };
                     
-                    console.log('[Notification] ✓✓✓ 通知已成功发送！');
-                    showDebugToast(`✓ 通知: ${title}`);
+                    console.log('[Notification] Notification sent successfully');
+                    showDebugToast(`✓ 通知已发送: ${title}`);
                 } catch (error) {
-                    console.error('[Notification] ✗✗✗ 发送失败:', error);
-                    showDebugToast(`✗ 通知失败: ${error.message}`);
+                    console.error('[Notification] Failed to send notification:', error);
+                    showDebugToast(`✗ 通知发送失败: ${error.message}`);
                 }
-            } else if (permission === "default") {
-                console.log('[Notification] 权限未设置，请求权限...');
+            } else if (Notification.permission !== "denied") {
+                console.log('[Notification] Requesting permission...');
+                showDebugToast('请求通知权限中...');
                 Notification.requestPermission().then(permission => {
-                    console.log(`[Notification] 权限请求结果: ${permission}`);
+                    console.log(`[Notification] Permission result: ${permission}`);
                     if (permission === "granted") {
                         try {
                             new Notification(title, { 
                                 body: body,
                                 icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png'
                             });
-                            console.log('[Notification] ✓ 通知已发送（权限授予后）');
+                            console.log('[Notification] Notification sent after permission granted');
+                            showDebugToast('✓ 权限已授予，通知已发送');
                         } catch (error) {
-                            console.error('[Notification] ✗ 发送失败:', error);
+                            console.error('[Notification] Failed to send notification:', error);
+                            showDebugToast(`✗ 通知发送失败: ${error.message}`);
                         }
                     } else {
-                        console.warn('[Notification] ✗ 权限被拒绝');
+                        showDebugToast('✗ 通知权限被拒绝');
                     }
                 });
             } else {
-                console.error('[Notification] ✗✗✗ 权限已被拒绝，无法发送通知');
-                console.error('[Notification] 请在浏览器设置中允许通知权限');
-                showDebugToast('✗ 通知权限被拒绝，请在设置中允许');
+                console.warn('[Notification] Permission denied by user');
+                showDebugToast('✗ 通知权限已被拒绝');
             }
-            
-            console.log(`[Notification] ========================================`);
         }
 
         // 标记已读
@@ -4184,12 +4185,6 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                     user_id: currentUserId
                 }));
                 
-                console.log(`[Sync] ========================================`);
-                console.log(`[Sync] 正在同步 ${syncData.length} 个角色到后端...`);
-                console.log(`[Sync]   user_id: ${currentUserId}`);
-                console.log(`[Sync]   user_id类型: ${typeof currentUserId}`);
-                console.log(`[Sync]   角色列表:`, syncData.map(c => ({ name: c.name, user_id: c.user_id })));
-                
                 // 发送到后端
                 const res = await fetch(`${API_BASE}/characters/sync`, {
                     method: 'POST',
@@ -4198,17 +4193,10 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 });
                 
                 if (res.ok) {
-                    const result = await res.json();
-                    console.log(`[Sync] ✓✓✓ 同步成功！`);
-                    console.log(`[Sync]   后端响应:`, result);
-                    console.log(`[Sync] ========================================`);
+                    console.log(`[Sync] ✓ Synced ${syncData.length} characters to backend`);
                     showDebugToast(`✓ 已同步${syncData.length}个角色到后端`);
                 } else {
-                    const errorText = await res.text();
-                    console.error('[Sync] ✗✗✗ 同步失败！');
-                    console.error('[Sync]   状态码:', res.status);
-                    console.error('[Sync]   错误信息:', errorText);
-                    console.log(`[Sync] ========================================`);
+                    console.error('[Sync] Failed to sync:', await res.text());
                 }
                 
             } catch (err) {
@@ -4262,37 +4250,26 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 console.log('[Push] Subscribed:', subscription);
                 
                 // 发送订阅信息到后端
-                console.log('[Push] ========================================');
-                console.log('[Push] 🔔 正在发送订阅到后端...');
-                console.log('[Push]   user_id:', currentUserId);
-                console.log('[Push]   user_id类型:', typeof currentUserId);
-                console.log('[Push]   subscription endpoint:', subscription.endpoint.substring(0, 50) + '...');
-                
-                const subscriptionData = {
-                    user_id: currentUserId,
-                    subscription: subscription.toJSON()
-                };
-                console.log('[Push]   发送数据:', JSON.stringify(subscriptionData).substring(0, 200) + '...');
-                
+                console.log('[Push] Sending subscription to backend...');
+                console.log('[Push] user_id:', currentUserId);
                 const subRes = await fetch(`${API_BASE}/push/subscribe`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(subscriptionData)
+                    body: JSON.stringify({
+                        user_id: currentUserId,
+                        subscription: subscription.toJSON()
+                    })
                 });
                 
                 if (subRes.ok) {
                     const result = await subRes.json();
-                    console.log('[Push] ✓✓✓ 订阅已保存到后端！');
-                    console.log('[Push]   后端响应:', result);
-                    console.log('[Push]   🎉 后台推送已激活！即使浏览器在后台也能收到通知！');
-                    console.log('[Push] ========================================');
+                    console.log('[Push] ✓✓✓ Subscription saved to backend!');
+                    console.log('[Push] Backend response:', result);
+                    console.log('[Push] 🎉 后台推送已激活！即使浏览器在后台也能收到通知！');
                     showDebugToast('🎉 后台推送已激活！', true);
                 } else {
                     const errorText = await subRes.text();
-                    console.error('[Push] ✗✗✗ 订阅保存失败！');
-                    console.error('[Push]   状态码:', subRes.status);
-                    console.error('[Push]   错误信息:', errorText);
-                    console.log('[Push] ========================================');
+                    console.error('[Push] ✗ Failed to save subscription:', errorText);
                     showDebugToast('✗ 订阅保存失败: ' + errorText);
                 }
                 
@@ -4623,18 +4600,17 @@ ${loreContext}
 
                     console.log(`[AutoChat] Sent part ${i+1}/${segments.length} for ${freshChar.name}: ${seg}`);
 
-                    // 5. 更新 UI（如果正在查看）
+                    // 5. 更新 UI 或 发送通知
+                    // 如果当前正好打开了这个角色的窗口，直接追加
                     if (currentChatCharId === freshChar.id) {
                         console.log(`[AutoChat] User is viewing ${freshChar.name}'s chat, appending to UI`);
                         appendMessageToUI('char', seg, freshChar.avatar);
-                    }
-                    
-                    // 6. 无论是否在查看，都发送通知（重要！）
-                    console.log(`[AutoChat] Sending notification for ${freshChar.name}: ${seg}`);
-                    sendSystemNotification(freshChar.name, seg);
-                    
-                    // 7. 如果在微信列表页，刷新列表以更新最后一条消息预览
-                    if (currentChatCharId !== freshChar.id) {
+                    } else {
+                        // 否则发送系统通知
+                        console.log(`[AutoChat] User is NOT viewing ${freshChar.name}'s chat (current: ${currentChatCharId}), sending notification`);
+                        sendSystemNotification(freshChar.name, seg);
+                        
+                        // 如果在微信列表页，刷新列表以更新最后一条消息预览
                         const wechatPage = document.getElementById('wechat-page');
                         if (wechatPage.style.display !== 'none' && 
                             document.querySelector('.wechat-tab-item.active .tab-name').innerText === '微信') {

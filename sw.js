@@ -17,60 +17,37 @@ self.addEventListener('activate', (event) => {
 
 // 接收推送（核心）
 self.addEventListener('push', (event) => {
-    console.log('[SW] ========================================');
-    console.log('[SW] 🔔🔔🔔 收到推送事件！');
-    console.log('[SW] Event:', event);
+    console.log('[SW] Push received:', event);
     
     let payload = {
         title: '新消息',
         body: '你有一条新消息',
-        icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png',
-        badge: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png'
+        icon: '/icon-192.png',
+        badge: '/icon-192.png'
     };
     
     if (event.data) {
         try {
-            const data = event.data.json();
-            console.log('[SW] 解析推送数据:', data);
-            payload = {
-                title: data.title || payload.title,
-                body: data.body || payload.body,
-                icon: data.icon || payload.icon,
-                badge: data.badge || payload.badge,
-                data: data.data || {}
-            };
+            payload = event.data.json();
         } catch (e) {
-            console.error('[SW] 解析推送数据失败:', e);
-            // 尝试文本格式
-            try {
-                payload.body = event.data.text();
-            } catch (e2) {
-                console.error('[SW] 无法解析推送数据');
-            }
+            console.error('[SW] Failed to parse push data:', e);
         }
     }
     
-    console.log('[SW] 准备显示通知:', payload);
+    console.log('[SW] Showing notification:', payload);
     
     // 显示通知（这是唯一允许显示通知的地方）
     event.waitUntil(
         self.registration.showNotification(payload.title, {
             body: payload.body,
-            icon: payload.icon,
-            badge: payload.badge,
+            icon: payload.icon || '/icon-192.png',
+            badge: payload.badge || '/icon-192.png',
             vibrate: [200, 100, 200],
-            tag: 'chat-notification-' + (payload.data.char_id || Date.now()),
+            tag: 'chat-notification',
             data: payload.data || {},
-            requireInteraction: false,
-            silent: false
-        }).then(() => {
-            console.log('[SW] ✓✓✓ 通知已成功显示！');
-        }).catch((err) => {
-            console.error('[SW] ✗✗✗ 通知显示失败:', err);
+            requireInteraction: false
         })
     );
-    
-    console.log('[SW] ========================================');
 });
 
 // 点击通知
