@@ -2849,15 +2849,12 @@
         }
 
         // --- 通知系统逻辑 ---
-        // 自动检测环境：本地用localhost，部署用Zeabur域名
-        const BACKEND_URL = location.hostname === 'localhost' 
-            ? 'http://localhost:5000'
-            : 'https://rime2713.zeabur.app'; // ✅ 你的Zeabur域名（请确认是https）
+        // TODO: 部署到 Zeabur 后，请将下面的地址替换为 Zeabur 提供的后端域名
+        // 本地测试请保持 http://localhost:5000
+        // 如果部署了，改成：https://你的后端域名.zeabur.app
+        const BACKEND_URL = 'http://localhost:5000';
         const API_BASE = BACKEND_URL + '/api';
         const SOCKET_URL = BACKEND_URL; // WebSocket自动使用同一个地址
-        
-        console.log('[Config] BACKEND_URL:', BACKEND_URL);
-        console.log('[Config] Current hostname:', location.hostname);
         
         let socket = null; // WebSocket连接 
 
@@ -4365,11 +4362,7 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             console.log('[AutoChat] Current environment:', {
                 protocol: location.protocol,
                 hostname: location.hostname,
-                href: location.href,
-                serviceWorkerSupported: 'serviceWorker' in navigator,
-                pushManagerSupported: 'PushManager' in window,
-                notificationSupported: 'Notification' in window,
-                notificationPermission: Notification.permission
+                href: location.href
             });
             showDebugToast('实时推送启动中...', true);
             
@@ -4600,17 +4593,37 @@ ${loreContext}
 
                     console.log(`[AutoChat] Sent part ${i+1}/${segments.length} for ${freshChar.name}: ${seg}`);
 
-                    // 5. 更新 UI 或 发送通知
-                    // 如果当前正好打开了这个角色的窗口，直接追加
+                    // 5. 更新 UI（如果正在查看）
                     if (currentChatCharId === freshChar.id) {
                         console.log(`[AutoChat] User is viewing ${freshChar.name}'s chat, appending to UI`);
                         appendMessageToUI('char', seg, freshChar.avatar);
-                    } else {
-                        // 否则发送系统通知
-                        console.log(`[AutoChat] User is NOT viewing ${freshChar.name}'s chat (current: ${currentChatCharId}), sending notification`);
-                        sendSystemNotification(freshChar.name, seg);
-                        
-                        // 如果在微信列表页，刷新列表以更新最后一条消息预览
+                    }
+                    
+                    // 6. 发送通知（双重保障：前端Notification + 后端WebPush）
+                    console.log(`[AutoChat] Sending notifications for ${freshChar.name}...`);
+                    
+                    // 6.1 前端Notification（如果页面在前台且有权限）
+                    sendSystemNotification(freshChar.name, seg);
+                    
+                    // 6.2 后端Web Push（即使页面在后台也能收到）
+                    try {
+                        await fetch(`${API_BASE}/trigger_push`, {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                user_id: currentUserId,
+                                char_id: freshChar.id,
+                                char_name: freshChar.name,
+                                message: seg  // 传递消息内容
+                            })
+                        });
+                        console.log(`[AutoChat] ✓ Web Push sent for ${freshChar.name}`);
+                    } catch (err) {
+                        console.error(`[AutoChat] ✗ Web Push failed:`, err);
+                    }
+                    
+                    // 7. 如果在微信列表页，刷新列表以更新最后一条消息预览
+                    if (currentChatCharId !== freshChar.id) {
                         const wechatPage = document.getElementById('wechat-page');
                         if (wechatPage.style.display !== 'none' && 
                             document.querySelector('.wechat-tab-item.active .tab-name').innerText === '微信') {
