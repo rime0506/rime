@@ -5,3 +5,4 @@ python-socketio==5.10.0
 pywebpush==1.14.0
 py-vapid==1.9.0
 cryptography==41.0.7
+requests==2.31.0
