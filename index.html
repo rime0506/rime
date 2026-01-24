@@ -4247,6 +4247,8 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 console.log('[Push] Subscribed:', subscription);
                 
                 // 发送订阅信息到后端
+                console.log('[Push] Sending subscription to backend...');
+                console.log('[Push] user_id:', currentUserId);
                 const subRes = await fetch(`${API_BASE}/push/subscribe`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -4257,11 +4259,15 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 });
                 
                 if (subRes.ok) {
-                    console.log('[Push] ✓ Subscription saved to backend');
-                    showDebugToast('✓ 推送订阅成功！可在后台收通知', true);
+                    const result = await subRes.json();
+                    console.log('[Push] ✓✓✓ Subscription saved to backend!');
+                    console.log('[Push] Backend response:', result);
+                    console.log('[Push] 🎉 后台推送已激活！即使浏览器在后台也能收到通知！');
+                    showDebugToast('🎉 后台推送已激活！', true);
                 } else {
-                    console.error('[Push] Failed to save subscription');
-                    showDebugToast('✗ 订阅保存失败');
+                    const errorText = await subRes.text();
+                    console.error('[Push] ✗ Failed to save subscription:', errorText);
+                    showDebugToast('✗ 订阅保存失败: ' + errorText);
                 }
                 
             } catch (err) {
@@ -4326,31 +4332,14 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 socket.on('auto_chat_trigger', (data) => {
                     console.log('[WebSocket] ✓✓✓ Received auto_chat_trigger!');
                     console.log('[WebSocket] Data:', data);
-                    showDebugToast(`🔥 收到推送: ${data.char_name}`);
+                    showDebugToast(`🔥 收到WebSocket推送: ${data.char_name}`);
                     
-                    // 立即弹通知（就像你之前的版本一样）
-                    if (Notification.permission === 'granted') {
-                        try {
-                            new Notification(data.char_name, {
-                                body: `${data.char_name} 给你发了新消息！`,
-                                tag: 'auto-chat-notification',
-                                icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png'
-                            });
-                            console.log('[WebSocket] ✓ Notification shown!');
-                        } catch (err) {
-                            console.error('[WebSocket] Failed to show notification:', err);
-                            showDebugToast(`✗ 通知失败: ${err.message}`);
-                        }
-                    } else {
-                        console.warn('[WebSocket] ⚠️ Notification permission not granted:', Notification.permission);
-                        showDebugToast(`⚠️ 通知权限未授予(${Notification.permission})，请在设置中允许通知`);
-                    }
-                    
-                    // 查找对应角色并触发AI生成
+                    // 查找对应角色并触发AI生成（强制发送通知）
                     db.characters.get(data.char_id).then(char => {
                         if (char) {
-                            console.log('[WebSocket] ✓ Found character, triggering AI...');
-                            triggerAutoChat(char);
+                            console.log('[WebSocket] ✓ Found character, triggering AI with forceNotification=true...');
+                            // 强制发送通知（因为是后端推送的，说明用户可能不在前台）
+                            triggerAutoChat(char, true);
                         } else {
                             console.warn('[WebSocket] ✗ Character not found:', data.char_id);
                             showDebugToast(`✗ 找不到角色: ${data.char_id}`);
@@ -4371,6 +4360,11 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             if (syncTimer) clearInterval(syncTimer);
             
             console.log('[AutoChat] Starting real-time push mode...');
+            console.log('[AutoChat] Current environment:', {
+                protocol: location.protocol,
+                hostname: location.hostname,
+                href: location.href
+            });
             showDebugToast('实时推送启动中...', true);
             
             // 1. 连接WebSocket（实时推送，前台生效）
@@ -4380,10 +4374,13 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             // 2. 注册 Service Worker（后台推送，需要HTTPS或localhost）
             console.log('[AutoChat] Step 2: Registering Service Worker...');
             if (location.protocol === 'https:' || location.hostname === 'localhost') {
+                console.log('[AutoChat] ✓ Environment supports Service Worker');
                 await registerServiceWorkerAndSubscribe();
             } else {
-                console.log('[AutoChat] Service Worker skipped (需要HTTPS或localhost)');
-                showDebugToast('⚠️ 仅WebSocket模式（需HTTPS才有后台推送）');
+                console.warn('[AutoChat] ✗ Service Worker NOT supported in this environment!');
+                console.warn(`[AutoChat] Current: ${location.protocol}//${location.hostname}`);
+                console.warn('[AutoChat] Required: https:// OR http://localhost');
+                showDebugToast('⚠️ 需要HTTPS或localhost才有后台推送');
             }
             
             // 3. 立即同步一次配置到后端
@@ -4396,11 +4393,58 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 syncCharactersToBackend();
             }, 30 * 1000);
             
+            // 5. 每15秒检查一次是否该发消息（立即触发，无后端轮询延迟）
+            setInterval(() => {
+                checkAutoChat(); // 前端主动检查
+            }, 15 * 1000);
+            
+            // 立即检查一次
+            checkAutoChat();
+            
+            // 6. 监听页面可见性变化，从后台切回时立即检查
+            document.addEventListener('visibilitychange', function() {
+                if (!document.hidden) {
+                    console.log('[AutoChat] ✓ Page became visible, checking for pending messages...');
+                    showDebugToast('✓ 返回前台，检查消息并发通知...');
+                    
+                    // 立即检查是否有该发的消息（可能在后台时错过了WebSocket推送）
+                    // 强制发送通知（forceNotification标记）
+                    setTimeout(() => {
+                        checkAutoChat(true); // true = 强制发通知
+                    }, 500); // 缩短延迟到500ms
+                }
+            });
+            
             console.log('[AutoChat] ✓ Setup complete!');
             showDebugToast('✓ 实时推送已启动！', true);
         }
 
-        async function checkAutoChat() {
+        // 立即触发后台推送通知（无延迟）
+        async function triggerPushNotification(char) {
+            try {
+                console.log(`[PushTrigger] Sending immediate push for ${char.name}...`);
+                
+                const res = await fetch(`${API_BASE}/trigger_push`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        user_id: currentUserId,
+                        char_id: char.id,
+                        char_name: char.name
+                    })
+                });
+                
+                if (res.ok) {
+                    console.log(`[PushTrigger] ✓✓✓ Push sent immediately for ${char.name}!`);
+                } else {
+                    console.error(`[PushTrigger] ✗ Failed:`, await res.text());
+                }
+            } catch (err) {
+                console.error(`[PushTrigger] ✗ Error:`, err);
+            }
+        }
+        
+        async function checkAutoChat(forceNotification = false) {
             const now = Date.now();
             // 获取开启了主动聊天的角色
             const chars = await db.characters
@@ -4408,7 +4452,7 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 .toArray();
 
             if (chars.length > 0) {
-                console.log(`[AutoChat] Check triggered at ${new Date().toLocaleTimeString()} for ${chars.length} enabled chars.`);
+                console.log(`[AutoChat] Check triggered at ${new Date().toLocaleTimeString()} for ${chars.length} enabled chars. forceNotification=${forceNotification}`);
             }
 
             for (const char of chars) {
@@ -4436,13 +4480,18 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 // 例如间隔1分钟，diff是 0.95分钟，也允许触发
                 if (diffMinutes >= (char.auto_reply_interval - 0.1)) {
                     // 触发主动消息
-                    console.log(`[AutoChat] Triggering for ${char.name} (Interval: ${char.auto_reply_interval}, Last msg: ${diffMinutes.toFixed(2)} mins ago)`);
-                    triggerAutoChat(char); // 不使用 await，让它异步去跑，不要阻塞循环
+                    console.log(`[AutoChat] ✓✓✓ Triggering for ${char.name} (Interval: ${char.auto_reply_interval}, Last msg: ${diffMinutes.toFixed(2)} mins ago)`);
+                    
+                    // 1. 立即通过后端发送Web Push（后台通知）
+                    triggerPushNotification(char);
+                    
+                    // 2. 生成AI消息
+                    triggerAutoChat(char, forceNotification); // 传递强制通知标记
                 }
             }
         }
 
-        async function triggerAutoChat(char) {
+        async function triggerAutoChat(char, forceNotification = false) {
             // 加锁
             autoChatLocks.add(char.id);
 
@@ -4575,8 +4624,19 @@ ${loreContext}
                     console.log(`[AutoChat] Sent part ${i+1}/${segments.length} for ${freshChar.name}: ${seg}`);
 
                     // 5. 更新 UI 或 发送通知
+                    // 如果强制通知模式（从后台返回时），无论是否在聊天窗口都发送通知
+                    if (forceNotification) {
+                        console.log(`[AutoChat] Force notification mode - sending notification for ${freshChar.name}`);
+                        showDebugToast(`🔔 强制通知: ${freshChar.name}`);
+                        sendSystemNotification(freshChar.name, seg);
+                        
+                        // 同时更新UI（如果正在查看）
+                        if (currentChatCharId === freshChar.id) {
+                            appendMessageToUI('char', seg, freshChar.avatar);
+                        }
+                    }
                     // 如果当前正好打开了这个角色的窗口，直接追加
-                    if (currentChatCharId === freshChar.id) {
+                    else if (currentChatCharId === freshChar.id) {
                         console.log(`[AutoChat] User is viewing ${freshChar.name}'s chat, appending to UI`);
                         showDebugToast(`主动消息: 正在查看${freshChar.name}，显示在UI`);
                         appendMessageToUI('char', seg, freshChar.avatar);
@@ -4585,8 +4645,10 @@ ${loreContext}
                         console.log(`[AutoChat] User is NOT viewing ${freshChar.name}'s chat (current: ${currentChatCharId}), sending notification`);
                         showDebugToast(`主动消息: 不在${freshChar.name}聊天中，发送通知`);
                         sendSystemNotification(freshChar.name, seg);
-                        
-                        // 如果在微信列表页，刷新列表以更新最后一条消息预览
+                    }
+                    
+                    // 如果在微信列表页，刷新列表以更新最后一条消息预览
+                    if (currentChatCharId !== freshChar.id) {
                         const wechatPage = document.getElementById('wechat-page');
                         if (wechatPage.style.display !== 'none' && 
                             document.querySelector('.wechat-tab-item.active .tab-name').innerText === '微信') {

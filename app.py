@@ -408,7 +408,31 @@ def send_web_push(user_id, char_name, char_id):
     except Exception as e:
         print(f"[WebPush] ✗ Error in send_web_push: {e}")
 
-# 启动后台检查线程
+# 按需触发推送通知（前端调用）
+@app.route('/api/trigger_push', methods=['POST'])
+def trigger_push():
+    """前端检测到需要发消息时，立即调用此API发送推送"""
+    try:
+        data = request.get_json()
+        user_id = data.get('user_id')
+        char_id = data.get('char_id')
+        char_name = data.get('char_name')
+        
+        if not all([user_id, char_id, char_name]):
+            return jsonify({'error': 'Missing parameters'}), 400
+        
+        print(f"[TriggerPush] ✓ Immediate push requested for {char_name}")
+        
+        # 立即发送Web Push
+        send_web_push(user_id, char_name, char_id)
+        
+        return jsonify({'message': 'Push sent successfully'}), 200
+        
+    except Exception as e:
+        print(f"[TriggerPush] ✗ Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# 启动后台检查线程（已废弃，改为按需推送）
 def start_background_checker():
     thread = threading.Thread(target=check_auto_messages, daemon=True)
     thread.start()
@@ -437,8 +461,8 @@ if __name__ == '__main__':
     print(" - auto_chat_trigger (实时推送)")
     print("=" * 50)
     
-    # 启动后台检查线程
-    start_background_checker()
+    # ❌ 移除10秒轮询，改为前端按需触发推送（立即推送，无延迟）
+    # start_background_checker()
     
     # 使用socketio.run而不是app.run
     socketio.run(app, debug=True, port=port, host='0.0.0.0', allow_unsafe_werkzeug=True)
