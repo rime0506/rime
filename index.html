@@ -4481,9 +4481,24 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 }
                 
                 // 获取 VAPID 公钥
+                console.log('[Push] Fetching VAPID public key...');
                 const keyRes = await fetch(`${API_BASE}/push/public_key`);
+                
+                if (!keyRes.ok) {
+                    throw new Error(`获取公钥失败: ${keyRes.status}`);
+                }
+                
                 const keyData = await keyRes.json();
+                console.log('[Push] Key data received:', keyData);
+                
                 const publicKey = keyData.public_key;
+                
+                // 验证公钥是否有效
+                if (!publicKey) {
+                    throw new Error('后端返回的公钥为空！请检查后端 VAPID 密钥是否正确生成。');
+                }
+                
+                console.log('[Push] Public key:', publicKey.substring(0, 30) + '...');
                 
                 // 订阅推送
                 const subscription = await registration.pushManager.subscribe({

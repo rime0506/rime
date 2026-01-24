@@ -23,58 +23,91 @@ print(f"[VAPID] 密钥文件路径: {VAPID_FILE}")
 def get_vapid_keys():
     """获取或生成 VAPID 密钥"""
     if os.path.exists(VAPID_FILE):
-        with open(VAPID_FILE, 'r') as f:
-            keys = json.load(f)
-            print("[VAPID] ✓ Loaded existing keys from file")
-            return keys
-    else:
-        print("[VAPID] Generating new VAPID keys...")
         try:
-            from pywebpush import vapid as vapid_gen
-            import base64
-            
-            v = vapid_gen.Vapid()
-            v.generate_keys()
-            
-            # 获取原始字节
-            private_bytes = v.private_key.to_string()
-            public_bytes = v.public_key.to_string()
-            
-            # 转为URL-safe base64（前端需要这种格式）
-            public_key_b64 = base64.urlsafe_b64encode(public_bytes).decode('utf-8').rstrip('=')
-            
-            keys = {
-                'private_key': private_bytes.hex(),
-                'public_key': public_key_b64,
-                'public_key_raw': public_bytes.hex()
-            }
-            
-            with open(VAPID_FILE, 'w') as f:
-                json.dump(keys, f, indent=2)
-            
-            print(f"[VAPID] ✓ Generated new keys")
-            print(f"[VAPID] Public Key: {public_key_b64[:30]}...")
-            return keys
-            
-        except ImportError:
-            print("[VAPID] ✗ pywebpush not installed! Run: pip install pywebpush")
-            return None
+            with open(VAPID_FILE, 'r') as f:
+                keys = json.load(f)
+                # 验证密钥完整性
+                if keys.get('public_key') and keys.get('private_key'):
+                    print("[VAPID] ✓ Loaded existing keys from file")
+                    print(f"[VAPID] Public Key: {keys['public_key'][:30]}...")
+                    return keys
+                else:
+                    print("[VAPID] ✗ Existing keys incomplete, regenerating...")
+                    os.remove(VAPID_FILE)
         except Exception as e:
-            print(f"[VAPID] ✗ Error generating keys: {e}")
-            return None
+            print(f"[VAPID] ✗ Error loading keys: {e}, regenerating...")
+            if os.path.exists(VAPID_FILE):
+                os.remove(VAPID_FILE)
+    
+    # 生成新密钥
+    print("[VAPID] Generating new VAPID keys...")
+    try:
+        from pywebpush import vapid as vapid_gen
+        import base64
+        
+        v = vapid_gen.Vapid()
+        v.generate_keys()
+        
+        # 获取原始字节（使用正确的方法）
+        # pywebpush 1.14.0 使用 private_pem() 和 public_key.public_bytes()
+        private_key_pem = v.private_pem()
+        
+        # 获取公钥的原始字节（65字节，未压缩格式）
+        from cryptography.hazmat.primitives import serialization
+        public_key_bytes = v.public_key.public_bytes(
+            encoding=serialization.Encoding.X962,
+            format=serialization.PublicFormat.UncompressedPoint
+        )
+        
+        # 转为URL-safe base64（前端需要这种格式）
+        public_key_b64 = base64.urlsafe_b64encode(public_key_bytes).decode('utf-8').rstrip('=')
+        
+        keys = {
+            'private_key': private_key_pem.decode('utf-8') if isinstance(private_key_pem, bytes) else private_key_pem,
+            'public_key': public_key_b64,
+            'public_key_raw': public_key_bytes.hex()
+        }
+        
+        with open(VAPID_FILE, 'w') as f:
+            json.dump(keys, f, indent=2)
+        
+        print(f"[VAPID] ✓✓✓ Generated new keys successfully!")
+        print(f"[VAPID] Public Key: {public_key_b64[:30]}...")
+        print(f"[VAPID] Public Key Length: {len(public_key_b64)} chars")
+        print(f"[VAPID] Keys saved to: {VAPID_FILE}")
+        return keys
+        
+    except ImportError as e:
+        print(f"[VAPID] ✗ Import error: {e}")
+        print("[VAPID] Please install: pip install pywebpush cryptography")
+        return None
+    except Exception as e:
+        print(f"[VAPID] ✗✗✗ Error generating keys: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 try:
     vapid_keys = get_vapid_keys()
     if vapid_keys:
-        VAPID_PRIVATE_KEY = bytes.fromhex(vapid_keys['private_key'])
+        # 私钥现在是 PEM 格式的字符串
+        private_key_str = vapid_keys['private_key']
+        if isinstance(private_key_str, str):
+            VAPID_PRIVATE_KEY = private_key_str
+        else:
+            VAPID_PRIVATE_KEY = private_key_str.decode('utf-8')
+        
         VAPID_PUBLIC_KEY = vapid_keys['public_key']
         VAPID_CLAIMS = {"sub": "mailto:admin@example.com"}
-        print(f"[VAPID] ✓ Ready to send push notifications")
+        print(f"[VAPID] ✓✓✓ Ready to send push notifications!")
+        print(f"[VAPID] Public Key (first 30 chars): {VAPID_PUBLIC_KEY[:30]}...")
     else:
         raise Exception("Failed to generate VAPID keys")
 except Exception as e:
-    print(f"[VAPID] ✗ Fatal error: {e}")
-    print("[VAPID] Please install pywebpush: pip install -r requirements.txt")
+    print(f"[VAPID] ✗✗✗ Fatal error: {e}")
+    print("[VAPID] Please install dependencies: pip install -r requirements.txt")
+    import traceback
+    traceback.print_exc()
     VAPID_PRIVATE_KEY = None
     VAPID_PUBLIC_KEY = None
     VAPID_CLAIMS = {}
