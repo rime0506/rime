@@ -2914,14 +2914,33 @@
             }
             
             if (Notification.permission === "granted") {
-                sendSystemNotification("测试通知", "如果你能看到这条通知，说明系统通知功能正常！");
-                showDebugToast("测试通知已发送！请查看是否弹出通知窗口", true);
+                // 立即发送第一条通知
+                new Notification("测试通知", {
+                    body: "如果你能看到这条通知，说明系统通知功能正常！",
+                    icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png'
+                });
+                showDebugToast("✓ 立即发送通知！5秒后再发一条", true);
+                
+                // 5秒后发送第二条通知
+                setTimeout(() => {
+                    new Notification("延迟测试通知", {
+                        body: "这是5秒后发送的通知，如果在后台也能收到，说明后台推送正常！",
+                        icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png',
+                        tag: 'delayed-test'
+                    });
+                    showDebugToast("✓ 5秒延迟通知已发送！", true);
+                    console.log('[Test] 5秒延迟通知已发送');
+                }, 5000);
+                
             } else {
                 Notification.requestPermission().then(permission => {
                     console.log('[Test] Permission request result:', permission);
                     if (permission === "granted") {
-                        sendSystemNotification("测试通知", "权限已授予！系统通知功能正常工作");
-                        showDebugToast("权限已授予！请查看是否弹出通知", true);
+                        new Notification("测试通知", {
+                            body: "权限已授予！系统通知功能正常工作",
+                            icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png'
+                        });
+                        showDebugToast("✓ 权限已授予！通知已发送", true);
                     } else {
                         alert("通知权限被拒绝，无法发送通知");
                     }
@@ -4320,7 +4339,11 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                             console.log('[WebSocket] ✓ Notification shown!');
                         } catch (err) {
                             console.error('[WebSocket] Failed to show notification:', err);
+                            showDebugToast(`✗ 通知失败: ${err.message}`);
                         }
+                    } else {
+                        console.warn('[WebSocket] ⚠️ Notification permission not granted:', Notification.permission);
+                        showDebugToast(`⚠️ 通知权限未授予(${Notification.permission})，请在设置中允许通知`);
                     }
                     
                     // 查找对应角色并触发AI生成
