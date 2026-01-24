@@ -4962,9 +4962,30 @@ ${loreContext}
                         jsonStr = jsonStr.replace(/^```\s*/, '').replace(/\s*```$/, '');
                     }
                     
+                    // 尝试提取JSON对象（可能包含在文本中）
+                    let jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        jsonStr = jsonMatch[0];
+                    }
+                    
                     const parsed = JSON.parse(jsonStr);
-                    cleanReply = parsed.reply || aiResponse; // 如果解析失败，使用原始回复
+                    cleanReply = parsed.reply || "";
                     thought = parsed.thought || "";
+                    
+                    // 如果reply为空，说明可能格式不对，尝试从原始响应中提取
+                    if (!cleanReply && aiResponse.includes('"reply"')) {
+                        // 尝试匹配reply字段（支持多行文本）
+                        const replyMatch = aiResponse.match(/"reply"\s*:\s*"([\s\S]*?)"(?:\s*[,}])/);
+                        if (replyMatch) {
+                            cleanReply = replyMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\/g, '');
+                        }
+                    }
+                    
+                    // 如果还是为空，使用原始响应（但尝试去掉JSON格式）
+                    if (!cleanReply) {
+                        cleanReply = aiResponse.replace(/\{[\s\S]*?\}/, '').trim();
+                        if (!cleanReply) cleanReply = aiResponse; // 最后兜底
+                    }
                     
                     // 存储心声到角色对象
                     if (thought && thought.trim()) {
@@ -4984,9 +5005,27 @@ ${loreContext}
                         }
                     }
                 } catch (e) {
-                    // 如果解析失败，使用原始回复
-                    console.warn("解析AI返回的JSON失败，使用原始回复", e);
-                    cleanReply = aiResponse;
+                    // 如果解析失败，尝试从响应中提取reply字段
+                    console.warn("解析AI返回的JSON失败，尝试提取reply字段", e);
+                    try {
+                        // 尝试匹配reply字段（支持多行文本）
+                        const replyMatch = aiResponse.match(/"reply"\s*:\s*"([\s\S]*?)"(?:\s*[,}])/);
+                        if (replyMatch) {
+                            cleanReply = replyMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\/g, '');
+                        } else {
+                            // 如果找不到reply字段，尝试提取纯文本
+                            cleanReply = aiResponse.replace(/\{[\s\S]*?\}/g, '').trim();
+                            if (!cleanReply) cleanReply = aiResponse; // 最后兜底
+                        }
+                    } catch (e2) {
+                        console.error("提取reply字段也失败", e2);
+                        cleanReply = aiResponse; // 最后兜底
+                    }
+                }
+                
+                // 确保cleanReply不为空
+                if (!cleanReply || !cleanReply.trim()) {
+                    cleanReply = aiResponse.replace(/\{[\s\S]*?\}/g, '').trim() || aiResponse;
                 }
                 
                 const replyText = cleanReply;
@@ -5832,9 +5871,30 @@ ${loreContext}
                         jsonStr = jsonStr.replace(/^```\s*/, '').replace(/\s*```$/, '');
                     }
                     
+                    // 尝试提取JSON对象（可能包含在文本中）
+                    let jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        jsonStr = jsonMatch[0];
+                    }
+                    
                     const parsed = JSON.parse(jsonStr);
-                    replyText = parsed.reply || aiResponse; // 如果解析失败，使用原始回复
+                    replyText = parsed.reply || "";
                     thought = parsed.thought || "";
+                    
+                    // 如果reply为空，说明可能格式不对，尝试从原始响应中提取
+                    if (!replyText && aiResponse.includes('"reply"')) {
+                        // 尝试匹配reply字段（支持多行文本）
+                        const replyMatch = aiResponse.match(/"reply"\s*:\s*"([\s\S]*?)"(?:\s*[,}])/);
+                        if (replyMatch) {
+                            replyText = replyMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\/g, '');
+                        }
+                    }
+                    
+                    // 如果还是为空，使用原始响应（但尝试去掉JSON格式）
+                    if (!replyText) {
+                        replyText = aiResponse.replace(/\{[\s\S]*?\}/, '').trim();
+                        if (!replyText) replyText = aiResponse; // 最后兜底
+                    }
                     
                     // 存储心声到角色对象
                     if (thought && thought.trim()) {
@@ -5854,9 +5914,27 @@ ${loreContext}
                         }
                     }
                 } catch (e) {
-                    // 如果解析失败，使用原始回复
-                    console.warn("解析AI返回的JSON失败，使用原始回复", e);
-                    replyText = aiResponse;
+                    // 如果解析失败，尝试从响应中提取reply字段
+                    console.warn("解析AI返回的JSON失败，尝试提取reply字段", e);
+                    try {
+                        // 尝试匹配reply字段（支持多行文本）
+                        const replyMatch = aiResponse.match(/"reply"\s*:\s*"([\s\S]*?)"(?:\s*[,}])/);
+                        if (replyMatch) {
+                            replyText = replyMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\/g, '');
+                        } else {
+                            // 如果找不到reply字段，尝试提取纯文本
+                            replyText = aiResponse.replace(/\{[\s\S]*?\}/g, '').trim();
+                            if (!replyText) replyText = aiResponse; // 最后兜底
+                        }
+                    } catch (e2) {
+                        console.error("提取reply字段也失败", e2);
+                        replyText = aiResponse; // 最后兜底
+                    }
+                }
+                
+                // 确保replyText不为空
+                if (!replyText || !replyText.trim()) {
+                    replyText = aiResponse.replace(/\{[\s\S]*?\}/g, '').trim() || aiResponse;
                 }
 
                 // 3. 移除 loading

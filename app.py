@@ -16,82 +16,78 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # VAPID 密钥（用于 Web Push）
-# 【Zeabur 兼容方案】使用内存存储，避免文件读写权限问题
 print("[VAPID] ========================================")
-print("[VAPID] 🔧 初始化 VAPID 密钥（内存模式，适配 Zeabur）")
+print("[VAPID] 🔧 初始化 VAPID 密钥")
 
-def generate_vapid_keys_in_memory():
+def load_or_generate_vapid_keys():
     """
-    直接在内存中生成 VAPID 密钥（不依赖文件系统）
-    适配 Zeabur 容器环境的临时文件系统和权限限制
+    加载或生成 VAPID 密钥，支持持久化到文件
     """
-    try:
+    from py_vapid import Vapid
+    from cryptography.hazmat.primitives import serialization
+    import base64
+    
+    private_key_pem = None
+    
+    # 尝试从文件加载
+    if os.path.exists(KEY_FILE):
+        try:
+            print(f"[VAPID] 📂 发现现有密钥文件: {KEY_FILE}")
+            with open(KEY_FILE, 'r') as f:
+                private_key_pem = f.read()
+            print("[VAPID] ✅ 成功加载私钥")
+        except Exception as e:
+            print(f"[VAPID] ⚠️ 加载密钥文件失败: {e}")
+    
+    # 如果没有加载到，则生成新的
+    if not private_key_pem:
         print("[VAPID] 🔑 正在生成新的 VAPID 密钥...")
-        
-        from py_vapid import Vapid
-        from cryptography.hazmat.primitives import serialization
-        import base64
-        
-        # 生成密钥对
         v = Vapid()
         v.generate_keys()
-        
-        # 获取私钥（PEM 格式）
         private_key_pem = v.private_pem()
         if isinstance(private_key_pem, bytes):
             private_key_pem = private_key_pem.decode('utf-8')
-        
-        # 获取公钥（原始字节，65字节未压缩格式）
+            
+        # 尝试保存到文件
+        try:
+            with open(KEY_FILE, 'w') as f:
+                f.write(private_key_pem)
+            print(f"[VAPID] 💾 新密钥已保存到: {KEY_FILE}")
+        except Exception as e:
+            print(f"[VAPID] ⚠️ 无法保存密钥文件 (使用内存模式): {e}")
+
+    # 从私钥推导公钥
+    try:
+        v = Vapid.from_string(private_key_pem)
         public_key_bytes = v.public_key.public_bytes(
             encoding=serialization.Encoding.X962,
             format=serialization.PublicFormat.UncompressedPoint
         )
-        
-        # 转为 URL-safe base64（前端订阅需要）
         public_key_b64 = base64.urlsafe_b64encode(public_key_bytes).decode('utf-8').rstrip('=')
-        
-        print(f"[VAPID] ✅ 密钥生成成功！")
-        print(f"[VAPID]   公钥: {public_key_b64[:40]}...")
-        print(f"[VAPID]   公钥长度: {len(public_key_b64)} 字符")
-        print(f"[VAPID]   私钥格式: PEM")
-        print(f"[VAPID] ========================================")
         
         return {
             'private_key': private_key_pem,
             'public_key': public_key_b64
         }
-        
-    except ImportError as e:
-        print(f"[VAPID] ❌ 导入错误: {e}")
-        print(f"[VAPID]   请安装依赖: pip install pywebpush cryptography")
-        print(f"[VAPID] ========================================")
-        return None
     except Exception as e:
-        print(f"[VAPID] ❌ 生成失败: {e}")
-        import traceback
-        traceback.print_exc()
-        print(f"[VAPID] ========================================")
+        print(f"[VAPID] ❌ 密钥处理失败: {e}")
         return None
 
-# 启动时强制生成密钥（内存存储）
 try:
-    vapid_keys = generate_vapid_keys_in_memory()
+    vapid_keys = load_or_generate_vapid_keys()
     
     if vapid_keys and vapid_keys.get('public_key') and vapid_keys.get('private_key'):
         VAPID_PRIVATE_KEY = vapid_keys['private_key']
         VAPID_PUBLIC_KEY = vapid_keys['public_key']
         VAPID_CLAIMS = {"sub": "mailto:admin@example.com"}
         
-        print("[VAPID] ✅✅✅ VAPID 已就绪，可以发送推送通知！")
-        print(f"[VAPID]   模式: 内存存储（Zeabur 兼容）")
+        print("[VAPID] ✅✅✅ VAPID 已就绪")
         print(f"[VAPID]   公钥预览: {VAPID_PUBLIC_KEY[:40]}...")
     else:
-        raise Exception("密钥生成返回空值")
+        raise Exception("密钥初始化失败")
         
 except Exception as e:
     print(f"[VAPID] ❌❌❌ 致命错误: {e}")
-    print(f"[VAPID]   推送功能将不可用！")
-    print(f"[VAPID]   请检查依赖: pip install -r requirements.txt")
     import traceback
     traceback.print_exc()
     
@@ -101,9 +97,16 @@ except Exception as e:
 
 print("[VAPID] ========================================")
 
-# 适配 Zeabur 容器环境，使用 /tmp 目录（注意：Zeabur 免费版容器重启后 /tmp 数据会重置）
-# 如果需要持久化，建议在 Zeabur 设置中挂载存储卷到特定路径
-DB_FILE = '/tmp/notifications.db'
+# 适配 Zeabur 容器环境，优先使用 /app/data (持久化目录)，其次当前目录，最后 /tmp
+if os.path.exists('/app/data'):
+    DB_FILE = '/app/data/notifications.db'
+    KEY_FILE = '/app/data/vapid_private.pem'
+else:
+    DB_FILE = 'notifications.db'
+    KEY_FILE = 'vapid_private.pem'
+
+print(f"[Config] DB_FILE: {DB_FILE}")
+print(f"[Config] KEY_FILE: {KEY_FILE}")
 
 def init_db():
     """初始化数据库表"""
@@ -143,6 +146,15 @@ def init_db():
                   subscription TEXT NOT NULL,
                   created_at REAL,
                   UNIQUE(user_id, subscription))''')
+    
+    # 消息记录表
+    c.execute('''CREATE TABLE IF NOT EXISTS messages
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id TEXT,
+                  char_id TEXT,
+                  sender TEXT,
+                  content TEXT,
+                  timestamp REAL)''')
     
     conn.commit()
     conn.close()
@@ -630,6 +642,58 @@ def trigger_push():
     except Exception as e:
         print(f"[TriggerPush] ✗ Error: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/trigger-active-message', methods=['POST'])
+def trigger_active_message():
+    data = request.json
+    user_id = data.get('user_id')
+    char_id = data.get('char_id')
+    content = data.get('content', '我好想你呀，你在干嘛呢？') # 默认内容
+
+    if not user_id or not char_id:
+        return jsonify({'error': 'Missing params'}), 400
+
+    conn = get_db_connection()
+    try:
+        # 1. 获取角色信息
+        cursor = conn.execute('SELECT name, avatar FROM characters WHERE id = ?', (char_id,))
+        char = cursor.fetchone()
+        char_name = char['name'] if char else "AI角色"
+        
+        # 2. 保存消息到数据库
+        conn.execute('INSERT INTO messages (user_id, char_id, sender, content, timestamp) VALUES (?, ?, ?, ?, ?)',
+                     (user_id, char_id, 'ai', content, int(time.time())))
+        conn.commit()
+        
+        # 3. WebSocket 发送 (用于前台实时显示，如果在后台会被挂起)
+        socketio.emit('receive_message', {
+            'role': 'ai',
+            'content': content,
+            'char_id': char_id,
+            'timestamp': int(time.time())
+        }, room=str(user_id))
+        
+        # ============================================================
+        # 【修改这里】新增：必须主动调用 Web Push，手机才能在后台收到通知
+        # ============================================================
+        print(f"[Active] 正在给用户 {user_id} 发送后台推送...")
+        
+        # 这里的 send_web_push 是你在文件上方定义的那个函数
+        # 只要前端之前调用过 subscribeToPush，这里就能推送成功
+        send_web_push(
+            user_id, 
+            char_name,   # 标题（角色名）
+            char_id,     # 如果你的 send_web_push 需要 icon，这里传 char_id 或具体 url
+            content      # 消息内容
+        )
+        # ============================================================
+
+        return jsonify({'success': True, 'message': 'Active message sent'})
+    except Exception as e:
+        print(f"Error: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
 
 # 启动后台检查线程（已废弃，改为按需推送）
 def start_background_checker():
