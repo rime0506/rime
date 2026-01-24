@@ -3084,31 +3084,30 @@
 
         // 发送系统通知
         function sendSystemNotification(title, body) {
-            console.log(`[Notification] Attempting to send: "${title}" - "${body}"`);
+            console.log(`[Notification] ========================================`);
+            console.log(`[Notification] 🔔 尝试发送通知: "${title}" - "${body}"`);
             
             // 检查浏览器是否支持通知
             if (!("Notification" in window)) {
-                console.warn('[Notification] Browser does not support notifications');
+                console.error('[Notification] ✗ 浏览器不支持通知');
                 showDebugToast('浏览器不支持通知');
                 return;
             }
             
-            // 检查页面可见性（可选：只在后台时通知）
-            const isPageHidden = document.hidden || document.visibilityState === 'hidden';
-            console.log(`[Notification] Page visibility - hidden: ${isPageHidden}, state: ${document.visibilityState}`);
-            
             // 检查权限状态
-            console.log(`[Notification] Permission status: ${Notification.permission}`);
+            const permission = Notification.permission;
+            console.log(`[Notification] 权限状态: ${permission}`);
             
-            if (Notification.permission === "granted") {
+            if (permission === "granted") {
                 try {
+                    console.log(`[Notification] ✓ 权限已授予，立即发送通知...`);
                     const notification = new Notification(title, { 
                         body: body,
                         icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png',
                         badge: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png',
-                        tag: 'chat-message', // 相同tag的通知会被替换，避免通知过多
-                        requireInteraction: false, // 自动关闭
-                        silent: false // 有声音提示
+                        tag: 'chat-message-' + Date.now(), // 每次都用新tag，避免被替换
+                        requireInteraction: false,
+                        silent: false
                     });
                     
                     notification.onclick = function() {
@@ -3116,37 +3115,37 @@
                         this.close();
                     };
                     
-                    console.log('[Notification] Notification sent successfully');
-                    showDebugToast(`✓ 通知已发送: ${title}`);
+                    console.log('[Notification] ✓✓✓ 通知已成功发送！');
+                    showDebugToast(`✓ 通知: ${title}`);
                 } catch (error) {
-                    console.error('[Notification] Failed to send notification:', error);
-                    showDebugToast(`✗ 通知发送失败: ${error.message}`);
+                    console.error('[Notification] ✗✗✗ 发送失败:', error);
+                    showDebugToast(`✗ 通知失败: ${error.message}`);
                 }
-            } else if (Notification.permission !== "denied") {
-                console.log('[Notification] Requesting permission...');
-                showDebugToast('请求通知权限中...');
+            } else if (permission === "default") {
+                console.log('[Notification] 权限未设置，请求权限...');
                 Notification.requestPermission().then(permission => {
-                    console.log(`[Notification] Permission result: ${permission}`);
+                    console.log(`[Notification] 权限请求结果: ${permission}`);
                     if (permission === "granted") {
                         try {
                             new Notification(title, { 
                                 body: body,
                                 icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png'
                             });
-                            console.log('[Notification] Notification sent after permission granted');
-                            showDebugToast('✓ 权限已授予，通知已发送');
+                            console.log('[Notification] ✓ 通知已发送（权限授予后）');
                         } catch (error) {
-                            console.error('[Notification] Failed to send notification:', error);
-                            showDebugToast(`✗ 通知发送失败: ${error.message}`);
+                            console.error('[Notification] ✗ 发送失败:', error);
                         }
                     } else {
-                        showDebugToast('✗ 通知权限被拒绝');
+                        console.warn('[Notification] ✗ 权限被拒绝');
                     }
                 });
             } else {
-                console.warn('[Notification] Permission denied by user');
-                showDebugToast('✗ 通知权限已被拒绝');
+                console.error('[Notification] ✗✗✗ 权限已被拒绝，无法发送通知');
+                console.error('[Notification] 请在浏览器设置中允许通知权限');
+                showDebugToast('✗ 通知权限被拒绝，请在设置中允许');
             }
+            
+            console.log(`[Notification] ========================================`);
         }
 
         // 标记已读
@@ -4600,17 +4599,18 @@ ${loreContext}
 
                     console.log(`[AutoChat] Sent part ${i+1}/${segments.length} for ${freshChar.name}: ${seg}`);
 
-                    // 5. 更新 UI 或 发送通知
-                    // 如果当前正好打开了这个角色的窗口，直接追加
+                    // 5. 更新 UI（如果正在查看）
                     if (currentChatCharId === freshChar.id) {
                         console.log(`[AutoChat] User is viewing ${freshChar.name}'s chat, appending to UI`);
                         appendMessageToUI('char', seg, freshChar.avatar);
-                    } else {
-                        // 否则发送系统通知
-                        console.log(`[AutoChat] User is NOT viewing ${freshChar.name}'s chat (current: ${currentChatCharId}), sending notification`);
-                        sendSystemNotification(freshChar.name, seg);
-                        
-                        // 如果在微信列表页，刷新列表以更新最后一条消息预览
+                    }
+                    
+                    // 6. 无论是否在查看，都发送通知（重要！）
+                    console.log(`[AutoChat] Sending notification for ${freshChar.name}: ${seg}`);
+                    sendSystemNotification(freshChar.name, seg);
+                    
+                    // 7. 如果在微信列表页，刷新列表以更新最后一条消息预览
+                    if (currentChatCharId !== freshChar.id) {
                         const wechatPage = document.getElementById('wechat-page');
                         if (wechatPage.style.display !== 'none' && 
                             document.querySelector('.wechat-tab-item.active .tab-name').innerText === '微信') {
