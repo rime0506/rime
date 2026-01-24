@@ -135,7 +135,7 @@ init_db()
 @app.route('/')
 def index():
     # 默认返回前端主页
-    return app.send_static_file('呀呀呀.html')
+    return app.send_static_file('index.html')
 
 # 显式处理 sw.js，确保 Service Worker 位于根作用域
 @app.route('/sw.js')
@@ -373,7 +373,7 @@ def send_web_push(user_id, char_name, char_id):
             'data': {
                 'char_id': char_id,
                 'char_name': char_name,
-                'url': './呀呀呀.html'
+                'url': './Index.html'
             }
         })
         
