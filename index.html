@@ -2128,11 +2128,6 @@
                     <div class="setting-item-text">测试通知</div>
                     <div style="color: #999; font-size: 12px;">点击发送测试通知</div>
                 </div>
-                <div class="setting-item" onclick="manualSubscribePush()">
-                    <div class="setting-item-text">手动开启推送</div>
-                    <div style="color: #999; font-size: 12px;">点击触发推送订阅</div>
-                    <div class="setting-arrow">›</div>
-                </div>
                 <div class="setting-item" onclick="document.getElementById('debug-switch').click()">
                     <div class="setting-item-text">调试模式</div>
                     <div style="color: #999; font-size: 12px;">显示通知调试信息</div>
@@ -2140,11 +2135,6 @@
                         <input type="checkbox" id="debug-switch" onchange="toggleDebugMode(this)">
                         <span class="slider"></span>
                     </label>
-                </div>
-                <div class="setting-item" onclick="showDiagnosticPanel()">
-                    <div class="setting-item-text">🔍 诊断面板</div>
-                    <div style="color: #999; font-size: 12px;">查看 user_id 和订阅状态</div>
-                    <div class="setting-arrow">›</div>
                 </div>
             </div>
 
@@ -2825,20 +2815,6 @@
         let isSelectionMode = false;
         let selectedIndices = new Set(); // 选中的消息索引集合
 
-        // 手动触发推送订阅（新增函数）
-        async function manualSubscribePush() {
-            console.log('[Manual] 手动触发推送订阅...');
-            showDebugToast('正在注册推送...', true);
-            
-            try {
-                await registerServiceWorkerAndSubscribe();
-                alert('✅ 推送订阅成功！请查看诊断面板确认状态。');
-            } catch (err) {
-                console.error('[Manual] 订阅失败:', err);
-                alert('❌ 订阅失败: ' + err.message);
-            }
-        }
-
         // 页面加载初始化
         window.onload = async function() {
             await restoreSetting(); // 异步恢复DEXie数据
@@ -2868,29 +2844,17 @@
                 startNotificationLoop(15);
             }
             
-            // ✅ 修复：页面加载时立即注册 Service Worker 和订阅推送
-            // 不再等待 startAutoChatLoop，而是立即执行
-            if (location.protocol === 'https:' || location.hostname === 'localhost') {
-                console.log('[Init] 立即注册 Service Worker 和订阅推送...');
-                await registerServiceWorkerAndSubscribe();
-            } else {
-                console.warn('[Init] 当前环境不支持 Service Worker (需要 HTTPS 或 localhost)');
-            }
-            
             // 启动主动聊天检测 (每分钟一次)
             startAutoChatLoop();
         }
 
         // --- 通知系统逻辑 ---
-        // 自动检测环境：本地用localhost，部署用Zeabur域名
-        const BACKEND_URL = location.hostname === 'localhost' 
-            ? 'http://localhost:5000'
-            : 'https://rime2713.zeabur.app'; // ✅ 你的Zeabur域名（请确认是https）
+        // TODO: 部署到 Zeabur 后，请将下面的地址替换为 Zeabur 提供的后端域名
+        // 本地测试请保持 http://localhost:5000
+        // 如果部署了，改成：https://你的后端域名.zeabur.app
+        const BACKEND_URL = 'https://rime2713.zeabur.app/';
         const API_BASE = BACKEND_URL + '/api';
         const SOCKET_URL = BACKEND_URL; // WebSocket自动使用同一个地址
-        
-        console.log('[Config] BACKEND_URL:', BACKEND_URL);
-        console.log('[Config] Current hostname:', location.hostname);
         
         let socket = null; // WebSocket连接 
 
@@ -3024,202 +2988,6 @@
             }, 3000);
         }
 
-        // 全局日志系统
-        const systemLogs = [];
-        const MAX_LOGS = 100;
-        
-        function addLog(type, message, data = null) {
-            const log = {
-                time: new Date().toLocaleTimeString(),
-                type: type, // 'info', 'success', 'warning', 'error'
-                message: message,
-                data: data
-            };
-            systemLogs.unshift(log);
-            if (systemLogs.length > MAX_LOGS) systemLogs.pop();
-            
-            // 如果诊断面板打开，实时更新
-            const logContainer = document.getElementById('diagnostic-logs');
-            if (logContainer) {
-                renderLogs();
-            }
-        }
-        
-        function renderLogs() {
-            const container = document.getElementById('diagnostic-logs');
-            if (!container) return;
-            
-            container.innerHTML = systemLogs.map(log => {
-                const colors = {
-                    info: '#007aff',
-                    success: '#34c759',
-                    warning: '#ff9500',
-                    error: '#ff3b30'
-                };
-                const icons = {
-                    info: 'ℹ️',
-                    success: '✅',
-                    warning: '⚠️',
-                    error: '❌'
-                };
-                
-                return `
-                    <div style="padding:8px; border-bottom:1px solid #eee; font-size:12px;">
-                        <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                            <span style="color:${colors[log.type]}; font-weight:bold;">${icons[log.type]} ${log.type.toUpperCase()}</span>
-                            <span style="color:#999;">${log.time}</span>
-                        </div>
-                        <div style="color:#333;">${log.message}</div>
-                        ${log.data ? `<pre style="background:#f5f5f5; padding:4px; border-radius:4px; margin-top:4px; font-size:10px; overflow-x:auto;">${JSON.stringify(log.data, null, 2)}</pre>` : ''}
-                    </div>
-                `;
-            }).join('');
-        }
-        
-        // 显示诊断面板
-        async function showDiagnosticPanel() {
-            const panel = document.createElement('div');
-            panel.style.cssText = `
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: rgba(0,0,0,0.8);
-                z-index: 9999;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                padding: 20px;
-            `;
-            
-            const content = document.createElement('div');
-            content.style.cssText = `
-                background: white;
-                border-radius: 12px;
-                padding: 20px;
-                max-width: 500px;
-                width: 100%;
-                max-height: 80vh;
-                overflow-y: auto;
-            `;
-            
-            // 获取诊断信息
-            let diagnosticInfo = `<h2 style="margin-top:0; color:#333;">🔍 诊断信息</h2>`;
-            
-            // 1. User ID
-            diagnosticInfo += `<div style="margin-bottom:20px; padding:10px; background:#f5f5f5; border-radius:8px;">
-                <strong style="color:#007aff;">User ID:</strong><br>
-                <code style="background:#fff; padding:5px; border-radius:4px; display:block; margin-top:5px; word-break:break-all;">${currentUserId}</code>
-            </div>`;
-            
-            // 2. 检查 Service Worker
-            let swStatus = '❌ 未注册';
-            if ('serviceWorker' in navigator) {
-                const registration = await navigator.serviceWorker.getRegistration();
-                if (registration) {
-                    swStatus = '✅ 已注册';
-                    if (registration.active) {
-                        swStatus += ' (激活)';
-                    }
-                }
-            }
-            diagnosticInfo += `<div style="margin-bottom:20px; padding:10px; background:#f5f5f5; border-radius:8px;">
-                <strong style="color:#007aff;">Service Worker:</strong><br>
-                <span style="margin-top:5px; display:block;">${swStatus}</span>
-            </div>`;
-            
-            // 3. 推送订阅状态
-            let subStatus = '❌ 未订阅';
-            let subEndpoint = '无';
-            if ('serviceWorker' in navigator && 'PushManager' in window) {
-                const registration = await navigator.serviceWorker.getRegistration();
-                if (registration) {
-                    const subscription = await registration.pushManager.getSubscription();
-                    if (subscription) {
-                        subStatus = '✅ 已订阅';
-                        subEndpoint = subscription.endpoint.substring(0, 50) + '...';
-                    }
-                }
-            }
-            diagnosticInfo += `<div style="margin-bottom:20px; padding:10px; background:#f5f5f5; border-radius:8px;">
-                <strong style="color:#007aff;">推送订阅:</strong><br>
-                <span style="margin-top:5px; display:block;">${subStatus}</span>
-                <code style="background:#fff; padding:5px; border-radius:4px; display:block; margin-top:5px; font-size:10px; word-break:break-all;">${subEndpoint}</code>
-            </div>`;
-            
-            // 4. 通知权限
-            const notifPerm = Notification.permission;
-            const permIcon = notifPerm === 'granted' ? '✅' : notifPerm === 'denied' ? '❌' : '⚠️';
-            diagnosticInfo += `<div style="margin-bottom:20px; padding:10px; background:#f5f5f5; border-radius:8px;">
-                <strong style="color:#007aff;">通知权限:</strong><br>
-                <span style="margin-top:5px; display:block;">${permIcon} ${notifPerm}</span>
-            </div>`;
-            
-            // 5. 环境信息
-            diagnosticInfo += `<div style="margin-bottom:20px; padding:10px; background:#f5f5f5; border-radius:8px;">
-                <strong style="color:#007aff;">环境信息:</strong><br>
-                <span style="margin-top:5px; display:block;">协议: ${location.protocol}</span>
-                <span style="display:block;">域名: ${location.hostname}</span>
-                <span style="display:block;">后端: ${BACKEND_URL}</span>
-            </div>`;
-            
-            // 6. 开启主动聊天的角色
-            const autoChars = await db.characters
-                .filter(c => c.auto_reply_enabled === true && c.auto_reply_interval > 0)
-                .toArray();
-            diagnosticInfo += `<div style="margin-bottom:20px; padding:10px; background:#f5f5f5; border-radius:8px;">
-                <strong style="color:#007aff;">主动聊天角色:</strong><br>
-                <span style="margin-top:5px; display:block;">${autoChars.length} 个角色已启用</span>
-                ${autoChars.map(c => `<div style="margin-top:5px; padding:5px; background:#fff; border-radius:4px;">
-                    ${c.name} (${c.auto_reply_interval}分钟)
-                </div>`).join('')}
-            </div>`;
-            
-            // 7. 实时日志区域
-            diagnosticInfo += `<div style="margin-bottom:20px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                    <strong style="color:#007aff;">📋 实时日志 (最近${systemLogs.length}条)</strong>
-                    <button onclick="systemLogs.length=0; renderLogs();" style="padding:4px 8px; background:#ff3b30; color:#fff; border:none; border-radius:4px; font-size:11px;">清空</button>
-                </div>
-                <div id="diagnostic-logs" style="max-height:300px; overflow-y:auto; background:#f9f9f9; border-radius:8px; padding:10px;">
-                    ${systemLogs.length === 0 ? '<div style="text-align:center; color:#999; padding:20px;">暂无日志</div>' : ''}
-                </div>
-            </div>`;
-            
-            content.innerHTML = diagnosticInfo;
-            
-            // 渲染日志
-            renderLogs();
-            
-            // 关闭按钮
-            const closeBtn = document.createElement('button');
-            closeBtn.innerText = '关闭';
-            closeBtn.style.cssText = `
-                width: 100%;
-                padding: 12px;
-                background: var(--ins-pink);
-                color: white;
-                border: none;
-                border-radius: 8px;
-                font-size: 16px;
-                cursor: pointer;
-                margin-top: 10px;
-            `;
-            closeBtn.onclick = () => document.body.removeChild(panel);
-            content.appendChild(closeBtn);
-            
-            panel.appendChild(content);
-            document.body.appendChild(panel);
-            
-            // 点击背景关闭
-            panel.onclick = (e) => {
-                if (e.target === panel) {
-                    document.body.removeChild(panel);
-                }
-            };
-        }
-
         // 显示设置页面
         function showSettingPage() {
             document.getElementById('setting-page').style.display = 'flex';
@@ -3313,33 +3081,31 @@
 
         // 发送系统通知
         function sendSystemNotification(title, body) {
-            console.log(`[Notification] ========================================`);
-            console.log(`[Notification] 🔔 尝试发送通知: "${title}" - "${body}"`);
-            addLog('info', `尝试发送通知: ${title}`, { body, caller: new Error().stack.split('\n')[2] });
+            console.log(`[Notification] Attempting to send: "${title}" - "${body}"`);
             
             // 检查浏览器是否支持通知
             if (!("Notification" in window)) {
-                console.error('[Notification] ✗ 浏览器不支持通知');
-                addLog('error', '浏览器不支持通知');
+                console.warn('[Notification] Browser does not support notifications');
                 showDebugToast('浏览器不支持通知');
                 return;
             }
             
-            // 检查权限状态
-            const permission = Notification.permission;
-            console.log(`[Notification] 权限状态: ${permission}`);
-            addLog('info', `通知权限状态: ${permission}`);
+            // 检查页面可见性（可选：只在后台时通知）
+            const isPageHidden = document.hidden || document.visibilityState === 'hidden';
+            console.log(`[Notification] Page visibility - hidden: ${isPageHidden}, state: ${document.visibilityState}`);
             
-            if (permission === "granted") {
+            // 检查权限状态
+            console.log(`[Notification] Permission status: ${Notification.permission}`);
+            
+            if (Notification.permission === "granted") {
                 try {
-                    console.log(`[Notification] ✓ 权限已授予，立即发送通知...`);
                     const notification = new Notification(title, { 
                         body: body,
                         icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png',
                         badge: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png',
-                        tag: 'chat-message-' + Date.now(), // 每次都用新tag，避免被替换
-                        requireInteraction: false,
-                        silent: false
+                        tag: 'chat-message', // 相同tag的通知会被替换，避免通知过多
+                        requireInteraction: false, // 自动关闭
+                        silent: false // 有声音提示
                     });
                     
                     notification.onclick = function() {
@@ -3347,37 +3113,37 @@
                         this.close();
                     };
                     
-                    console.log('[Notification] ✓✓✓ 通知已成功发送！');
-                    showDebugToast(`✓ 通知: ${title}`);
+                    console.log('[Notification] Notification sent successfully');
+                    showDebugToast(`✓ 通知已发送: ${title}`);
                 } catch (error) {
-                    console.error('[Notification] ✗✗✗ 发送失败:', error);
-                    showDebugToast(`✗ 通知失败: ${error.message}`);
+                    console.error('[Notification] Failed to send notification:', error);
+                    showDebugToast(`✗ 通知发送失败: ${error.message}`);
                 }
-            } else if (permission === "default") {
-                console.log('[Notification] 权限未设置，请求权限...');
+            } else if (Notification.permission !== "denied") {
+                console.log('[Notification] Requesting permission...');
+                showDebugToast('请求通知权限中...');
                 Notification.requestPermission().then(permission => {
-                    console.log(`[Notification] 权限请求结果: ${permission}`);
+                    console.log(`[Notification] Permission result: ${permission}`);
                     if (permission === "granted") {
                         try {
                             new Notification(title, { 
                                 body: body,
                                 icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png'
                             });
-                            console.log('[Notification] ✓ 通知已发送（权限授予后）');
+                            console.log('[Notification] Notification sent after permission granted');
+                            showDebugToast('✓ 权限已授予，通知已发送');
                         } catch (error) {
-                            console.error('[Notification] ✗ 发送失败:', error);
+                            console.error('[Notification] Failed to send notification:', error);
+                            showDebugToast(`✗ 通知发送失败: ${error.message}`);
                         }
                     } else {
-                        console.warn('[Notification] ✗ 权限被拒绝');
+                        showDebugToast('✗ 通知权限被拒绝');
                     }
                 });
             } else {
-                console.error('[Notification] ✗✗✗ 权限已被拒绝，无法发送通知');
-                console.error('[Notification] 请在浏览器设置中允许通知权限');
-                showDebugToast('✗ 通知权限被拒绝，请在设置中允许');
+                console.warn('[Notification] Permission denied by user');
+                showDebugToast('✗ 通知权限已被拒绝');
             }
-            
-            console.log(`[Notification] ========================================`);
         }
 
         // 标记已读
@@ -4416,12 +4182,6 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                     user_id: currentUserId
                 }));
                 
-                console.log(`[Sync] ========================================`);
-                console.log(`[Sync] 正在同步 ${syncData.length} 个角色到后端...`);
-                console.log(`[Sync]   user_id: ${currentUserId}`);
-                console.log(`[Sync]   user_id类型: ${typeof currentUserId}`);
-                console.log(`[Sync]   角色列表:`, syncData.map(c => ({ name: c.name, user_id: c.user_id })));
-                
                 // 发送到后端
                 const res = await fetch(`${API_BASE}/characters/sync`, {
                     method: 'POST',
@@ -4430,17 +4190,10 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 });
                 
                 if (res.ok) {
-                    const result = await res.json();
-                    console.log(`[Sync] ✓✓✓ 同步成功！`);
-                    console.log(`[Sync]   后端响应:`, result);
-                    console.log(`[Sync] ========================================`);
+                    console.log(`[Sync] ✓ Synced ${syncData.length} characters to backend`);
                     showDebugToast(`✓ 已同步${syncData.length}个角色到后端`);
                 } else {
-                    const errorText = await res.text();
-                    console.error('[Sync] ✗✗✗ 同步失败！');
-                    console.error('[Sync]   状态码:', res.status);
-                    console.error('[Sync]   错误信息:', errorText);
-                    console.log(`[Sync] ========================================`);
+                    console.error('[Sync] Failed to sync:', await res.text());
                 }
                 
             } catch (err) {
@@ -4481,24 +4234,9 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 }
                 
                 // 获取 VAPID 公钥
-                console.log('[Push] Fetching VAPID public key...');
                 const keyRes = await fetch(`${API_BASE}/push/public_key`);
-                
-                if (!keyRes.ok) {
-                    throw new Error(`获取公钥失败: ${keyRes.status}`);
-                }
-                
                 const keyData = await keyRes.json();
-                console.log('[Push] Key data received:', keyData);
-                
                 const publicKey = keyData.public_key;
-                
-                // 验证公钥是否有效
-                if (!publicKey) {
-                    throw new Error('后端返回的公钥为空！请检查后端 VAPID 密钥是否正确生成。');
-                }
-                
-                console.log('[Push] Public key:', publicKey.substring(0, 30) + '...');
                 
                 // 订阅推送
                 const subscription = await registration.pushManager.subscribe({
@@ -4509,37 +4247,26 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 console.log('[Push] Subscribed:', subscription);
                 
                 // 发送订阅信息到后端
-                console.log('[Push] ========================================');
-                console.log('[Push] 🔔 正在发送订阅到后端...');
-                console.log('[Push]   user_id:', currentUserId);
-                console.log('[Push]   user_id类型:', typeof currentUserId);
-                console.log('[Push]   subscription endpoint:', subscription.endpoint.substring(0, 50) + '...');
-                
-                const subscriptionData = {
-                    user_id: currentUserId,
-                    subscription: subscription.toJSON()
-                };
-                console.log('[Push]   发送数据:', JSON.stringify(subscriptionData).substring(0, 200) + '...');
-                
+                console.log('[Push] Sending subscription to backend...');
+                console.log('[Push] user_id:', currentUserId);
                 const subRes = await fetch(`${API_BASE}/push/subscribe`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(subscriptionData)
+                    body: JSON.stringify({
+                        user_id: currentUserId,
+                        subscription: subscription.toJSON()
+                    })
                 });
                 
                 if (subRes.ok) {
                     const result = await subRes.json();
-                    console.log('[Push] ✓✓✓ 订阅已保存到后端！');
-                    console.log('[Push]   后端响应:', result);
-                    console.log('[Push]   🎉 后台推送已激活！即使浏览器在后台也能收到通知！');
-                    console.log('[Push] ========================================');
+                    console.log('[Push] ✓✓✓ Subscription saved to backend!');
+                    console.log('[Push] Backend response:', result);
+                    console.log('[Push] 🎉 后台推送已激活！即使浏览器在后台也能收到通知！');
                     showDebugToast('🎉 后台推送已激活！', true);
                 } else {
                     const errorText = await subRes.text();
-                    console.error('[Push] ✗✗✗ 订阅保存失败！');
-                    console.error('[Push]   状态码:', subRes.status);
-                    console.error('[Push]   错误信息:', errorText);
-                    console.log('[Push] ========================================');
+                    console.error('[Push] ✗ Failed to save subscription:', errorText);
                     showDebugToast('✗ 订阅保存失败: ' + errorText);
                 }
                 
@@ -4635,11 +4362,7 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             console.log('[AutoChat] Current environment:', {
                 protocol: location.protocol,
                 hostname: location.hostname,
-                href: location.href,
-                serviceWorkerSupported: 'serviceWorker' in navigator,
-                pushManagerSupported: 'PushManager' in window,
-                notificationSupported: 'Notification' in window,
-                notificationPermission: Notification.permission
+                href: location.href
             });
             showDebugToast('实时推送启动中...', true);
             
@@ -4869,23 +4592,20 @@ ${loreContext}
                     await db.characters.put(freshChar);
 
                     console.log(`[AutoChat] Sent part ${i+1}/${segments.length} for ${freshChar.name}: ${seg}`);
-                    addLog('success', `角色消息已存入DB: ${freshChar.name}`, { segment: i+1, total: segments.length, message: seg });
 
                     // 5. 更新 UI（如果正在查看）
                     if (currentChatCharId === freshChar.id) {
                         console.log(`[AutoChat] User is viewing ${freshChar.name}'s chat, appending to UI`);
-                        addLog('info', `正在查看聊天，更新UI: ${freshChar.name}`);
                         appendMessageToUI('char', seg, freshChar.avatar);
-                    } else {
-                        addLog('warning', `不在聊天窗口，应发送通知: ${freshChar.name}`, { currentChatCharId });
                     }
                     
-                    // 6. 无论是否在查看，都发送通知（重要！）
-                    console.log(`[AutoChat] Sending notification for ${freshChar.name}: ${seg}`);
-                    addLog('info', `调用sendSystemNotification: ${freshChar.name}`, { message: seg });
+                    // 6. 发送通知（双重保障：前端Notification + 后端WebPush）
+                    console.log(`[AutoChat] Sending notifications for ${freshChar.name}...`);
+                    
+                    // 6.1 前端Notification（如果页面在前台且有权限）
                     sendSystemNotification(freshChar.name, seg);
                     
-                    // 7. 【关键修复】立即调用后端API发送Web Push推送
+                    // 6.2 后端Web Push（即使页面在后台也能收到）
                     try {
                         await fetch(`${API_BASE}/trigger_push`, {
                             method: 'POST',
@@ -4894,12 +4614,12 @@ ${loreContext}
                                 user_id: currentUserId,
                                 char_id: freshChar.id,
                                 char_name: freshChar.name,
-                                message: seg
+                                message: seg  // 传递消息内容
                             })
                         });
-                        console.log(`[AutoChat] ✓ Backend push API called for ${freshChar.name}`);
+                        console.log(`[AutoChat] ✓ Web Push sent for ${freshChar.name}`);
                     } catch (err) {
-                        console.error(`[AutoChat] ✗ Backend push API failed:`, err);
+                        console.error(`[AutoChat] ✗ Web Push failed:`, err);
                     }
                     
                     // 7. 如果在微信列表页，刷新列表以更新最后一条消息预览
