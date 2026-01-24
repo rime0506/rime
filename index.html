@@ -2327,6 +2327,17 @@
         </div>
     </div>
 
+    <!-- 角色心声弹窗 -->
+    <div class="modal-overlay" id="thoughts-modal" onclick="closeModal('thoughts-modal')">
+        <div class="modal-box" style="height:70%; max-width:90%;" onclick="event.stopPropagation()">
+            <div class="modal-title" id="thoughts-modal-title">角色心声</div>
+            <div style="flex:1; overflow-y:auto; padding:10px 0;" id="thoughts-content">
+                <!-- 动态生成 -->
+            </div>
+            <button class="modal-btn btn-cancel" onclick="closeModal('thoughts-modal')">关闭</button>
+        </div>
+    </div>
+
     <!-- 聊天窗口 -->
     <div class="chat-window" id="chat-window">
         <div class="chat-header">
@@ -2461,11 +2472,17 @@
                         <span class="detail-arrow">›</span>
                     </div>
                 </div>
-                <div class="detail-item">
-                    <div>关联世界书</div>
-                    <select id="detail-lorebook-select" style="border:none; outline:none; text-align:right; background:transparent; font-size:14px; color:#666; width:150px;" onchange="saveChatDetail()">
-                        <option value="">无</option>
-                    </select>
+                <div class="detail-item" style="flex-direction:column; align-items:flex-start;">
+                    <div style="width:100%; display:flex; justify-content:space-between; align-items:center;">
+                        <div>关联世界书</div>
+                        <div id="detail-lorebook-count" style="font-size:12px; color:#999;">0个</div>
+                    </div>
+                    <div id="detail-lorebook-list" style="width:100%; margin-top:8px; max-height:200px; overflow-y:auto; display:none;">
+                        <!-- 世界书checkbox列表将在这里动态生成 -->
+                    </div>
+                    <div style="width:100%; margin-top:4px; text-align:right;">
+                        <span id="detail-lorebook-toggle" style="font-size:12px; color:var(--ins-pink); cursor:pointer;" onclick="toggleLorebookList()">展开</span>
+                    </div>
                 </div>
             </div>
 
@@ -3954,6 +3971,63 @@
             document.getElementById(id).style.display = 'none';
         }
 
+        // 显示角色心声
+        async function showCharacterThoughts(charId, messageIndex) {
+            if (!charId) return;
+            
+            const char = await db.characters.get(charId);
+            if (!char) return;
+            
+            const modal = document.getElementById('thoughts-modal');
+            const title = document.getElementById('thoughts-modal-title');
+            const content = document.getElementById('thoughts-content');
+            
+            title.textContent = `${char.name}的心声`;
+            content.innerHTML = '';
+            
+            // 获取该消息对应的心声（根据messageIndex匹配）
+            if (!char.thoughts || char.thoughts.length === 0) {
+                content.innerHTML = '<div style="text-align:center; color:#999; padding:40px 20px;">暂无心声记录</div>';
+            } else {
+                // 找到与当前消息相关的心声（messageIndex匹配或最近的心声）
+                let relevantThoughts = char.thoughts.filter(t => t.messageIndex === messageIndex);
+                
+                // 如果没有精确匹配，显示最近的心声
+                if (relevantThoughts.length === 0) {
+                    relevantThoughts = char.thoughts.slice(-5); // 显示最近5条
+                }
+                
+                if (relevantThoughts.length === 0) {
+                    content.innerHTML = '<div style="text-align:center; color:#999; padding:40px 20px;">暂无相关心声</div>';
+                } else {
+                    relevantThoughts.reverse().forEach(thought => {
+                        const item = document.createElement('div');
+                        item.style.cssText = 'padding:12px; margin-bottom:10px; background:#f5f5f5; border-radius:8px; border-left:3px solid var(--ins-pink);';
+                        
+                        const text = document.createElement('div');
+                        text.textContent = thought.content;
+                        text.style.cssText = 'font-size:14px; line-height:1.6; color:#333; margin-bottom:6px;';
+                        
+                        const time = document.createElement('div');
+                        const timeStr = new Date(thought.time).toLocaleString('zh-CN', {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        });
+                        time.textContent = timeStr;
+                        time.style.cssText = 'font-size:12px; color:#999;';
+                        
+                        item.appendChild(text);
+                        item.appendChild(time);
+                        content.appendChild(item);
+                    });
+                }
+            }
+            
+            modal.style.display = 'flex';
+        }
+
         // 搜索好友
         function showAddFriendModal() {
             document.getElementById('search-friend-modal').style.display = 'flex';
@@ -3968,36 +4042,42 @@
         let searchTargetChar = null;
 
         // 辅助：获取世界书上下文 (简单的关键词匹配)
-        async function getLorebookContext(lorebookId, keywords) {
-            if (!lorebookId) return "";
+        // 支持单个ID或ID数组
+        async function getLorebookContext(lorebookIdOrIds, keywords) {
+            if (!lorebookIdOrIds) return "";
             
-            const book = await db.lorebooks.get(lorebookId);
-            if (!book || !book.content || !book.content.entries) return "";
+            // 兼容旧数据：如果是单个ID，转换为数组
+            const ids = Array.isArray(lorebookIdOrIds) ? lorebookIdOrIds : [lorebookIdOrIds];
+            if (ids.length === 0) return "";
             
-            let context = [];
-            const entries = Object.values(book.content.entries);
-            
-            // 简单匹配：只要 Entry 的 key 出现在 keywords 中，就启用
-            // keywords 应该是一个包含所有相关文本（名字、当前对话等）的大字符串
+            let allContext = [];
             const checkText = keywords.toLowerCase();
             
-            entries.forEach(entry => {
-                if (!entry.enabled) return;
-                // entry.key 可能是数组或字符串
-                const keys = Array.isArray(entry.key) ? entry.key : [entry.key];
+            // 遍历所有世界书
+            for (const id of ids) {
+                const book = await db.lorebooks.get(id);
+                if (!book || !book.content || !book.content.entries) continue;
                 
-                const isMatch = keys.some(k => {
-                    if(!k) return false;
-                    return checkText.includes(k.toLowerCase());
+                const entries = Object.values(book.content.entries);
+                
+                entries.forEach(entry => {
+                    if (!entry.enabled) return;
+                    // entry.key 可能是数组或字符串
+                    const keys = Array.isArray(entry.key) ? entry.key : [entry.key];
+                    
+                    const isMatch = keys.some(k => {
+                        if(!k) return false;
+                        return checkText.includes(k.toLowerCase());
+                    });
+                    
+                    if (isMatch) {
+                        allContext.push(entry.content);
+                    }
                 });
-                
-                if (isMatch) {
-                    context.push(entry.content);
-                }
-            });
+            }
             
-            if (context.length > 0) {
-                return `【相关世界书设定】:\n${context.join('\n')}\n`;
+            if (allContext.length > 0) {
+                return `【相关世界书设定】:\n${allContext.join('\n')}\n`;
             }
             return "";
         }
@@ -4070,9 +4150,11 @@
                 // 2. 准备 Lorebook 匹配关键词 (User名 + Char名 + 申请理由)
                 const keywords = `${userChar.name} ${searchTargetChar.name} ${reason}`;
                 
-                // 3. 获取双方 Lorebook 上下文
-                const userLore = await getLorebookContext(userChar.lorebookId, keywords);
-                const charLore = await getLorebookContext(searchTargetChar.lorebookId, keywords);
+                // 3. 获取双方 Lorebook 上下文（支持多个世界书）
+                const userLorebookIds = userChar.lorebookIds || (userChar.lorebookId ? [userChar.lorebookId] : []);
+                const charLorebookIds = searchTargetChar.lorebookIds || (searchTargetChar.lorebookId ? [searchTargetChar.lorebookId] : []);
+                const userLore = await getLorebookContext(userLorebookIds, keywords);
+                const charLore = await getLorebookContext(charLorebookIds, keywords);
                 
                 // 4. 构建 Prompt
                 const prompt = `[场景: 微信好友申请]
@@ -4241,17 +4323,45 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 document.getElementById('detail-char-avatar').style.backgroundImage = '';
             }
 
-            // 2. 加载世界书列表
+            // 2. 加载世界书列表（多选）
             const lorebooks = await db.lorebooks.toArray();
-            const lbSelect = document.getElementById('detail-lorebook-select');
-            lbSelect.innerHTML = '<option value="">无</option>';
-            lorebooks.forEach(lb => {
-                const opt = document.createElement('option');
-                opt.value = lb.id;
-                opt.text = lb.name;
-                if (char.lorebookId && lb.id == char.lorebookId) opt.selected = true;
-                lbSelect.appendChild(opt);
-            });
+            const lbList = document.getElementById('detail-lorebook-list');
+            lbList.innerHTML = '';
+            
+            // 兼容旧数据：如果lorebookId存在但lorebookIds不存在，转换为数组
+            const selectedIds = char.lorebookIds || (char.lorebookId ? [char.lorebookId] : []);
+            
+            if (lorebooks.length === 0) {
+                lbList.innerHTML = '<div style="padding:8px; color:#999; font-size:12px; text-align:center;">暂无世界书</div>';
+            } else {
+                lorebooks.forEach(lb => {
+                    const label = document.createElement('label');
+                    label.style.cssText = 'display:flex; align-items:center; padding:8px; cursor:pointer; border-radius:6px; margin-bottom:4px;';
+                    label.style.background = selectedIds.includes(lb.id) ? '#f0f0f5' : 'transparent';
+                    
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.value = lb.id;
+                    checkbox.checked = selectedIds.includes(lb.id);
+                    checkbox.style.marginRight = '8px';
+                    checkbox.onchange = () => {
+                        label.style.background = checkbox.checked ? '#f0f0f5' : 'transparent';
+                        updateLorebookCount();
+                        saveChatDetail();
+                    };
+                    
+                    const name = document.createElement('span');
+                    name.textContent = lb.name;
+                    name.style.fontSize = '14px';
+                    name.style.color = '#333';
+                    
+                    label.appendChild(checkbox);
+                    label.appendChild(name);
+                    lbList.appendChild(label);
+                });
+            }
+            
+            updateLorebookCount();
 
             // 3. 加载 User 列表
             const users = await db.characters.where('type').equals('user').toArray();
@@ -4278,12 +4388,34 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             document.getElementById('chat-detail-page').style.display = 'none';
         }
 
+        function toggleLorebookList() {
+            const list = document.getElementById('detail-lorebook-list');
+            const toggle = document.getElementById('detail-lorebook-toggle');
+            if (list.style.display === 'none' || !list.style.display) {
+                list.style.display = 'block';
+                toggle.textContent = '收起';
+            } else {
+                list.style.display = 'none';
+                toggle.textContent = '展开';
+            }
+        }
+
+        function updateLorebookCount() {
+            const checkboxes = document.querySelectorAll('#detail-lorebook-list input[type="checkbox"]:checked');
+            const count = checkboxes.length;
+            document.getElementById('detail-lorebook-count').textContent = `${count}个`;
+        }
+
         async function saveChatDetail() {
             if (!currentChatCharId) return;
             const char = await db.characters.get(currentChatCharId);
             
             const remark = document.getElementById('detail-char-remark').value.trim();
-            const lorebookId = document.getElementById('detail-lorebook-select').value;
+            
+            // 获取选中的世界书ID数组
+            const checkboxes = document.querySelectorAll('#detail-lorebook-list input[type="checkbox"]:checked');
+            const lorebookIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+            
             // linked_user_id 在 handleUserChange 中处理，或者在这里统一保存
             const linkedUserId = document.getElementById('detail-user-select').value;
             
@@ -4292,7 +4424,13 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             const autoInterval = parseInt(document.getElementById('detail-auto-chat-interval').value);
 
             char.remark = remark;
-            char.lorebookId = lorebookId ? parseInt(lorebookId) : null;
+            char.lorebookIds = lorebookIds.length > 0 ? lorebookIds : null;
+            // 保留旧字段以兼容，但优先使用lorebookIds
+            if (lorebookIds.length > 0) {
+                char.lorebookId = lorebookIds[0]; // 保留第一个作为兼容
+            } else {
+                char.lorebookId = null;
+            }
             char.linked_user_id = linkedUserId ? parseInt(linkedUserId) : null;
             char.auto_reply_enabled = autoEnabled;
             char.auto_reply_interval = autoInterval > 0 ? autoInterval : null;
@@ -4755,9 +4893,10 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 }
                 
                 let loreContext = "";
-                if (char.lorebookId) {
+                const lorebookIds = char.lorebookIds || (char.lorebookId ? [char.lorebookId] : []);
+                if (lorebookIds.length > 0) {
                     const recentText = (char.chat_history || []).slice(-10).map(m => m.content).join(' ');
-                    loreContext = await getLorebookContext(char.lorebookId, `${char.name} ${userName} ${recentText}`);
+                    loreContext = await getLorebookContext(lorebookIds, `${char.name} ${userName} ${recentText}`);
                 }
 
                 // 2. 构建 Prompt
@@ -4782,7 +4921,19 @@ ${loreContext}
 4. 严禁只发送标点符号。每一条消息都必须有实际文字内容。
 5. 语气要自然、口语化，符合人设。
 
-请务必输出格式如：第一条消息内容|||第二条消息内容|||第三条消息内容`;
+请务必输出格式如：第一条消息内容|||第二条消息内容|||第三条消息内容
+
+【重要】你需要同时生成两个内容：
+1. **回复内容**：主动发送的消息（用|||分隔的多条消息）
+2. **心声内容**：角色当前的心理活动、想法、感受或状态变化
+
+请以JSON格式返回，格式如下：
+{
+  "reply": "第一条消息|||第二条消息|||第三条消息",
+  "thought": "角色的心声/心理活动/想法"
+}
+
+请严格返回JSON格式，不要包含Markdown代码块标记。`;
 
                 // 取最近 10 条历史记录作为参考
                 const recentHistory = (char.chat_history || []).slice(-10).map(m => ({
@@ -4795,9 +4946,50 @@ ${loreContext}
                     ...recentHistory
                 ];
 
-                // 3. 调用 AI
-                const replyText = await callAI(messages);
-                const cleanReply = replyText.trim();
+                // 3. 调用 AI（同时生成回复和心声）
+                const aiResponse = await callAI(messages);
+                
+                // 解析AI返回的JSON
+                let cleanReply = "";
+                let thought = "";
+                
+                try {
+                    // 清理可能的markdown代码块
+                    let jsonStr = aiResponse.trim();
+                    if (jsonStr.startsWith('```json')) {
+                        jsonStr = jsonStr.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+                    } else if (jsonStr.startsWith('```')) {
+                        jsonStr = jsonStr.replace(/^```\s*/, '').replace(/\s*```$/, '');
+                    }
+                    
+                    const parsed = JSON.parse(jsonStr);
+                    cleanReply = parsed.reply || aiResponse; // 如果解析失败，使用原始回复
+                    thought = parsed.thought || "";
+                    
+                    // 存储心声到角色对象
+                    if (thought && thought.trim()) {
+                        const freshChar = await db.characters.get(char.id);
+                        if (freshChar) {
+                            if (!freshChar.thoughts) freshChar.thoughts = [];
+                            freshChar.thoughts.push({
+                                content: thought.trim(),
+                                time: Date.now(),
+                                messageIndex: freshChar.chat_history ? freshChar.chat_history.length : 0
+                            });
+                            // 只保留最近50条心声
+                            if (freshChar.thoughts.length > 50) {
+                                freshChar.thoughts = freshChar.thoughts.slice(-50);
+                            }
+                            await db.characters.put(freshChar);
+                        }
+                    }
+                } catch (e) {
+                    // 如果解析失败，使用原始回复
+                    console.warn("解析AI返回的JSON失败，使用原始回复", e);
+                    cleanReply = aiResponse;
+                }
+                
+                const replyText = cleanReply;
                 
                 if (!cleanReply) {
                     console.warn(`[AutoChat] AI returned empty reply for ${char.name}`);
@@ -5059,6 +5251,12 @@ ${loreContext}
             
             if (msg.role === 'char') {
                 if (charAvatar) avatar.style.backgroundImage = `url(${charAvatar})`;
+                // 给角色头像添加点击事件，显示心声
+                avatar.style.cursor = 'pointer';
+                avatar.onclick = async (e) => {
+                    e.stopPropagation(); // 阻止冒泡，避免触发消息选择
+                    await showCharacterThoughts(currentChatCharId, index);
+                };
             } else {
                 if (userAvatar) {
                     avatar.style.backgroundImage = `url(${userAvatar})`;
@@ -5568,10 +5766,11 @@ ${loreContext}
                 }
                 
                 let loreContext = "";
-                if (char.lorebookId) {
+                const lorebookIds = char.lorebookIds || (char.lorebookId ? [char.lorebookId] : []);
+                if (lorebookIds.length > 0) {
                     // 获取最近对话用于关键词匹配
                     const recentText = (char.chat_history || []).slice(-10).map(m => m.content).join(' ');
-                    loreContext = await getLorebookContext(char.lorebookId, `${char.name} ${userName} ${recentText}`);
+                    loreContext = await getLorebookContext(lorebookIds, `${char.name} ${userName} ${recentText}`);
                 }
 
                 // 2. 准备 Context
@@ -5592,7 +5791,19 @@ ${loreContext}
 
 请完全沉浸在角色中，用符合角色性格的语气回复。
 回复简短自然，像微信聊天一样。
-请注意：不要重复输出名字前缀，直接输出回复内容。`;
+请注意：不要重复输出名字前缀，直接输出回复内容。
+
+【重要】你需要同时生成两个内容：
+1. **回复内容**：对用户消息的回复
+2. **心声内容**：角色当前的心理活动、想法、感受或状态变化（可以是内心独白、情绪变化、想法等）
+
+请以JSON格式返回，格式如下：
+{
+  "reply": "你的回复内容",
+  "thought": "角色的心声/心理活动/想法"
+}
+
+请严格返回JSON格式，不要包含Markdown代码块标记。`;
 
                 // 取最近 20 条历史记录
                 const recentHistory = (char.chat_history || []).slice(-20).map(m => ({
@@ -5605,8 +5816,48 @@ ${loreContext}
                     ...recentHistory
                 ];
 
-                // 2. 调用 AI
-                const replyText = await callAI(messages);
+                // 2. 调用 AI（同时生成回复和心声）
+                const aiResponse = await callAI(messages);
+                
+                // 3. 解析AI返回的JSON
+                let replyText = "";
+                let thought = "";
+                
+                try {
+                    // 清理可能的markdown代码块
+                    let jsonStr = aiResponse.trim();
+                    if (jsonStr.startsWith('```json')) {
+                        jsonStr = jsonStr.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+                    } else if (jsonStr.startsWith('```')) {
+                        jsonStr = jsonStr.replace(/^```\s*/, '').replace(/\s*```$/, '');
+                    }
+                    
+                    const parsed = JSON.parse(jsonStr);
+                    replyText = parsed.reply || aiResponse; // 如果解析失败，使用原始回复
+                    thought = parsed.thought || "";
+                    
+                    // 存储心声到角色对象
+                    if (thought && thought.trim()) {
+                        const freshChar = await db.characters.get(targetCharId);
+                        if (freshChar) {
+                            if (!freshChar.thoughts) freshChar.thoughts = [];
+                            freshChar.thoughts.push({
+                                content: thought.trim(),
+                                time: Date.now(),
+                                messageIndex: freshChar.chat_history ? freshChar.chat_history.length : 0
+                            });
+                            // 只保留最近50条心声
+                            if (freshChar.thoughts.length > 50) {
+                                freshChar.thoughts = freshChar.thoughts.slice(-50);
+                            }
+                            await db.characters.put(freshChar);
+                        }
+                    }
+                } catch (e) {
+                    // 如果解析失败，使用原始回复
+                    console.warn("解析AI返回的JSON失败，使用原始回复", e);
+                    replyText = aiResponse;
+                }
 
                 // 3. 移除 loading
                 const loadingBubble = document.getElementById(loadingId);
@@ -5844,20 +6095,26 @@ ${loreContext}
                 // 1. 构建 Prompt
                 let loreContext = "";
                 let entriesCount = 0;
-                if (sourceChar.lorebookId) {
-                    const book = await db.lorebooks.get(sourceChar.lorebookId);
-                    if (book && book.content && book.content.entries) {
-                        // 优化：提取所有启用的词条，不再限制前10条
+                const sourceLorebookIds = sourceChar.lorebookIds || (sourceChar.lorebookId ? [sourceChar.lorebookId] : []);
+                if (sourceLorebookIds.length > 0) {
+                    // 合并多个世界书的所有词条
+                    let allEntries = [];
+                    for (const bookId of sourceLorebookIds) {
+                        const book = await db.lorebooks.get(bookId);
+                        if (book && book.content && book.content.entries) {
+                            const bookEntries = Object.values(book.content.entries)
+                                .filter(e => e.enabled)
+                                .map(e => `[词条: ${e.key}]\n${e.content}`);
+                            allEntries = allEntries.concat(bookEntries);
+                        }
+                    }
+                    
+                    entriesCount = allEntries.length;
+                    if (entriesCount > 0) {
                         // 为了防止Token溢出，按长度截断（假设约 12000 字符为安全区，留给 Response 和 Prompt）
-                        const allEntries = Object.values(book.content.entries)
-                            .filter(e => e.enabled)
-                            .map(e => `[词条: ${e.key}]\n${e.content}`)
-                            .join('\n\n');
-                        
-                        entriesCount = Object.values(book.content.entries).filter(e => e.enabled).length;
-                        // 简单截断
-                        loreContext = `【世界观背景 (Lorebook - 共${entriesCount}条设定)】\n${allEntries.slice(0, 12000)}\n`;
-                        if (allEntries.length > 12000) loreContext += `\n...(部分设定因过长已省略)`;
+                        const entriesText = allEntries.join('\n\n');
+                        loreContext = `【世界观背景 (Lorebook - 共${entriesCount}条设定)】\n${entriesText.slice(0, 12000)}\n`;
+                        if (entriesText.length > 12000) loreContext += `\n...(部分设定因过长已省略)`;
                     }
                 }
 
@@ -5916,7 +6173,8 @@ ${loreContext}
                         description: fullDesc, // 存入整合后的详细描述
                         type: 'npc', // 默认为 NPC 类型
                         avatar: '', // 暂时留空
-                        lorebookId: sourceChar.lorebookId, // 继承世界书
+                        lorebookIds: sourceLorebookIds.length > 0 ? sourceLorebookIds : null, // 继承多个世界书
+                        lorebookId: sourceLorebookIds.length > 0 ? sourceLorebookIds[0] : null, // 兼容字段
                         identity: {
                             // 基础身份占位
                             job: npcData.identity_job
@@ -6219,7 +6477,8 @@ ${loreContext}
                             type: currentCharacterType, 
                             avatar: avatarBase64,
                             original_data: json,
-                            lorebookId: lorebookId, // 关联世界书ID
+                            lorebookIds: lorebookId ? [lorebookId] : null, // 关联世界书ID数组
+                            lorebookId: lorebookId, // 兼容字段
                             updated_at: Date.now()
                         });
                         
