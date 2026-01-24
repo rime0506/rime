@@ -2095,6 +2095,10 @@
                         <span class="slider"></span>
                     </label>
                 </div>
+                <div class="setting-item" onclick="testNotification()">
+                    <div class="setting-item-text">测试通知</div>
+                    <div style="color: #999; font-size: 12px;">点击发送测试通知</div>
+                </div>
             </div>
 
             <!-- API 设置 折叠卡片 -->
@@ -2831,6 +2835,39 @@
             }
         }
 
+        // 测试通知功能
+        function testNotification() {
+            console.log('[Test] Testing notification system...');
+            console.log('[Test] Browser supports Notification:', "Notification" in window);
+            console.log('[Test] Current permission:', Notification.permission);
+            console.log('[Test] Page visibility:', document.visibilityState);
+            console.log('[Test] Page hidden:', document.hidden);
+            
+            if (!("Notification" in window)) {
+                alert("你的浏览器不支持系统通知功能");
+                return;
+            }
+            
+            if (Notification.permission === "denied") {
+                alert("通知权限已被拒绝，请在浏览器设置中允许通知权限后刷新页面");
+                return;
+            }
+            
+            if (Notification.permission === "granted") {
+                sendSystemNotification("测试通知", "如果你能看到这条通知，说明系统通知功能正常！");
+                alert("测试通知已发送！如果没有弹出通知窗口，请检查：\n1. 浏览器通知权限是否允许\n2. 系统通知设置是否开启\n3. 浏览器是否允许显示通知\n\n请查看控制台(F12)获取详细调试信息");
+            } else {
+                Notification.requestPermission().then(permission => {
+                    console.log('[Test] Permission request result:', permission);
+                    if (permission === "granted") {
+                        sendSystemNotification("测试通知", "权限已授予！系统通知功能正常工作");
+                    } else {
+                        alert("通知权限被拒绝，无法发送通知");
+                    }
+                });
+            }
+        }
+
         // 显示设置页面
         function showSettingPage() {
             document.getElementById('setting-page').style.display = 'flex';
@@ -2923,22 +2960,59 @@
 
         // 发送系统通知
         function sendSystemNotification(title, body) {
-            if (!("Notification" in window)) return;
+            console.log(`[Notification] Attempting to send: "${title}" - "${body}"`);
+            
+            // 检查浏览器是否支持通知
+            if (!("Notification" in window)) {
+                console.warn('[Notification] Browser does not support notifications');
+                return;
+            }
+            
+            // 检查页面可见性（可选：只在后台时通知）
+            const isPageHidden = document.hidden || document.visibilityState === 'hidden';
+            console.log(`[Notification] Page visibility - hidden: ${isPageHidden}, state: ${document.visibilityState}`);
+            
+            // 检查权限状态
+            console.log(`[Notification] Permission status: ${Notification.permission}`);
             
             if (Notification.permission === "granted") {
-                new Notification(title, { 
-                    body: body,
-                    icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png' // 使用应用图标
-                });
+                try {
+                    const notification = new Notification(title, { 
+                        body: body,
+                        icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png',
+                        badge: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png',
+                        tag: 'chat-message', // 相同tag的通知会被替换，避免通知过多
+                        requireInteraction: false, // 自动关闭
+                        silent: false // 有声音提示
+                    });
+                    
+                    notification.onclick = function() {
+                        window.focus();
+                        this.close();
+                    };
+                    
+                    console.log('[Notification] Notification sent successfully');
+                } catch (error) {
+                    console.error('[Notification] Failed to send notification:', error);
+                }
             } else if (Notification.permission !== "denied") {
+                console.log('[Notification] Requesting permission...');
                 Notification.requestPermission().then(permission => {
+                    console.log(`[Notification] Permission result: ${permission}`);
                     if (permission === "granted") {
-                        new Notification(title, { 
-                            body: body,
-                            icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png'
-                        });
+                        try {
+                            new Notification(title, { 
+                                body: body,
+                                icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png'
+                            });
+                            console.log('[Notification] Notification sent after permission granted');
+                        } catch (error) {
+                            console.error('[Notification] Failed to send notification:', error);
+                        }
                     }
                 });
+            } else {
+                console.warn('[Notification] Permission denied by user');
             }
         }
 
@@ -4129,9 +4203,11 @@ ${loreContext}
                     // 5. 更新 UI 或 发送通知
                     // 如果当前正好打开了这个角色的窗口，直接追加
                     if (currentChatCharId === freshChar.id) {
+                        console.log(`[AutoChat] User is viewing ${freshChar.name}'s chat, appending to UI`);
                         appendMessageToUI('char', seg, freshChar.avatar);
                     } else {
                         // 否则发送系统通知
+                        console.log(`[AutoChat] User is NOT viewing ${freshChar.name}'s chat (current: ${currentChatCharId}), sending notification`);
                         sendSystemNotification(freshChar.name, seg);
                         
                         // 如果在微信列表页，刷新列表以更新最后一条消息预览
@@ -4866,7 +4942,12 @@ ${loreContext}
                         
                         // 只有在当前窗口匹配时才渲染 UI
                         if (currentChatCharId === targetCharId) {
+                            console.log(`[AiReply] User is viewing ${freshChar.name}'s chat, appending to UI`);
                             appendMessageToUI('char', seg, freshChar.avatar);
+                        } else {
+                            // 不在当前窗口时，发送系统通知
+                            console.log(`[AiReply] User is NOT viewing ${freshChar.name}'s chat (current: ${currentChatCharId}), sending notification`);
+                            sendSystemNotification(freshChar.name, seg);
                         }
                     }
                 }
