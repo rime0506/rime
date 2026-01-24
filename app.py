@@ -16,8 +16,9 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # VAPID 密钥（用于 Web Push）
-# 首次运行时自动生成，会保存到文件
-VAPID_FILE = '/tmp/vapid_keys.json'
+# 使用当前目录持久化存储，避免容器重启后丢失
+VAPID_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vapid_keys.json')
+print(f"[VAPID] 密钥文件路径: {VAPID_FILE}")
 
 def get_vapid_keys():
     """获取或生成 VAPID 密钥"""
@@ -246,20 +247,43 @@ def subscribe_push():
     user_id = data.get('user_id')
     subscription = data.get('subscription')
     
+    print(f"[Subscribe] ========================================")
+    print(f"[Subscribe] 📥 收到订阅请求")
+    print(f"[Subscribe]   user_id: {user_id}")
+    print(f"[Subscribe]   user_id类型: {type(user_id).__name__}")
+    print(f"[Subscribe]   subscription endpoint: {subscription.get('endpoint', 'N/A')[:50] if subscription else 'N/A'}...")
+    
     if not user_id or not subscription:
+        print(f"[Subscribe] ✗ 缺少必要参数")
+        print(f"[Subscribe] ========================================")
         return jsonify({'error': 'user_id and subscription required'}), 400
     
     conn = get_db_connection()
     c = conn.cursor()
     try:
+        subscription_json = json.dumps(subscription)
         c.execute('''INSERT OR REPLACE INTO push_subscriptions 
                      (user_id, subscription, created_at) 
                      VALUES (?, ?, ?)''',
-                  (user_id, json.dumps(subscription), time.time()))
+                  (user_id, subscription_json, time.time()))
         conn.commit()
-        print(f"[Push] Subscription saved for user: {user_id}")
+        
+        print(f"[Subscribe] ✓✓✓ 订阅保存成功！")
+        print(f"[Subscribe]   已保存到数据库: user_id={user_id}")
+        
+        # 验证保存结果
+        verify = c.execute('SELECT user_id FROM push_subscriptions WHERE user_id = ?', (user_id,)).fetchone()
+        if verify:
+            print(f"[Subscribe]   ✓ 验证成功：数据库中已存在该订阅")
+        else:
+            print(f"[Subscribe]   ✗ 警告：保存后查询不到该订阅！")
+        
+        print(f"[Subscribe] ========================================")
         return jsonify({'message': 'Subscribed successfully'}), 200
     except Exception as e:
+        print(f"[Subscribe] ✗✗✗ 保存失败！")
+        print(f"[Subscribe]   错误: {str(e)}")
+        print(f"[Subscribe] ========================================")
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
@@ -271,25 +295,44 @@ def sync_characters():
     data = request.json
     characters = data.get('characters', [])
     
+    print(f"[Sync] ========================================")
+    print(f"[Sync] 📥 收到同步请求")
+    print(f"[Sync]   角色数量: {len(characters)}")
+    
     conn = get_db_connection()
     c = conn.cursor()
     
-    for char in characters:
+    for idx, char in enumerate(characters):
+        char_id = char.get('id')
+        char_name = char.get('name')
+        user_id = char.get('user_id')
+        
+        print(f"[Sync] ----------------------------------------")
+        print(f"[Sync] 角色 #{idx+1}/{len(characters)}")
+        print(f"[Sync]   id: {char_id}")
+        print(f"[Sync]   name: {char_name}")
+        print(f"[Sync]   user_id: {user_id}")
+        print(f"[Sync]   user_id类型: {type(user_id).__name__}")
+        print(f"[Sync]   auto_reply_enabled: {char.get('auto_reply_enabled')}")
+        print(f"[Sync]   auto_reply_interval: {char.get('auto_reply_interval')} 分钟")
+        print(f"[Sync]   last_message_time: {char.get('last_message_time')}")
+        
         c.execute('''INSERT OR REPLACE INTO characters 
                      (id, name, avatar, auto_reply_enabled, auto_reply_interval, 
                       last_message_time, user_id, updated_at)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                  (char.get('id'), char.get('name'), char.get('avatar'),
+                  (char_id, char_name, char.get('avatar'),
                    1 if char.get('auto_reply_enabled') else 0,
                    char.get('auto_reply_interval', 0),
                    char.get('last_message_time', 0),
-                   char.get('user_id'),
+                   user_id,
                    time.time()))
     
     conn.commit()
     conn.close()
     
-    print(f"[Sync] Synced {len(characters)} characters")
+    print(f"[Sync] ✓✓✓ 同步完成！已保存 {len(characters)} 个角色到数据库")
+    print(f"[Sync] ========================================")
     return jsonify({'message': f'Synced {len(characters)} characters'}), 200
 
 # 后台定时检查线程
@@ -318,12 +361,21 @@ def check_auto_messages():
                 last_time = row['last_message_time']
                 user_id = row['user_id']
                 
+                # 检查user_id是否有效
+                if not user_id:
+                    print(f"[AutoCheck] ⚠️ {char_name} 的user_id为空，跳过")
+                    continue
+                
                 # 计算时间差（分钟）
                 time_diff = (now - last_time) / 60
                 
                 # 如果超过间隔时间，立即推送
                 if time_diff >= interval_minutes:
-                    print(f"[AutoCheck] ✓ {char_name} needs to send (interval: {interval_minutes}min, elapsed: {time_diff:.1f}min)")
+                    print(f"[AutoCheck] ========================================")
+                    print(f"[AutoCheck] ✓ {char_name} 需要发消息！")
+                    print(f"[AutoCheck]   间隔: {interval_minutes}分钟, 已过: {time_diff:.1f}分钟")
+                    print(f"[AutoCheck]   user_id: {user_id}")
+                    print(f"[AutoCheck]   char_id: {char_id}")
                     
                     # 更新最后发送时间
                     c.execute('UPDATE characters SET last_message_time = ? WHERE id = ?',
@@ -339,13 +391,14 @@ def check_auto_messages():
                         'timestamp': now
                     }
                     socketio.emit('auto_chat_trigger', push_data, broadcast=True)
-                    print(f"[AutoCheck] ✓ WebSocket push sent for {char_name}")
+                    print(f"[AutoCheck] ✓ WebSocket推送已发送")
                     
-                    # 2. 同时通过 Web Push 推送系统通知（即使浏览器在后台也能收到）
-                    # 这个通知会唤醒Service Worker，显示系统弹窗
+                    # 2. 【关键】立即通过 Web Push 推送系统通知（即使浏览器在后台也能收到）
+                    print(f"[AutoCheck] 🔔 正在发送Web Push后台通知...")
                     message_preview = f"{char_name} 想和你聊天了~"
                     send_web_push(user_id, char_name, char_id, message_preview)
-                    print(f"[AutoCheck] ✓✓✓ Web Push sent for {char_name} (后台通知已发送)")
+                    print(f"[AutoCheck] ✓✓✓ Web Push后台通知已发送！")
+                    print(f"[AutoCheck] ========================================")
             
             conn.close()
             
@@ -360,20 +413,36 @@ def send_web_push(user_id, char_name, char_id, message=None):
         c = conn.cursor()
         
         # 获取该用户的所有订阅
+        print(f"[WebPush] ========================================")
+        print(f"[WebPush] 🔍 查找订阅...")
+        print(f"[WebPush]   user_id: {user_id}")
+        print(f"[WebPush]   user_id类型: {type(user_id).__name__}")
+        
+        # 先查询所有订阅，看看数据库里有什么
+        all_rows = c.execute('SELECT user_id, created_at FROM push_subscriptions').fetchall()
+        print(f"[WebPush]   数据库中的订阅总数: {len(all_rows)}")
+        if all_rows:
+            print(f"[WebPush]   数据库中的user_id列表:")
+            for r in all_rows:
+                print(f"[WebPush]     - user_id: {r['user_id']} (类型: {type(r['user_id']).__name__})")
+        
+        # 精确匹配查询
         rows = c.execute('SELECT subscription FROM push_subscriptions WHERE user_id = ?', 
                         (user_id,)).fetchall()
         conn.close()
         
         if not rows:
-            print(f"[WebPush] ✗✗✗ 没有找到订阅！")
-            print(f"[WebPush] user_id: {user_id}")
-            print(f"[WebPush] 请检查：")
-            print(f"[WebPush]   1. 是否在HTTPS或localhost环境？")
-            print(f"[WebPush]   2. 前端是否成功订阅？")
-            print(f"[WebPush]   3. 浏览器是否授予了通知权限？")
+            print(f"[WebPush] ✗✗✗ 没有找到匹配的订阅！")
+            print(f"[WebPush]   查询的user_id: {user_id} (类型: {type(user_id).__name__})")
+            print(f"[WebPush]   请检查：")
+            print(f"[WebPush]     1. user_id是否完全匹配（包括大小写和类型）？")
+            print(f"[WebPush]     2. 前端订阅时使用的user_id是什么？")
+            print(f"[WebPush]     3. 角色同步时使用的user_id是什么？")
+            print(f"[WebPush] ========================================")
             return
         
-        print(f"[WebPush] ✓ 找到 {len(rows)} 个订阅")
+        print(f"[WebPush] ✓ 找到 {len(rows)} 个匹配的订阅")
+        print(f"[WebPush] ========================================")
         
         # 准备推送数据（带真实消息内容）
         body_text = message if message else f'{char_name} 给你发来了消息'
@@ -389,9 +458,16 @@ def send_web_push(user_id, char_name, char_id, message=None):
         })
         
         # 推送到所有订阅
-        for row in rows:
+        for idx, row in enumerate(rows):
             try:
                 subscription_info = json.loads(row['subscription'])
+                
+                print(f"[WebPush] ========================================")
+                print(f"[WebPush] 🔔 正在发送推送 #{idx+1}/{len(rows)}")
+                print(f"[WebPush]   user_id: {user_id}")
+                print(f"[WebPush]   char_name: {char_name}")
+                print(f"[WebPush]   message: {body_text[:50]}...")
+                print(f"[WebPush]   subscription endpoint: {subscription_info.get('endpoint', 'N/A')[:50]}...")
                 
                 webpush(
                     subscription_info=subscription_info,
@@ -400,24 +476,95 @@ def send_web_push(user_id, char_name, char_id, message=None):
                     vapid_claims=VAPID_CLAIMS
                 )
                 
-                print(f"[WebPush] ✓ Push sent to {user_id} for {char_name}")
+                print(f"[WebPush] ✓✓✓ 推送成功发送！user_id={user_id}, char={char_name}")
+                print(f"[WebPush] ========================================")
                 
             except WebPushException as e:
-                print(f"[WebPush] ✗ Failed: {e}")
+                print(f"[WebPush] ========================================")
+                print(f"[WebPush] ✗✗✗ WebPush异常！")
+                print(f"[WebPush]   错误类型: {type(e).__name__}")
+                print(f"[WebPush]   错误消息: {str(e)}")
+                if e.response:
+                    print(f"[WebPush]   响应状态码: {e.response.status_code}")
+                    try:
+                        error_detail = e.response.json()
+                        print(f"[WebPush]   响应详情: {error_detail}")
+                    except:
+                        print(f"[WebPush]   响应内容: {e.response.text[:200]}")
+                
                 if e.response and e.response.status_code == 410:
                     # 订阅已过期，删除
+                    print(f"[WebPush]   订阅已过期(410)，正在删除...")
                     conn = get_db_connection()
                     c = conn.cursor()
                     c.execute('DELETE FROM push_subscriptions WHERE subscription = ?',
                              (row['subscription'],))
                     conn.commit()
                     conn.close()
-                    print(f"[WebPush] Removed expired subscription")
+                    print(f"[WebPush]   ✓ 已删除过期订阅")
+                print(f"[WebPush] ========================================")
+                
             except Exception as e:
-                print(f"[WebPush] ✗ Error: {e}")
+                print(f"[WebPush] ========================================")
+                print(f"[WebPush] ✗✗✗ 未知异常！")
+                print(f"[WebPush]   错误类型: {type(e).__name__}")
+                print(f"[WebPush]   错误消息: {str(e)}")
+                import traceback
+                print(f"[WebPush]   堆栈跟踪:")
+                traceback.print_exc()
+                print(f"[WebPush] ========================================")
                 
     except Exception as e:
         print(f"[WebPush] ✗ Error in send_web_push: {e}")
+
+# 诊断API - 检查订阅状态
+@app.route('/api/debug/subscriptions', methods=['GET'])
+def debug_subscriptions():
+    """检查push_subscriptions表中的订阅数量"""
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        rows = c.execute('SELECT user_id, created_at FROM push_subscriptions').fetchall()
+        conn.close()
+        
+        result = {
+            'count': len(rows),
+            'subscriptions': [{'user_id': r['user_id'], 'created_at': r['created_at']} for r in rows]
+        }
+        print(f"[Debug] 订阅数量: {len(rows)}")
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# 诊断API - 手动触发一次后台检查
+@app.route('/api/debug/trigger_check', methods=['POST'])
+def debug_trigger_check():
+    """手动触发一次后台检查（用于测试）"""
+    try:
+        now = time.time()
+        conn = get_db_connection()
+        c = conn.cursor()
+        
+        rows = c.execute('''SELECT id, name, auto_reply_interval, last_message_time, user_id
+                            FROM characters 
+                            WHERE auto_reply_enabled = 1 
+                            AND auto_reply_interval > 0''').fetchall()
+        
+        results = []
+        for row in rows:
+            char_id = row['id']
+            char_name = row['name']
+            user_id = row['user_id']
+            
+            # 直接发送Web Push（不管时间）
+            message = f"【测试】{char_name} 的后台推送"
+            send_web_push(user_id, char_name, char_id, message)
+            results.append({'char_name': char_name, 'user_id': user_id, 'pushed': True})
+        
+        conn.close()
+        return jsonify({'message': f'已触发 {len(results)} 个推送', 'results': results}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # 按需触发推送通知（前端调用）
 @app.route('/api/trigger_push', methods=['POST'])
