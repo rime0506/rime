@@ -1835,6 +1835,13 @@
     </style>
     <!-- 引入DEXie.js -->
     <script src="https://cdn.jsdelivr.net/npm/dexie@3.2.4/dist/dexie.min.js"></script>
+    <!-- Socket.IO 客户端 用于实时推送 -->
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="./manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="微信">
 </head>
 <body id="desktop-body">
     <div class="phone" id="home-page">
@@ -2831,9 +2838,14 @@
         }
 
         // --- 通知系统逻辑 ---
-        // TODO: 部署到 Zeabur 后，请将下面的地址替换为 Zeabur 提供的后端域名 (例如 https://xxx.zeabur.app/api)
-        // 本地测试请保持 http://localhost:5000/api
-        const API_BASE = 'http://rime2713.zeabur.app/'; 
+        // TODO: 部署到 Zeabur 后，请将下面的地址替换为 Zeabur 提供的后端域名
+        // 本地测试请保持 http://localhost:5000
+        // 如果部署了，改成：https://你的后端域名.zeabur.app
+        const BACKEND_URL = 'http://localhost:5000';
+        const API_BASE = BACKEND_URL + '/api';
+        const SOCKET_URL = BACKEND_URL; // WebSocket自动使用同一个地址
+        
+        let socket = null; // WebSocket连接 
 
         // 启动轮询
         function startNotificationLoop(seconds) {
@@ -3005,25 +3017,6 @@
                     // 2. 检查是否有新消息 (不在已知列表中，且非首次加载)
                     if (!knownNotifIds.has(item.id)) {
                         knownNotifIds.add(item.id);
-                        
-                        // 检查是否是后端触发的主动消息通知
-                        if (item.content && item.content.includes('[主动消息触发]')) {
-                            console.log('[Backend] Auto-chat triggered for:', item.title);
-                            showDebugToast(`🔔 后端触发: ${item.title}`);
-                            
-                            // 查找对应的角色并触发AI生成
-                            db.characters.filter(c => c.name === item.title).first().then(char => {
-                                if (char) {
-                                    console.log('[Backend] Generating AI message for:', char.name);
-                                    triggerAutoChat(char);
-                                }
-                            });
-                            
-                            // 自动标记为已读（这是内部触发，不需要用户看到）
-                            markRead(item.id, false);
-                            
-                            return; // 不渲染这种系统通知
-                        }
                         
                         // 仅当非首次加载时弹窗，避免刷新页面时狂弹
                         if (!isFirstLoad) {
@@ -4178,24 +4171,186 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             }
         }
         
+        // 注册 Service Worker 并订阅推送
+        async function registerServiceWorkerAndSubscribe() {
+            if (!('serviceWorker' in navigator)) {
+                console.log('[SW] Not supported');
+                showDebugToast('❌ 浏览器不支持Service Worker');
+                return;
+            }
+            
+            if (!('PushManager' in window)) {
+                console.log('[Push] Not supported');
+                showDebugToast('❌ 浏览器不支持推送通知');
+                return;
+            }
+            
+            try {
+                // 注册 Service Worker（独立文件）
+                const registration = await navigator.serviceWorker.register('./sw.js');
+                console.log('[SW] Registered:', registration);
+                showDebugToast('✓ Service Worker已注册');
+                
+                // 等待激活
+                await navigator.serviceWorker.ready;
+                console.log('[ServiceWorker] Ready');
+                
+                // 请求通知权限
+                const permission = await Notification.requestPermission();
+                if (permission !== 'granted') {
+                    console.log('[Push] Permission denied');
+                    showDebugToast('✗ 推送权限被拒绝');
+                    return;
+                }
+                
+                // 获取 VAPID 公钥
+                const keyRes = await fetch(`${API_BASE}/push/public_key`);
+                const keyData = await keyRes.json();
+                const publicKey = keyData.public_key;
+                
+                // 订阅推送
+                const subscription = await registration.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: urlBase64ToUint8Array(publicKey)
+                });
+                
+                console.log('[Push] Subscribed:', subscription);
+                
+                // 发送订阅信息到后端
+                const subRes = await fetch(`${API_BASE}/push/subscribe`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        user_id: currentUserId,
+                        subscription: subscription.toJSON()
+                    })
+                });
+                
+                if (subRes.ok) {
+                    console.log('[Push] ✓ Subscription saved to backend');
+                    showDebugToast('✓ 推送订阅成功！可在后台收通知', true);
+                } else {
+                    console.error('[Push] Failed to save subscription');
+                    showDebugToast('✗ 订阅保存失败');
+                }
+                
+            } catch (err) {
+                console.error('[ServiceWorker] Error:', err);
+                showDebugToast(`✗ Service Worker错误: ${err.message}`);
+            }
+        }
+        
+        // Base64 转 Uint8Array (用于 VAPID 公钥)
+        function urlBase64ToUint8Array(base64String) {
+            const padding = '='.repeat((4 - base64String.length % 4) % 4);
+            const base64 = (base64String + padding)
+                .replace(/\-/g, '+')
+                .replace(/_/g, '/');
+            
+            const rawData = window.atob(base64);
+            const outputArray = new Uint8Array(rawData.length);
+            
+            for (let i = 0; i < rawData.length; ++i) {
+                outputArray[i] = rawData.charCodeAt(i);
+            }
+            return outputArray;
+        }
+        
+        // 连接WebSocket接收实时推送
+        function connectWebSocket() {
+            console.log('[WebSocket] Initializing connection to:', SOCKET_URL);
+            
+            if (socket && socket.connected) {
+                console.log('[WebSocket] Already connected');
+                showDebugToast('WebSocket已连接');
+                return;
+            }
+            
+            try {
+                console.log('[WebSocket] Creating io connection...');
+                socket = io(SOCKET_URL, {
+                    transports: ['websocket', 'polling'],
+                    reconnection: true,
+                    reconnectionDelay: 1000,
+                    reconnectionAttempts: 10
+                });
+                
+                socket.on('connect', () => {
+                    console.log('[WebSocket] ✓✓✓ CONNECTED to server!');
+                    console.log('[WebSocket] Socket ID:', socket.id);
+                    showDebugToast('✓ WebSocket已连接！', true);
+                });
+                
+                socket.on('disconnect', (reason) => {
+                    console.log('[WebSocket] ✗ Disconnected:', reason);
+                    showDebugToast(`✗ WebSocket断开: ${reason}`);
+                });
+                
+                socket.on('connect_error', (error) => {
+                    console.error('[WebSocket] Connection error:', error);
+                    console.error('[WebSocket] 检查后端是否运行:', SOCKET_URL);
+                    showDebugToast(`✗ 连接失败，检查后端${SOCKET_URL}`);
+                });
+                
+                // 监听后端推送的触发事件
+                socket.on('auto_chat_trigger', (data) => {
+                    console.log('[WebSocket] ✓✓✓ Received auto_chat_trigger!');
+                    console.log('[WebSocket] Data:', data);
+                    showDebugToast(`🔥 收到推送: ${data.char_name}`);
+                    
+                    // 查找对应角色并立即触发AI生成
+                    db.characters.get(data.char_id).then(char => {
+                        if (char) {
+                            console.log('[WebSocket] ✓ Found character, triggering AI...');
+                            triggerAutoChat(char);
+                            sendSystemNotification(char.name, `${char.name} 给你发了新消息！`);
+                        } else {
+                            console.warn('[WebSocket] ✗ Character not found:', data.char_id);
+                            showDebugToast(`✗ 找不到角色: ${data.char_id}`);
+                        }
+                    });
+                });
+                
+                console.log('[WebSocket] Event listeners registered');
+                
+            } catch (err) {
+                console.error('[WebSocket] ✗ Failed to initialize:', err);
+                showDebugToast(`✗ WebSocket初始化失败: ${err.message}`);
+            }
+        }
+        
         // 启动同步循环（每30秒同步一次配置）
-        function startAutoChatLoop() {
+        async function startAutoChatLoop() {
             if (syncTimer) clearInterval(syncTimer);
             
-            console.log('[AutoChat] Starting backend-driven mode...');
-            showDebugToast('后端驱动模式已启动', true);
+            console.log('[AutoChat] Starting real-time push mode...');
+            showDebugToast('实时推送启动中...', true);
             
-            // 立即同步一次
+            // 1. 连接WebSocket（实时推送，前台生效）
+            console.log('[AutoChat] Step 1: Connecting WebSocket...');
+            connectWebSocket();
+            
+            // 2. 注册 Service Worker（后台推送，需要HTTPS或localhost）
+            console.log('[AutoChat] Step 2: Registering Service Worker...');
+            if (location.protocol === 'https:' || location.hostname === 'localhost') {
+                await registerServiceWorkerAndSubscribe();
+            } else {
+                console.log('[AutoChat] Service Worker skipped (需要HTTPS或localhost)');
+                showDebugToast('⚠️ 仅WebSocket模式（需HTTPS才有后台推送）');
+            }
+            
+            // 3. 立即同步一次配置到后端
+            console.log('[AutoChat] Step 3: Syncing characters...');
             syncCharactersToBackend();
             
-            // 每30秒同步一次（只同步配置，不检查消息）
+            // 4. 每30秒同步一次配置
             syncTimer = setInterval(() => {
                 console.log('[Sync] Syncing characters to backend...');
                 syncCharactersToBackend();
             }, 30 * 1000);
             
-            console.log('[AutoChat] ✓ Backend will check every 10s, frontend syncs config every 30s');
-            showDebugToast('✓ 后端每10秒检查，前端每30秒同步配置', true);
+            console.log('[AutoChat] ✓ Setup complete!');
+            showDebugToast('✓ 实时推送已启动！', true);
         }
 
         async function checkAutoChat() {
