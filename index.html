@@ -4362,7 +4362,11 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             console.log('[AutoChat] Current environment:', {
                 protocol: location.protocol,
                 hostname: location.hostname,
-                href: location.href
+                href: location.href,
+                serviceWorkerSupported: 'serviceWorker' in navigator,
+                pushManagerSupported: 'PushManager' in window,
+                notificationSupported: 'Notification' in window,
+                notificationPermission: Notification.permission
             });
             showDebugToast('实时推送启动中...', true);
             
@@ -4599,28 +4603,9 @@ ${loreContext}
                         appendMessageToUI('char', seg, freshChar.avatar);
                     }
                     
-                    // 6. 发送通知（双重保障：前端Notification + 后端WebPush）
-                    console.log(`[AutoChat] Sending notifications for ${freshChar.name}...`);
-                    
-                    // 6.1 前端Notification（如果页面在前台且有权限）
+                    // 6. 发送前端通知（如果页面在前台）
+                    // 后端的Web Push由后台检查线程负责，不需要前端再调用
                     sendSystemNotification(freshChar.name, seg);
-                    
-                    // 6.2 后端Web Push（即使页面在后台也能收到）
-                    try {
-                        await fetch(`${API_BASE}/trigger_push`, {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({
-                                user_id: currentUserId,
-                                char_id: freshChar.id,
-                                char_name: freshChar.name,
-                                message: seg  // 传递消息内容
-                            })
-                        });
-                        console.log(`[AutoChat] ✓ Web Push sent for ${freshChar.name}`);
-                    } catch (err) {
-                        console.error(`[AutoChat] ✗ Web Push failed:`, err);
-                    }
                     
                     // 7. 如果在微信列表页，刷新列表以更新最后一条消息预览
                     if (currentChatCharId !== freshChar.id) {

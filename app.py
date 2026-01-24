@@ -330,7 +330,7 @@ def check_auto_messages():
                               (now, char_id))
                     conn.commit()
                     
-                    # 通过WebSocket立即推送给前端（如果在线）
+                    # 1. 通过WebSocket推送给前端（如果在线，让前端生成消息）
                     push_data = {
                         'type': 'auto_chat_trigger',
                         'char_id': char_id,
@@ -341,8 +341,11 @@ def check_auto_messages():
                     socketio.emit('auto_chat_trigger', push_data, broadcast=True)
                     print(f"[AutoCheck] ✓ WebSocket push sent for {char_name}")
                     
-                    # 同时通过 Web Push 推送（即使浏览器在后台也能收到）
-                    send_web_push(user_id, char_name, char_id)
+                    # 2. 同时通过 Web Push 推送系统通知（即使浏览器在后台也能收到）
+                    # 这个通知会唤醒Service Worker，显示系统弹窗
+                    message_preview = f"{char_name} 想和你聊天了~"
+                    send_web_push(user_id, char_name, char_id, message_preview)
+                    print(f"[AutoCheck] ✓✓✓ Web Push sent for {char_name} (后台通知已发送)")
             
             conn.close()
             
@@ -362,8 +365,15 @@ def send_web_push(user_id, char_name, char_id, message=None):
         conn.close()
         
         if not rows:
-            print(f"[WebPush] No subscriptions found for user: {user_id}")
+            print(f"[WebPush] ✗✗✗ 没有找到订阅！")
+            print(f"[WebPush] user_id: {user_id}")
+            print(f"[WebPush] 请检查：")
+            print(f"[WebPush]   1. 是否在HTTPS或localhost环境？")
+            print(f"[WebPush]   2. 前端是否成功订阅？")
+            print(f"[WebPush]   3. 浏览器是否授予了通知权限？")
             return
+        
+        print(f"[WebPush] ✓ 找到 {len(rows)} 个订阅")
         
         # 准备推送数据（带真实消息内容）
         body_text = message if message else f'{char_name} 给你发来了消息'
@@ -463,8 +473,9 @@ if __name__ == '__main__':
     print(" - auto_chat_trigger (实时推送)")
     print("=" * 50)
     
-    # ❌ 移除10秒轮询，改为前端按需触发推送（立即推送，无延迟）
-    # start_background_checker()
+    # ✅ 启动后台检查线程（必须！否则后台无法收到通知）
+    # 这个线程会在后台持续检查，即使前端JavaScript被暂停也能工作
+    start_background_checker()
     
     # 使用socketio.run而不是app.run
     socketio.run(app, debug=True, port=port, host='0.0.0.0', allow_unsafe_werkzeug=True)
