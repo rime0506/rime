@@ -2,7 +2,7 @@
   "name": "微信模拟器",
   "short_name": "微信",
   "description": "AI角色扮演微信模拟器",
-  "start_url": "/呀呀呀.html",
+  "start_url": "./呀呀呀.html",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#07c160",
@@ -22,4 +22,3 @@
     }
   ]
 }
-

@@ -8,7 +8,8 @@ from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 from pywebpush import webpush, WebPushException
 
-app = Flask(__name__)
+# 配置静态文件夹路径 (假设前端文件在当前目录下)
+app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # 初始化 SocketIO（用于实时推送）
@@ -133,7 +134,22 @@ init_db()
 
 @app.route('/')
 def index():
-    return "Notification System API is Running!"
+    # 默认返回前端主页
+    return app.send_static_file('呀呀呀.html')
+
+# 显式处理 sw.js，确保 Service Worker 位于根作用域
+@app.route('/sw.js')
+def service_worker():
+    response = app.send_static_file('sw.js')
+    response.headers['Content-Type'] = 'application/javascript'
+    return response
+
+# 显式处理 manifest.json
+@app.route('/manifest.json')
+def manifest():
+    response = app.send_static_file('manifest.json')
+    response.headers['Content-Type'] = 'application/manifest+json'
+    return response
 
 # 1. 创建通知 (管理员接口)
 @app.route('/api/notifications', methods=['POST'])
@@ -357,7 +373,7 @@ def send_web_push(user_id, char_name, char_id):
             'data': {
                 'char_id': char_id,
                 'char_name': char_name,
-                'url': '/呀呀呀.html'
+                'url': './呀呀呀.html'
             }
         })
         
