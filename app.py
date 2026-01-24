@@ -5,10 +5,50 @@ import os
 import threading
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from flask_socketio import SocketIO, emit
+from pywebpush import webpush, WebPushException
 
 app = Flask(__name__)
-# 允许跨域，方便前端直接调用
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
+
+# 初始化 SocketIO（用于实时推送）
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+
+# VAPID 密钥（用于 Web Push）
+# 首次运行时自动生成，会保存到文件
+VAPID_FILE = '/tmp/vapid_keys.json'
+
+def get_vapid_keys():
+    """获取或生成 VAPID 密钥"""
+    if os.path.exists(VAPID_FILE):
+        with open(VAPID_FILE, 'r') as f:
+            keys = json.load(f)
+            print("[VAPID] Loaded existing keys")
+            return keys
+    else:
+        from pywebpush import vapid as vapid_gen
+        v = vapid_gen.Vapid()
+        v.generate_keys()
+        keys = {
+            'private_key': v.private_key.to_string().hex(),
+            'public_key': v.public_key.to_string().hex()
+        }
+        with open(VAPID_FILE, 'w') as f:
+            json.dump(keys, f)
+        print("[VAPID] Generated new keys")
+        return keys
+
+try:
+    vapid_keys = get_vapid_keys()
+    VAPID_PRIVATE_KEY = bytes.fromhex(vapid_keys['private_key'])
+    VAPID_PUBLIC_KEY = vapid_keys['public_key']
+    VAPID_CLAIMS = {"sub": "mailto:admin@example.com"}
+    print(f"[VAPID] Public Key: {VAPID_PUBLIC_KEY[:20]}...")
+except Exception as e:
+    print(f"[VAPID] Error loading keys: {e}")
+    VAPID_PRIVATE_KEY = None
+    VAPID_PUBLIC_KEY = "VAPID_KEY_ERROR"
+    VAPID_CLAIMS = {}
 
 # 适配 Zeabur 容器环境，使用 /tmp 目录（注意：Zeabur 免费版容器重启后 /tmp 数据会重置）
 # 如果需要持久化，建议在 Zeabur 设置中挂载存储卷到特定路径
@@ -44,6 +84,14 @@ def init_db():
                   last_message_time REAL DEFAULT 0,
                   user_id TEXT,
                   updated_at REAL)''')
+    
+    # 推送订阅表（存储用户的推送订阅信息）
+    c.execute('''CREATE TABLE IF NOT EXISTS push_subscriptions
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id TEXT NOT NULL,
+                  subscription TEXT NOT NULL,
+                  created_at REAL,
+                  UNIQUE(user_id, subscription))''')
     
     conn.commit()
     conn.close()
@@ -141,7 +189,39 @@ def mark_as_read(notification_id):
 
     return jsonify({'message': 'Marked as read'}), 200
 
-# 4. 同步角色配置
+# 4. 获取 VAPID 公钥
+@app.route('/api/push/public_key', methods=['GET'])
+def get_public_key():
+    """返回VAPID公钥，供前端订阅使用"""
+    return jsonify({'public_key': VAPID_PUBLIC_KEY})
+
+# 5. 保存推送订阅
+@app.route('/api/push/subscribe', methods=['POST'])
+def subscribe_push():
+    """保存用户的推送订阅"""
+    data = request.json
+    user_id = data.get('user_id')
+    subscription = data.get('subscription')
+    
+    if not user_id or not subscription:
+        return jsonify({'error': 'user_id and subscription required'}), 400
+    
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        c.execute('''INSERT OR REPLACE INTO push_subscriptions 
+                     (user_id, subscription, created_at) 
+                     VALUES (?, ?, ?)''',
+                  (user_id, json.dumps(subscription), time.time()))
+        conn.commit()
+        print(f"[Push] Subscription saved for user: {user_id}")
+        return jsonify({'message': 'Subscribed successfully'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+# 6. 同步角色配置
 @app.route('/api/characters/sync', methods=['POST'])
 def sync_characters():
     """前端同步角色配置到后端"""
@@ -198,31 +278,92 @@ def check_auto_messages():
                 # 计算时间差（分钟）
                 time_diff = (now - last_time) / 60
                 
-                # 如果超过间隔时间，创建通知
+                # 如果超过间隔时间，立即推送
                 if time_diff >= interval_minutes:
                     print(f"[AutoCheck] ✓ {char_name} needs to send (interval: {interval_minutes}min, elapsed: {time_diff:.1f}min)")
-                    
-                    # 创建通知（前端收到后会触发AI生成）
-                    c.execute('''INSERT INTO notifications 
-                                 (title, content, type, target_user_id, created_at)
-                                 VALUES (?, ?, ?, ?, ?)''',
-                              (char_name, 
-                               f"[主动消息触发] 间隔{interval_minutes}分钟已到",
-                               'single',
-                               user_id,
-                               now))
                     
                     # 更新最后发送时间
                     c.execute('UPDATE characters SET last_message_time = ? WHERE id = ?',
                               (now, char_id))
-                    
                     conn.commit()
-                    print(f"[AutoCheck] ✓ Notification created for {char_name}")
+                    
+                    # 通过WebSocket立即推送给前端（如果在线）
+                    push_data = {
+                        'type': 'auto_chat_trigger',
+                        'char_id': char_id,
+                        'char_name': char_name,
+                        'user_id': user_id,
+                        'timestamp': now
+                    }
+                    socketio.emit('auto_chat_trigger', push_data, broadcast=True)
+                    print(f"[AutoCheck] ✓ WebSocket push sent for {char_name}")
+                    
+                    # 同时通过 Web Push 推送（即使浏览器在后台也能收到）
+                    send_web_push(user_id, char_name, char_id)
             
             conn.close()
             
         except Exception as e:
             print(f"[AutoCheck] ✗ Error: {e}")
+
+# Web Push 推送函数
+def send_web_push(user_id, char_name, char_id):
+    """通过 Web Push 发送通知"""
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        
+        # 获取该用户的所有订阅
+        rows = c.execute('SELECT subscription FROM push_subscriptions WHERE user_id = ?', 
+                        (user_id,)).fetchall()
+        conn.close()
+        
+        if not rows:
+            print(f"[WebPush] No subscriptions found for user: {user_id}")
+            return
+        
+        # 准备推送数据
+        push_payload = json.dumps({
+            'title': char_name,
+            'body': f'{char_name} 给你发来了消息',
+            'icon': 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png',
+            'data': {
+                'char_id': char_id,
+                'char_name': char_name,
+                'url': '/呀呀呀.html'
+            }
+        })
+        
+        # 推送到所有订阅
+        for row in rows:
+            try:
+                subscription_info = json.loads(row['subscription'])
+                
+                webpush(
+                    subscription_info=subscription_info,
+                    data=push_payload,
+                    vapid_private_key=VAPID_PRIVATE_KEY,
+                    vapid_claims=VAPID_CLAIMS
+                )
+                
+                print(f"[WebPush] ✓ Push sent to {user_id} for {char_name}")
+                
+            except WebPushException as e:
+                print(f"[WebPush] ✗ Failed: {e}")
+                if e.response and e.response.status_code == 410:
+                    # 订阅已过期，删除
+                    conn = get_db_connection()
+                    c = conn.cursor()
+                    c.execute('DELETE FROM push_subscriptions WHERE subscription = ?',
+                             (row['subscription'],))
+                    conn.commit()
+                    conn.close()
+                    print(f"[WebPush] Removed expired subscription")
+            except Exception as e:
+                print(f"[WebPush] ✗ Error: {e}")
+                
+    except Exception as e:
+        print(f"[WebPush] ✗ Error in send_web_push: {e}")
 
 # 启动后台检查线程
 def start_background_checker():
@@ -230,20 +371,31 @@ def start_background_checker():
     thread.start()
     print("[Backend] ✓ Background auto-message checker started (10s interval)")
 
+# WebSocket连接事件
+@socketio.on('connect')
+def handle_connect():
+    print(f"[WebSocket] ✓ Client connected")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print(f"[WebSocket] ✗ Client disconnected")
+
 if __name__ == '__main__':
     # 获取环境变量 PORT，Zeabur 会自动注入此变量，本地默认使用 5000
     port = int(os.environ.get('PORT', 5000))
-    print(f"Starting Flask server on port {port}...")
+    print(f"Starting Flask + WebSocket server on port {port}...")
     print("=" * 50)
     print("API Routes:")
     print(" - POST /api/notifications (Create)")
     print(" - GET  /api/notifications?user_id=... (List)")
     print(" - POST /api/notifications/<id>/read (Mark Read)")
     print(" - POST /api/characters/sync (Sync Characters)")
+    print("WebSocket Events:")
+    print(" - auto_chat_trigger (实时推送)")
     print("=" * 50)
     
     # 启动后台检查线程
     start_background_checker()
     
-    # 注意：use_reloader=False 避免重复启动后台线程
-    app.run(debug=True, port=port, host='0.0.0.0', use_reloader=False)
+    # 使用socketio.run而不是app.run
+    socketio.run(app, debug=True, port=port, host='0.0.0.0', allow_unsafe_werkzeug=True)
