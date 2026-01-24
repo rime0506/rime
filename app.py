@@ -373,7 +373,7 @@ def send_web_push(user_id, char_name, char_id):
             'data': {
                 'char_id': char_id,
                 'char_name': char_name,
-                'url': './Index.html'
+                'url': './index.html'
             }
         })
         

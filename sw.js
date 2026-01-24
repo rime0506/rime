@@ -56,24 +56,22 @@ self.addEventListener('notificationclick', (event) => {
     event.notification.close();
     
     // 打开或聚焦应用
-    const targetUrl = (event.notification.data && event.notification.data.url) || './呀呀呀.html';
-    
     event.waitUntil(
         clients.matchAll({ type: 'window', includeUncontrolled: true })
             .then((clientList) => {
-                // 先尝试聚焦已有窗口 (匹配文件名即可，忽略参数)
+                // 先尝试聚焦已有窗口
                 for (let client of clientList) {
-                    // 如果当前 URL 包含目标文件名（简单匹配）
-                    if (client.url.indexOf('呀呀呀.html') > -1 && 'focus' in client) {
+                    if (client.url.includes('index.html') && 'focus' in client) {
                         return client.focus();
                     }
                 }
                 // 否则打开新窗口
                 if (clients.openWindow) {
-                    return clients.openWindow(targetUrl);
+                    return clients.openWindow('/index.html');
                 }
             })
     );
 });
 
 console.log('[SW] Ready for push notifications');
+
