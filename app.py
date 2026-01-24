@@ -318,19 +318,28 @@ def check_auto_messages():
                 last_time = row['last_message_time']
                 user_id = row['user_id']
                 
+                # 检查user_id是否有效
+                if not user_id:
+                    print(f"[AutoCheck] ⚠️ {char_name} 的user_id为空，跳过")
+                    continue
+                
                 # 计算时间差（分钟）
                 time_diff = (now - last_time) / 60
                 
                 # 如果超过间隔时间，立即推送
                 if time_diff >= interval_minutes:
-                    print(f"[AutoCheck] ✓ {char_name} needs to send (interval: {interval_minutes}min, elapsed: {time_diff:.1f}min)")
+                    print(f"[AutoCheck] ========================================")
+                    print(f"[AutoCheck] ✓ {char_name} 需要发消息！")
+                    print(f"[AutoCheck]   间隔: {interval_minutes}分钟, 已过: {time_diff:.1f}分钟")
+                    print(f"[AutoCheck]   user_id: {user_id}")
+                    print(f"[AutoCheck]   char_id: {char_id}")
                     
                     # 更新最后发送时间
                     c.execute('UPDATE characters SET last_message_time = ? WHERE id = ?',
                               (now, char_id))
                     conn.commit()
                     
-                    # 通过WebSocket立即推送给前端（如果在线）
+                    # 1. 通过WebSocket推送给前端（如果在线，让前端生成消息）
                     push_data = {
                         'type': 'auto_chat_trigger',
                         'char_id': char_id,
@@ -339,10 +348,14 @@ def check_auto_messages():
                         'timestamp': now
                     }
                     socketio.emit('auto_chat_trigger', push_data, broadcast=True)
-                    print(f"[AutoCheck] ✓ WebSocket push sent for {char_name}")
+                    print(f"[AutoCheck] ✓ WebSocket推送已发送")
                     
-                    # 同时通过 Web Push 推送（即使浏览器在后台也能收到）
-                    send_web_push(user_id, char_name, char_id)
+                    # 2. 【关键】立即通过 Web Push 推送系统通知（即使浏览器在后台也能收到）
+                    print(f"[AutoCheck] 🔔 正在发送Web Push后台通知...")
+                    message_preview = f"{char_name} 想和你聊天了~"
+                    send_web_push(user_id, char_name, char_id, message_preview)
+                    print(f"[AutoCheck] ✓✓✓ Web Push后台通知已发送！")
+                    print(f"[AutoCheck] ========================================")
             
             conn.close()
             
@@ -350,8 +363,8 @@ def check_auto_messages():
             print(f"[AutoCheck] ✗ Error: {e}")
 
 # Web Push 推送函数
-def send_web_push(user_id, char_name, char_id):
-    """通过 Web Push 发送通知"""
+def send_web_push(user_id, char_name, char_id, message=None):
+    """通过 Web Push 发送通知（带消息内容）"""
     try:
         conn = get_db_connection()
         c = conn.cursor()
@@ -362,13 +375,21 @@ def send_web_push(user_id, char_name, char_id):
         conn.close()
         
         if not rows:
-            print(f"[WebPush] No subscriptions found for user: {user_id}")
+            print(f"[WebPush] ✗✗✗ 没有找到订阅！")
+            print(f"[WebPush] user_id: {user_id}")
+            print(f"[WebPush] 请检查：")
+            print(f"[WebPush]   1. 是否在HTTPS或localhost环境？")
+            print(f"[WebPush]   2. 前端是否成功订阅？")
+            print(f"[WebPush]   3. 浏览器是否授予了通知权限？")
             return
         
-        # 准备推送数据
+        print(f"[WebPush] ✓ 找到 {len(rows)} 个订阅")
+        
+        # 准备推送数据（带真实消息内容）
+        body_text = message if message else f'{char_name} 给你发来了消息'
         push_payload = json.dumps({
             'title': char_name,
-            'body': f'{char_name} 给你发来了消息',
+            'body': body_text,
             'icon': 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png',
             'data': {
                 'char_id': char_id,
@@ -382,6 +403,11 @@ def send_web_push(user_id, char_name, char_id):
             try:
                 subscription_info = json.loads(row['subscription'])
                 
+                print(f"[WebPush] 🔔 正在发送推送...")
+                print(f"[WebPush]   user_id: {user_id}")
+                print(f"[WebPush]   char_name: {char_name}")
+                print(f"[WebPush]   message: {body_text[:50]}...")
+                
                 webpush(
                     subscription_info=subscription_info,
                     data=push_payload,
@@ -389,7 +415,7 @@ def send_web_push(user_id, char_name, char_id):
                     vapid_claims=VAPID_CLAIMS
                 )
                 
-                print(f"[WebPush] ✓ Push sent to {user_id} for {char_name}")
+                print(f"[WebPush] ✓✓✓ 推送成功发送！user_id={user_id}, char={char_name}")
                 
             except WebPushException as e:
                 print(f"[WebPush] ✗ Failed: {e}")
@@ -408,7 +434,81 @@ def send_web_push(user_id, char_name, char_id):
     except Exception as e:
         print(f"[WebPush] ✗ Error in send_web_push: {e}")
 
-# 启动后台检查线程
+# 诊断API - 检查订阅状态
+@app.route('/api/debug/subscriptions', methods=['GET'])
+def debug_subscriptions():
+    """检查push_subscriptions表中的订阅数量"""
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        rows = c.execute('SELECT user_id, created_at FROM push_subscriptions').fetchall()
+        conn.close()
+        
+        result = {
+            'count': len(rows),
+            'subscriptions': [{'user_id': r['user_id'], 'created_at': r['created_at']} for r in rows]
+        }
+        print(f"[Debug] 订阅数量: {len(rows)}")
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# 诊断API - 手动触发一次后台检查
+@app.route('/api/debug/trigger_check', methods=['POST'])
+def debug_trigger_check():
+    """手动触发一次后台检查（用于测试）"""
+    try:
+        now = time.time()
+        conn = get_db_connection()
+        c = conn.cursor()
+        
+        rows = c.execute('''SELECT id, name, auto_reply_interval, last_message_time, user_id
+                            FROM characters 
+                            WHERE auto_reply_enabled = 1 
+                            AND auto_reply_interval > 0''').fetchall()
+        
+        results = []
+        for row in rows:
+            char_id = row['id']
+            char_name = row['name']
+            user_id = row['user_id']
+            
+            # 直接发送Web Push（不管时间）
+            message = f"【测试】{char_name} 的后台推送"
+            send_web_push(user_id, char_name, char_id, message)
+            results.append({'char_name': char_name, 'user_id': user_id, 'pushed': True})
+        
+        conn.close()
+        return jsonify({'message': f'已触发 {len(results)} 个推送', 'results': results}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# 按需触发推送通知（前端调用）
+@app.route('/api/trigger_push', methods=['POST'])
+def trigger_push():
+    """前端AI消息生成后，立即调用此API发送推送（带消息内容）"""
+    try:
+        data = request.get_json()
+        user_id = data.get('user_id')
+        char_id = data.get('char_id')
+        char_name = data.get('char_name')
+        message = data.get('message', f'{char_name} 给你发来了消息')  # 消息内容
+        
+        if not all([user_id, char_id, char_name]):
+            return jsonify({'error': 'Missing parameters'}), 400
+        
+        print(f"[TriggerPush] ✓ Immediate push for {char_name}: {message[:20]}...")
+        
+        # 立即发送Web Push（带消息内容）
+        send_web_push(user_id, char_name, char_id, message)
+        
+        return jsonify({'message': 'Push sent successfully'}), 200
+        
+    except Exception as e:
+        print(f"[TriggerPush] ✗ Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# 启动后台检查线程（已废弃，改为按需推送）
 def start_background_checker():
     thread = threading.Thread(target=check_auto_messages, daemon=True)
     thread.start()
@@ -437,7 +537,8 @@ if __name__ == '__main__':
     print(" - auto_chat_trigger (实时推送)")
     print("=" * 50)
     
-    # 启动后台检查线程
+    # ✅ 启动后台检查线程（必须！否则后台无法收到通知）
+    # 这个线程会在后台持续检查，即使前端JavaScript被暂停也能工作
     start_background_checker()
     
     # 使用socketio.run而不是app.run
