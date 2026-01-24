@@ -16,11 +16,25 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 # 初始化 SocketIO（用于实时推送）
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
+# 适配 Zeabur 容器环境，优先使用 /app/data (持久化目录)，其次当前目录，最后 /tmp
+if os.path.exists('/app/data'):
+    DB_FILE = '/app/data/notifications.db'
+    KEY_FILE = '/app/data/vapid_private.pem'
+else:
+    DB_FILE = 'notifications.db'
+    KEY_FILE = 'vapid_private.pem'
+
+print(f"[Config] DB_FILE: {DB_FILE}")
+print(f"[Config] KEY_FILE: {KEY_FILE}")
+
 # VAPID 密钥（用于 Web Push）
 print("[VAPID] ========================================")
 print("[VAPID] 🔧 初始化 VAPID 密钥")
 
 def load_or_generate_vapid_keys():
+    if 'KEY_FILE' not in globals():
+        print("[VAPID] ❌ 致命错误：KEY_FILE 未定义")
+        return None
     """
     加载或生成 VAPID 密钥，支持持久化到文件
     """
@@ -29,6 +43,7 @@ def load_or_generate_vapid_keys():
     import base64
     
     private_key_pem = None
+    print(f"[VAPID] 当前密钥文件路径: {KEY_FILE}")
     
     # 尝试从文件加载
     if os.path.exists(KEY_FILE):
@@ -85,7 +100,7 @@ try:
         print("[VAPID] ✅✅✅ VAPID 已就绪")
         print(f"[VAPID]   公钥预览: {VAPID_PUBLIC_KEY[:40]}...")
     else:
-        raise Exception("密钥初始化失败")
+        raise Exception("密钥生成后为空，检查文件路径或权限")
         
 except Exception as e:
     print(f"[VAPID] ❌❌❌ 致命错误: {e}")
@@ -97,17 +112,6 @@ except Exception as e:
     VAPID_CLAIMS = {}
 
 print("[VAPID] ========================================")
-
-# 适配 Zeabur 容器环境，优先使用 /app/data (持久化目录)，其次当前目录，最后 /tmp
-if os.path.exists('/app/data'):
-    DB_FILE = '/app/data/notifications.db'
-    KEY_FILE = '/app/data/vapid_private.pem'
-else:
-    DB_FILE = 'notifications.db'
-    KEY_FILE = 'vapid_private.pem'
-
-print(f"[Config] DB_FILE: {DB_FILE}")
-print(f"[Config] KEY_FILE: {KEY_FILE}")
 
 def init_db():
     """初始化数据库表"""
