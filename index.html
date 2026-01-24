@@ -927,6 +927,28 @@
             font-size: 14px;
         }
 
+        /* Debug Toast */
+        .debug-toast {
+            position: fixed;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            z-index: 9999;
+            max-width: 80%;
+            word-wrap: break-word;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+        .debug-toast.show {
+            opacity: 1;
+        }
+
         /* 微信页面样式 */
         .wechat-page {
             position: fixed;
@@ -2099,6 +2121,14 @@
                     <div class="setting-item-text">测试通知</div>
                     <div style="color: #999; font-size: 12px;">点击发送测试通知</div>
                 </div>
+                <div class="setting-item" onclick="document.getElementById('debug-switch').click()">
+                    <div class="setting-item-text">调试模式</div>
+                    <div style="color: #999; font-size: 12px;">显示通知调试信息</div>
+                    <label class="ios-switch" onclick="event.stopPropagation()">
+                        <input type="checkbox" id="debug-switch" onchange="toggleDebugMode(this)">
+                        <span class="slider"></span>
+                    </label>
+                </div>
             </div>
 
             <!-- API 设置 折叠卡片 -->
@@ -2787,9 +2817,13 @@
             const notifEnabled = localStorage.getItem('notification_enabled') === 'true';
             document.getElementById('notif-switch').checked = notifEnabled;
             
-            // 初始化通知轮询 (固定30秒)
+            // 初始化调试模式设置
+            const debugEnabled = localStorage.getItem('debug_mode_enabled') === 'true';
+            document.getElementById('debug-switch').checked = debugEnabled;
+            
+            // 初始化通知轮询 (15秒检查，更快响应后端触发)
             if (notifEnabled) {
-                startNotificationLoop(30);
+                startNotificationLoop(15);
             }
             
             // 启动主动聊天检测 (每分钟一次)
@@ -2808,6 +2842,9 @@
             const loopTask = () => {
                 fetchNotifications();
             };
+            
+            console.log(`[Notification] Polling started, checking every ${seconds}s`);
+            showDebugToast(`通知轮询: 每${seconds}秒检查`, true);
             
             loopTask(); // 立即执行一次
             notifTimer = setInterval(loopTask, seconds * 1000);
@@ -2828,7 +2865,7 @@
                         }
                     });
                 }
-                startNotificationLoop(30); // 默认30秒
+                startNotificationLoop(15); // 15秒检查
             } else {
                 if (notifTimer) clearInterval(notifTimer);
                 document.getElementById('notif-badge').style.display = 'none';
@@ -2855,17 +2892,58 @@
             
             if (Notification.permission === "granted") {
                 sendSystemNotification("测试通知", "如果你能看到这条通知，说明系统通知功能正常！");
-                alert("测试通知已发送！如果没有弹出通知窗口，请检查：\n1. 浏览器通知权限是否允许\n2. 系统通知设置是否开启\n3. 浏览器是否允许显示通知\n\n请查看控制台(F12)获取详细调试信息");
+                showDebugToast("测试通知已发送！请查看是否弹出通知窗口", true);
             } else {
                 Notification.requestPermission().then(permission => {
                     console.log('[Test] Permission request result:', permission);
                     if (permission === "granted") {
                         sendSystemNotification("测试通知", "权限已授予！系统通知功能正常工作");
+                        showDebugToast("权限已授予！请查看是否弹出通知", true);
                     } else {
                         alert("通知权限被拒绝，无法发送通知");
                     }
                 });
             }
+        }
+
+        // 切换调试模式
+        function toggleDebugMode(checkbox) {
+            const enabled = checkbox.checked;
+            localStorage.setItem('debug_mode_enabled', enabled);
+            if (enabled) {
+                showDebugToast('调试模式已开启');
+            }
+        }
+
+        // 显示调试Toast（在手机上可见）
+        let toastTimer = null;
+        function showDebugToast(message, forceShow = false) {
+            // 检查是否开启调试模式（测试通知时强制显示）
+            const debugEnabled = localStorage.getItem('debug_mode_enabled') === 'true';
+            if (!debugEnabled && !forceShow) {
+                return;
+            }
+            
+            // 创建或获取toast元素
+            let toast = document.getElementById('debug-toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'debug-toast';
+                toast.className = 'debug-toast';
+                document.body.appendChild(toast);
+            }
+            
+            // 清除之前的定时器
+            if (toastTimer) clearTimeout(toastTimer);
+            
+            // 显示消息
+            toast.innerText = message;
+            toast.classList.add('show');
+            
+            // 3秒后隐藏
+            toastTimer = setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
         }
 
         // 显示设置页面
@@ -2927,6 +3005,26 @@
                     // 2. 检查是否有新消息 (不在已知列表中，且非首次加载)
                     if (!knownNotifIds.has(item.id)) {
                         knownNotifIds.add(item.id);
+                        
+                        // 检查是否是后端触发的主动消息通知
+                        if (item.content && item.content.includes('[主动消息触发]')) {
+                            console.log('[Backend] Auto-chat triggered for:', item.title);
+                            showDebugToast(`🔔 后端触发: ${item.title}`);
+                            
+                            // 查找对应的角色并触发AI生成
+                            db.characters.filter(c => c.name === item.title).first().then(char => {
+                                if (char) {
+                                    console.log('[Backend] Generating AI message for:', char.name);
+                                    triggerAutoChat(char);
+                                }
+                            });
+                            
+                            // 自动标记为已读（这是内部触发，不需要用户看到）
+                            markRead(item.id, false);
+                            
+                            return; // 不渲染这种系统通知
+                        }
+                        
                         // 仅当非首次加载时弹窗，避免刷新页面时狂弹
                         if (!isFirstLoad) {
                             sendSystemNotification(item.title, item.content);
@@ -2965,6 +3063,7 @@
             // 检查浏览器是否支持通知
             if (!("Notification" in window)) {
                 console.warn('[Notification] Browser does not support notifications');
+                showDebugToast('浏览器不支持通知');
                 return;
             }
             
@@ -2992,11 +3091,14 @@
                     };
                     
                     console.log('[Notification] Notification sent successfully');
+                    showDebugToast(`✓ 通知已发送: ${title}`);
                 } catch (error) {
                     console.error('[Notification] Failed to send notification:', error);
+                    showDebugToast(`✗ 通知发送失败: ${error.message}`);
                 }
             } else if (Notification.permission !== "denied") {
                 console.log('[Notification] Requesting permission...');
+                showDebugToast('请求通知权限中...');
                 Notification.requestPermission().then(permission => {
                     console.log(`[Notification] Permission result: ${permission}`);
                     if (permission === "granted") {
@@ -3006,13 +3108,18 @@
                                 icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png'
                             });
                             console.log('[Notification] Notification sent after permission granted');
+                            showDebugToast('✓ 权限已授予，通知已发送');
                         } catch (error) {
                             console.error('[Notification] Failed to send notification:', error);
+                            showDebugToast(`✗ 通知发送失败: ${error.message}`);
                         }
+                    } else {
+                        showDebugToast('✗ 通知权限被拒绝');
                     }
                 });
             } else {
                 console.warn('[Notification] Permission denied by user');
+                showDebugToast('✗ 通知权限已被拒绝');
             }
         }
 
@@ -3410,6 +3517,14 @@
 
         // --- 微信应用逻辑 ---
         function showWechatPage() {
+            // 确保聊天窗口被关闭
+            const chatWindow = document.getElementById('chat-window');
+            if (chatWindow && chatWindow.style.display !== 'none') {
+                chatWindow.style.display = 'none';
+                currentChatCharId = null;
+                console.log('[WechatPage] Closed chat window, cleared currentChatCharId');
+            }
+            
             document.getElementById('wechat-page').style.display = 'flex';
             // 打开时自动切到第一个标签页并渲染
             switchWechatTab(0);
@@ -4015,15 +4130,72 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             }
         }
         
-        // --- 主动发消息逻辑 ---
+        // --- 主动发消息逻辑（改为后端驱动）---
+        let syncTimer = null; // 同步定时器
+        
+        // 同步角色配置到后端（让后端来检查）
+        async function syncCharactersToBackend() {
+            try {
+                // 获取所有开启了主动发消息的角色
+                const chars = await db.characters
+                    .filter(c => c.auto_reply_enabled === true && c.auto_reply_interval > 0)
+                    .toArray();
+                
+                if (chars.length === 0) {
+                    console.log('[Sync] No characters to sync');
+                    return;
+                }
+                
+                // 准备同步数据
+                const syncData = chars.map(c => ({
+                    id: c.id,
+                    name: c.name,
+                    avatar: c.avatar,
+                    auto_reply_enabled: c.auto_reply_enabled,
+                    auto_reply_interval: c.auto_reply_interval,
+                    last_message_time: c.chat_history && c.chat_history.length > 0 
+                        ? c.chat_history[c.chat_history.length - 1].time 
+                        : (c.updated_at || Date.now()),
+                    user_id: currentUserId
+                }));
+                
+                // 发送到后端
+                const res = await fetch(`${API_BASE}/characters/sync`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ characters: syncData })
+                });
+                
+                if (res.ok) {
+                    console.log(`[Sync] ✓ Synced ${syncData.length} characters to backend`);
+                    showDebugToast(`✓ 已同步${syncData.length}个角色到后端`);
+                } else {
+                    console.error('[Sync] Failed to sync:', await res.text());
+                }
+                
+            } catch (err) {
+                console.error('[Sync] Error:', err);
+            }
+        }
+        
+        // 启动同步循环（每30秒同步一次配置）
         function startAutoChatLoop() {
-            if (autoChatTimer) clearInterval(autoChatTimer);
-            // 每60秒检查一次
-            console.log("[AutoChat] Loop started. Checking every 60s...");
-            autoChatTimer = setInterval(checkAutoChat, 60 * 1000);
+            if (syncTimer) clearInterval(syncTimer);
             
-            // 立即检查一次（可选，方便调试，但可能会在刚加载时触发）
-            // setTimeout(checkAutoChat, 5000); 
+            console.log('[AutoChat] Starting backend-driven mode...');
+            showDebugToast('后端驱动模式已启动', true);
+            
+            // 立即同步一次
+            syncCharactersToBackend();
+            
+            // 每30秒同步一次（只同步配置，不检查消息）
+            syncTimer = setInterval(() => {
+                console.log('[Sync] Syncing characters to backend...');
+                syncCharactersToBackend();
+            }, 30 * 1000);
+            
+            console.log('[AutoChat] ✓ Backend will check every 10s, frontend syncs config every 30s');
+            showDebugToast('✓ 后端每10秒检查，前端每30秒同步配置', true);
         }
 
         async function checkAutoChat() {
@@ -4204,10 +4376,12 @@ ${loreContext}
                     // 如果当前正好打开了这个角色的窗口，直接追加
                     if (currentChatCharId === freshChar.id) {
                         console.log(`[AutoChat] User is viewing ${freshChar.name}'s chat, appending to UI`);
+                        showDebugToast(`主动消息: 正在查看${freshChar.name}，显示在UI`);
                         appendMessageToUI('char', seg, freshChar.avatar);
                     } else {
                         // 否则发送系统通知
                         console.log(`[AutoChat] User is NOT viewing ${freshChar.name}'s chat (current: ${currentChatCharId}), sending notification`);
+                        showDebugToast(`主动消息: 不在${freshChar.name}聊天中，发送通知`);
                         sendSystemNotification(freshChar.name, seg);
                         
                         // 如果在微信列表页，刷新列表以更新最后一条消息预览
@@ -4943,10 +5117,12 @@ ${loreContext}
                         // 只有在当前窗口匹配时才渲染 UI
                         if (currentChatCharId === targetCharId) {
                             console.log(`[AiReply] User is viewing ${freshChar.name}'s chat, appending to UI`);
+                            showDebugToast(`AI回复: 正在查看${freshChar.name}，显示在UI`);
                             appendMessageToUI('char', seg, freshChar.avatar);
                         } else {
                             // 不在当前窗口时，发送系统通知
                             console.log(`[AiReply] User is NOT viewing ${freshChar.name}'s chat (current: ${currentChatCharId}), sending notification`);
+                            showDebugToast(`AI回复: 不在${freshChar.name}聊天中(当前:${currentChatCharId})，发送通知`);
                             sendSystemNotification(freshChar.name, seg);
                         }
                     }

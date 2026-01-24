@@ -2,6 +2,7 @@ import sqlite3
 import json
 import time
 import os
+import threading
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -32,6 +33,18 @@ def init_db():
                  (user_id TEXT,
                   notification_id INTEGER,
                   PRIMARY KEY (user_id, notification_id))''')
+    
+    # 角色配置表（前端同步过来的）
+    c.execute('''CREATE TABLE IF NOT EXISTS characters
+                 (id TEXT PRIMARY KEY,
+                  name TEXT NOT NULL,
+                  avatar TEXT,
+                  auto_reply_enabled INTEGER DEFAULT 0,
+                  auto_reply_interval INTEGER DEFAULT 0,
+                  last_message_time REAL DEFAULT 0,
+                  user_id TEXT,
+                  updated_at REAL)''')
+    
     conn.commit()
     conn.close()
 
@@ -128,12 +141,109 @@ def mark_as_read(notification_id):
 
     return jsonify({'message': 'Marked as read'}), 200
 
+# 4. 同步角色配置
+@app.route('/api/characters/sync', methods=['POST'])
+def sync_characters():
+    """前端同步角色配置到后端"""
+    data = request.json
+    characters = data.get('characters', [])
+    
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    for char in characters:
+        c.execute('''INSERT OR REPLACE INTO characters 
+                     (id, name, avatar, auto_reply_enabled, auto_reply_interval, 
+                      last_message_time, user_id, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (char.get('id'), char.get('name'), char.get('avatar'),
+                   1 if char.get('auto_reply_enabled') else 0,
+                   char.get('auto_reply_interval', 0),
+                   char.get('last_message_time', 0),
+                   char.get('user_id'),
+                   time.time()))
+    
+    conn.commit()
+    conn.close()
+    
+    print(f"[Sync] Synced {len(characters)} characters")
+    return jsonify({'message': f'Synced {len(characters)} characters'}), 200
+
+# 后台定时检查线程
+def check_auto_messages():
+    """后台线程：每10秒检查是否需要触发主动消息"""
+    print("[AutoCheck] Background checker thread started")
+    while True:
+        try:
+            time.sleep(10)  # 每10秒检查一次
+            
+            now = time.time()
+            conn = get_db_connection()
+            c = conn.cursor()
+            
+            # 查询开启了主动发消息的角色
+            rows = c.execute('''SELECT id, name, avatar, auto_reply_interval, 
+                                       last_message_time, user_id
+                                FROM characters 
+                                WHERE auto_reply_enabled = 1 
+                                AND auto_reply_interval > 0''').fetchall()
+            
+            for row in rows:
+                char_id = row['id']
+                char_name = row['name']
+                interval_minutes = row['auto_reply_interval']
+                last_time = row['last_message_time']
+                user_id = row['user_id']
+                
+                # 计算时间差（分钟）
+                time_diff = (now - last_time) / 60
+                
+                # 如果超过间隔时间，创建通知
+                if time_diff >= interval_minutes:
+                    print(f"[AutoCheck] ✓ {char_name} needs to send (interval: {interval_minutes}min, elapsed: {time_diff:.1f}min)")
+                    
+                    # 创建通知（前端收到后会触发AI生成）
+                    c.execute('''INSERT INTO notifications 
+                                 (title, content, type, target_user_id, created_at)
+                                 VALUES (?, ?, ?, ?, ?)''',
+                              (char_name, 
+                               f"[主动消息触发] 间隔{interval_minutes}分钟已到",
+                               'single',
+                               user_id,
+                               now))
+                    
+                    # 更新最后发送时间
+                    c.execute('UPDATE characters SET last_message_time = ? WHERE id = ?',
+                              (now, char_id))
+                    
+                    conn.commit()
+                    print(f"[AutoCheck] ✓ Notification created for {char_name}")
+            
+            conn.close()
+            
+        except Exception as e:
+            print(f"[AutoCheck] ✗ Error: {e}")
+
+# 启动后台检查线程
+def start_background_checker():
+    thread = threading.Thread(target=check_auto_messages, daemon=True)
+    thread.start()
+    print("[Backend] ✓ Background auto-message checker started (10s interval)")
+
 if __name__ == '__main__':
     # 获取环境变量 PORT，Zeabur 会自动注入此变量，本地默认使用 5000
     port = int(os.environ.get('PORT', 5000))
     print(f"Starting Flask server on port {port}...")
+    print("=" * 50)
     print("API Routes:")
     print(" - POST /api/notifications (Create)")
     print(" - GET  /api/notifications?user_id=... (List)")
     print(" - POST /api/notifications/<id>/read (Mark Read)")
-    app.run(debug=True, port=port, host='0.0.0.0')
+    print(" - POST /api/characters/sync (Sync Characters)")
+    print("=" * 50)
+    
+    # 启动后台检查线程
+    start_background_checker()
+    
+    # 注意：use_reloader=False 避免重复启动后台线程
+    app.run(debug=True, port=port, host='0.0.0.0', use_reloader=False)
