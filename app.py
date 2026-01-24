@@ -16,101 +16,90 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # VAPID 密钥（用于 Web Push）
-# 使用当前目录持久化存储，避免容器重启后丢失
-VAPID_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vapid_keys.json')
-print(f"[VAPID] 密钥文件路径: {VAPID_FILE}")
+# 【Zeabur 兼容方案】使用内存存储，避免文件读写权限问题
+print("[VAPID] ========================================")
+print("[VAPID] 🔧 初始化 VAPID 密钥（内存模式，适配 Zeabur）")
 
-def get_vapid_keys():
-    """获取或生成 VAPID 密钥"""
-    if os.path.exists(VAPID_FILE):
-        try:
-            with open(VAPID_FILE, 'r') as f:
-                keys = json.load(f)
-                # 验证密钥完整性
-                if keys.get('public_key') and keys.get('private_key'):
-                    print("[VAPID] ✓ Loaded existing keys from file")
-                    print(f"[VAPID] Public Key: {keys['public_key'][:30]}...")
-                    return keys
-                else:
-                    print("[VAPID] ✗ Existing keys incomplete, regenerating...")
-                    os.remove(VAPID_FILE)
-        except Exception as e:
-            print(f"[VAPID] ✗ Error loading keys: {e}, regenerating...")
-            if os.path.exists(VAPID_FILE):
-                os.remove(VAPID_FILE)
-    
-    # 生成新密钥
-    print("[VAPID] Generating new VAPID keys...")
+def generate_vapid_keys_in_memory():
+    """
+    直接在内存中生成 VAPID 密钥（不依赖文件系统）
+    适配 Zeabur 容器环境的临时文件系统和权限限制
+    """
     try:
+        print("[VAPID] 🔑 正在生成新的 VAPID 密钥...")
+        
         from pywebpush import vapid as vapid_gen
+        from cryptography.hazmat.primitives import serialization
         import base64
         
+        # 生成密钥对
         v = vapid_gen.Vapid()
         v.generate_keys()
         
-        # 获取原始字节（使用正确的方法）
-        # pywebpush 1.14.0 使用 private_pem() 和 public_key.public_bytes()
+        # 获取私钥（PEM 格式）
         private_key_pem = v.private_pem()
+        if isinstance(private_key_pem, bytes):
+            private_key_pem = private_key_pem.decode('utf-8')
         
-        # 获取公钥的原始字节（65字节，未压缩格式）
-        from cryptography.hazmat.primitives import serialization
+        # 获取公钥（原始字节，65字节未压缩格式）
         public_key_bytes = v.public_key.public_bytes(
             encoding=serialization.Encoding.X962,
             format=serialization.PublicFormat.UncompressedPoint
         )
         
-        # 转为URL-safe base64（前端需要这种格式）
+        # 转为 URL-safe base64（前端订阅需要）
         public_key_b64 = base64.urlsafe_b64encode(public_key_bytes).decode('utf-8').rstrip('=')
         
-        keys = {
-            'private_key': private_key_pem.decode('utf-8') if isinstance(private_key_pem, bytes) else private_key_pem,
-            'public_key': public_key_b64,
-            'public_key_raw': public_key_bytes.hex()
+        print(f"[VAPID] ✅ 密钥生成成功！")
+        print(f"[VAPID]   公钥: {public_key_b64[:40]}...")
+        print(f"[VAPID]   公钥长度: {len(public_key_b64)} 字符")
+        print(f"[VAPID]   私钥格式: PEM")
+        print(f"[VAPID] ========================================")
+        
+        return {
+            'private_key': private_key_pem,
+            'public_key': public_key_b64
         }
         
-        with open(VAPID_FILE, 'w') as f:
-            json.dump(keys, f, indent=2)
-        
-        print(f"[VAPID] ✓✓✓ Generated new keys successfully!")
-        print(f"[VAPID] Public Key: {public_key_b64[:30]}...")
-        print(f"[VAPID] Public Key Length: {len(public_key_b64)} chars")
-        print(f"[VAPID] Keys saved to: {VAPID_FILE}")
-        return keys
-        
     except ImportError as e:
-        print(f"[VAPID] ✗ Import error: {e}")
-        print("[VAPID] Please install: pip install pywebpush cryptography")
+        print(f"[VAPID] ❌ 导入错误: {e}")
+        print(f"[VAPID]   请安装依赖: pip install pywebpush cryptography")
+        print(f"[VAPID] ========================================")
         return None
     except Exception as e:
-        print(f"[VAPID] ✗✗✗ Error generating keys: {e}")
+        print(f"[VAPID] ❌ 生成失败: {e}")
         import traceback
         traceback.print_exc()
+        print(f"[VAPID] ========================================")
         return None
 
+# 启动时强制生成密钥（内存存储）
 try:
-    vapid_keys = get_vapid_keys()
-    if vapid_keys:
-        # 私钥现在是 PEM 格式的字符串
-        private_key_str = vapid_keys['private_key']
-        if isinstance(private_key_str, str):
-            VAPID_PRIVATE_KEY = private_key_str
-        else:
-            VAPID_PRIVATE_KEY = private_key_str.decode('utf-8')
-        
+    vapid_keys = generate_vapid_keys_in_memory()
+    
+    if vapid_keys and vapid_keys.get('public_key') and vapid_keys.get('private_key'):
+        VAPID_PRIVATE_KEY = vapid_keys['private_key']
         VAPID_PUBLIC_KEY = vapid_keys['public_key']
         VAPID_CLAIMS = {"sub": "mailto:admin@example.com"}
-        print(f"[VAPID] ✓✓✓ Ready to send push notifications!")
-        print(f"[VAPID] Public Key (first 30 chars): {VAPID_PUBLIC_KEY[:30]}...")
+        
+        print("[VAPID] ✅✅✅ VAPID 已就绪，可以发送推送通知！")
+        print(f"[VAPID]   模式: 内存存储（Zeabur 兼容）")
+        print(f"[VAPID]   公钥预览: {VAPID_PUBLIC_KEY[:40]}...")
     else:
-        raise Exception("Failed to generate VAPID keys")
+        raise Exception("密钥生成返回空值")
+        
 except Exception as e:
-    print(f"[VAPID] ✗✗✗ Fatal error: {e}")
-    print("[VAPID] Please install dependencies: pip install -r requirements.txt")
+    print(f"[VAPID] ❌❌❌ 致命错误: {e}")
+    print(f"[VAPID]   推送功能将不可用！")
+    print(f"[VAPID]   请检查依赖: pip install -r requirements.txt")
     import traceback
     traceback.print_exc()
+    
     VAPID_PRIVATE_KEY = None
     VAPID_PUBLIC_KEY = None
     VAPID_CLAIMS = {}
+
+print("[VAPID] ========================================")
 
 # 适配 Zeabur 容器环境，使用 /tmp 目录（注意：Zeabur 免费版容器重启后 /tmp 数据会重置）
 # 如果需要持久化，建议在 Zeabur 设置中挂载存储卷到特定路径
