@@ -350,8 +350,8 @@ def check_auto_messages():
             print(f"[AutoCheck] ✗ Error: {e}")
 
 # Web Push 推送函数
-def send_web_push(user_id, char_name, char_id):
-    """通过 Web Push 发送通知"""
+def send_web_push(user_id, char_name, char_id, message=None):
+    """通过 Web Push 发送通知（带消息内容）"""
     try:
         conn = get_db_connection()
         c = conn.cursor()
@@ -365,10 +365,11 @@ def send_web_push(user_id, char_name, char_id):
             print(f"[WebPush] No subscriptions found for user: {user_id}")
             return
         
-        # 准备推送数据
+        # 准备推送数据（带真实消息内容）
+        body_text = message if message else f'{char_name} 给你发来了消息'
         push_payload = json.dumps({
             'title': char_name,
-            'body': f'{char_name} 给你发来了消息',
+            'body': body_text,
             'icon': 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png',
             'data': {
                 'char_id': char_id,
@@ -411,20 +412,21 @@ def send_web_push(user_id, char_name, char_id):
 # 按需触发推送通知（前端调用）
 @app.route('/api/trigger_push', methods=['POST'])
 def trigger_push():
-    """前端检测到需要发消息时，立即调用此API发送推送"""
+    """前端AI消息生成后，立即调用此API发送推送（带消息内容）"""
     try:
         data = request.get_json()
         user_id = data.get('user_id')
         char_id = data.get('char_id')
         char_name = data.get('char_name')
+        message = data.get('message', f'{char_name} 给你发来了消息')  # 消息内容
         
         if not all([user_id, char_id, char_name]):
             return jsonify({'error': 'Missing parameters'}), 400
         
-        print(f"[TriggerPush] ✓ Immediate push requested for {char_name}")
+        print(f"[TriggerPush] ✓ Immediate push for {char_name}: {message[:20]}...")
         
-        # 立即发送Web Push
-        send_web_push(user_id, char_name, char_id)
+        # 立即发送Web Push（带消息内容）
+        send_web_push(user_id, char_name, char_id, message)
         
         return jsonify({'message': 'Push sent successfully'}), 200
         
