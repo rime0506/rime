@@ -4606,9 +4606,40 @@ ${loreContext}
                         appendMessageToUI('char', seg, freshChar.avatar);
                     }
                     
-                    // 6. 发送前端通知（如果页面在前台）
-                    // 后端的Web Push由后台检查线程负责，不需要前端再调用
-                    sendSystemNotification(freshChar.name, seg);
+                    // 6. 双重通知机制（前台+后台都能收到）
+                    console.log(`[AutoChat] Sending dual notifications for ${freshChar.name}...`);
+                    
+                    // 6.1 前端Notification（前台立即通知）
+                    if (Notification.permission === "granted") {
+                        try {
+                            new Notification(freshChar.name, {
+                                body: seg,
+                                icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png',
+                                tag: 'chat-message-' + freshChar.id,
+                                requireInteraction: false
+                            });
+                            console.log(`[AutoChat] ✓ 前端通知已发送`);
+                        } catch (err) {
+                            console.error(`[AutoChat] ✗ 前端通知失败:`, err);
+                        }
+                    }
+                    
+                    // 6.2 后端Web Push（后台通知，双保险）
+                    try {
+                        await fetch(`${API_BASE}/trigger_push`, {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                user_id: currentUserId,
+                                char_id: freshChar.id,
+                                char_name: freshChar.name,
+                                message: seg
+                            })
+                        });
+                        console.log(`[AutoChat] ✓ Web Push已发送`);
+                    } catch (err) {
+                        console.error(`[AutoChat] ✗ Web Push失败:`, err);
+                    }
                     
                     // 7. 如果在微信列表页，刷新列表以更新最后一条消息预览
                     if (currentChatCharId !== freshChar.id) {
