@@ -16,8 +16,9 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # VAPID 密钥（用于 Web Push）
-# 首次运行时自动生成，会保存到文件
-VAPID_FILE = '/tmp/vapid_keys.json'
+# 使用当前目录持久化存储，避免容器重启后丢失
+VAPID_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vapid_keys.json')
+print(f"[VAPID] 密钥文件路径: {VAPID_FILE}")
 
 def get_vapid_keys():
     """获取或生成 VAPID 密钥"""
@@ -370,20 +371,36 @@ def send_web_push(user_id, char_name, char_id, message=None):
         c = conn.cursor()
         
         # 获取该用户的所有订阅
+        print(f"[WebPush] ========================================")
+        print(f"[WebPush] 🔍 查找订阅...")
+        print(f"[WebPush]   user_id: {user_id}")
+        print(f"[WebPush]   user_id类型: {type(user_id).__name__}")
+        
+        # 先查询所有订阅，看看数据库里有什么
+        all_rows = c.execute('SELECT user_id, created_at FROM push_subscriptions').fetchall()
+        print(f"[WebPush]   数据库中的订阅总数: {len(all_rows)}")
+        if all_rows:
+            print(f"[WebPush]   数据库中的user_id列表:")
+            for r in all_rows:
+                print(f"[WebPush]     - user_id: {r['user_id']} (类型: {type(r['user_id']).__name__})")
+        
+        # 精确匹配查询
         rows = c.execute('SELECT subscription FROM push_subscriptions WHERE user_id = ?', 
                         (user_id,)).fetchall()
         conn.close()
         
         if not rows:
-            print(f"[WebPush] ✗✗✗ 没有找到订阅！")
-            print(f"[WebPush] user_id: {user_id}")
-            print(f"[WebPush] 请检查：")
-            print(f"[WebPush]   1. 是否在HTTPS或localhost环境？")
-            print(f"[WebPush]   2. 前端是否成功订阅？")
-            print(f"[WebPush]   3. 浏览器是否授予了通知权限？")
+            print(f"[WebPush] ✗✗✗ 没有找到匹配的订阅！")
+            print(f"[WebPush]   查询的user_id: {user_id} (类型: {type(user_id).__name__})")
+            print(f"[WebPush]   请检查：")
+            print(f"[WebPush]     1. user_id是否完全匹配（包括大小写和类型）？")
+            print(f"[WebPush]     2. 前端订阅时使用的user_id是什么？")
+            print(f"[WebPush]     3. 角色同步时使用的user_id是什么？")
+            print(f"[WebPush] ========================================")
             return
         
-        print(f"[WebPush] ✓ 找到 {len(rows)} 个订阅")
+        print(f"[WebPush] ✓ 找到 {len(rows)} 个匹配的订阅")
+        print(f"[WebPush] ========================================")
         
         # 准备推送数据（带真实消息内容）
         body_text = message if message else f'{char_name} 给你发来了消息'
@@ -399,14 +416,16 @@ def send_web_push(user_id, char_name, char_id, message=None):
         })
         
         # 推送到所有订阅
-        for row in rows:
+        for idx, row in enumerate(rows):
             try:
                 subscription_info = json.loads(row['subscription'])
                 
-                print(f"[WebPush] 🔔 正在发送推送...")
+                print(f"[WebPush] ========================================")
+                print(f"[WebPush] 🔔 正在发送推送 #{idx+1}/{len(rows)}")
                 print(f"[WebPush]   user_id: {user_id}")
                 print(f"[WebPush]   char_name: {char_name}")
                 print(f"[WebPush]   message: {body_text[:50]}...")
+                print(f"[WebPush]   subscription endpoint: {subscription_info.get('endpoint', 'N/A')[:50]}...")
                 
                 webpush(
                     subscription_info=subscription_info,
@@ -416,20 +435,42 @@ def send_web_push(user_id, char_name, char_id, message=None):
                 )
                 
                 print(f"[WebPush] ✓✓✓ 推送成功发送！user_id={user_id}, char={char_name}")
+                print(f"[WebPush] ========================================")
                 
             except WebPushException as e:
-                print(f"[WebPush] ✗ Failed: {e}")
+                print(f"[WebPush] ========================================")
+                print(f"[WebPush] ✗✗✗ WebPush异常！")
+                print(f"[WebPush]   错误类型: {type(e).__name__}")
+                print(f"[WebPush]   错误消息: {str(e)}")
+                if e.response:
+                    print(f"[WebPush]   响应状态码: {e.response.status_code}")
+                    try:
+                        error_detail = e.response.json()
+                        print(f"[WebPush]   响应详情: {error_detail}")
+                    except:
+                        print(f"[WebPush]   响应内容: {e.response.text[:200]}")
+                
                 if e.response and e.response.status_code == 410:
                     # 订阅已过期，删除
+                    print(f"[WebPush]   订阅已过期(410)，正在删除...")
                     conn = get_db_connection()
                     c = conn.cursor()
                     c.execute('DELETE FROM push_subscriptions WHERE subscription = ?',
                              (row['subscription'],))
                     conn.commit()
                     conn.close()
-                    print(f"[WebPush] Removed expired subscription")
+                    print(f"[WebPush]   ✓ 已删除过期订阅")
+                print(f"[WebPush] ========================================")
+                
             except Exception as e:
-                print(f"[WebPush] ✗ Error: {e}")
+                print(f"[WebPush] ========================================")
+                print(f"[WebPush] ✗✗✗ 未知异常！")
+                print(f"[WebPush]   错误类型: {type(e).__name__}")
+                print(f"[WebPush]   错误消息: {str(e)}")
+                import traceback
+                print(f"[WebPush]   堆栈跟踪:")
+                traceback.print_exc()
+                print(f"[WebPush] ========================================")
                 
     except Exception as e:
         print(f"[WebPush] ✗ Error in send_web_push: {e}")

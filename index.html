@@ -4184,6 +4184,12 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                     user_id: currentUserId
                 }));
                 
+                console.log(`[Sync] ========================================`);
+                console.log(`[Sync] 正在同步 ${syncData.length} 个角色到后端...`);
+                console.log(`[Sync]   user_id: ${currentUserId}`);
+                console.log(`[Sync]   user_id类型: ${typeof currentUserId}`);
+                console.log(`[Sync]   角色列表:`, syncData.map(c => ({ name: c.name, user_id: c.user_id })));
+                
                 // 发送到后端
                 const res = await fetch(`${API_BASE}/characters/sync`, {
                     method: 'POST',
@@ -4192,10 +4198,17 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 });
                 
                 if (res.ok) {
-                    console.log(`[Sync] ✓ Synced ${syncData.length} characters to backend`);
+                    const result = await res.json();
+                    console.log(`[Sync] ✓✓✓ 同步成功！`);
+                    console.log(`[Sync]   后端响应:`, result);
+                    console.log(`[Sync] ========================================`);
                     showDebugToast(`✓ 已同步${syncData.length}个角色到后端`);
                 } else {
-                    console.error('[Sync] Failed to sync:', await res.text());
+                    const errorText = await res.text();
+                    console.error('[Sync] ✗✗✗ 同步失败！');
+                    console.error('[Sync]   状态码:', res.status);
+                    console.error('[Sync]   错误信息:', errorText);
+                    console.log(`[Sync] ========================================`);
                 }
                 
             } catch (err) {
@@ -4249,26 +4262,37 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 console.log('[Push] Subscribed:', subscription);
                 
                 // 发送订阅信息到后端
-                console.log('[Push] Sending subscription to backend...');
-                console.log('[Push] user_id:', currentUserId);
+                console.log('[Push] ========================================');
+                console.log('[Push] 🔔 正在发送订阅到后端...');
+                console.log('[Push]   user_id:', currentUserId);
+                console.log('[Push]   user_id类型:', typeof currentUserId);
+                console.log('[Push]   subscription endpoint:', subscription.endpoint.substring(0, 50) + '...');
+                
+                const subscriptionData = {
+                    user_id: currentUserId,
+                    subscription: subscription.toJSON()
+                };
+                console.log('[Push]   发送数据:', JSON.stringify(subscriptionData).substring(0, 200) + '...');
+                
                 const subRes = await fetch(`${API_BASE}/push/subscribe`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        user_id: currentUserId,
-                        subscription: subscription.toJSON()
-                    })
+                    body: JSON.stringify(subscriptionData)
                 });
                 
                 if (subRes.ok) {
                     const result = await subRes.json();
-                    console.log('[Push] ✓✓✓ Subscription saved to backend!');
-                    console.log('[Push] Backend response:', result);
-                    console.log('[Push] 🎉 后台推送已激活！即使浏览器在后台也能收到通知！');
+                    console.log('[Push] ✓✓✓ 订阅已保存到后端！');
+                    console.log('[Push]   后端响应:', result);
+                    console.log('[Push]   🎉 后台推送已激活！即使浏览器在后台也能收到通知！');
+                    console.log('[Push] ========================================');
                     showDebugToast('🎉 后台推送已激活！', true);
                 } else {
                     const errorText = await subRes.text();
-                    console.error('[Push] ✗ Failed to save subscription:', errorText);
+                    console.error('[Push] ✗✗✗ 订阅保存失败！');
+                    console.error('[Push]   状态码:', subRes.status);
+                    console.error('[Push]   错误信息:', errorText);
+                    console.log('[Push] ========================================');
                     showDebugToast('✗ 订阅保存失败: ' + errorText);
                 }
                 
