@@ -2128,6 +2128,11 @@
                     <div class="setting-item-text">测试通知</div>
                     <div style="color: #999; font-size: 12px;">点击发送测试通知</div>
                 </div>
+                <div class="setting-item" onclick="manualSubscribePush()">
+                    <div class="setting-item-text">手动开启推送</div>
+                    <div style="color: #999; font-size: 12px;">点击触发推送订阅</div>
+                    <div class="setting-arrow">›</div>
+                </div>
                 <div class="setting-item" onclick="document.getElementById('debug-switch').click()">
                     <div class="setting-item-text">调试模式</div>
                     <div style="color: #999; font-size: 12px;">显示通知调试信息</div>
@@ -2820,6 +2825,20 @@
         let isSelectionMode = false;
         let selectedIndices = new Set(); // 选中的消息索引集合
 
+        // 手动触发推送订阅（新增函数）
+        async function manualSubscribePush() {
+            console.log('[Manual] 手动触发推送订阅...');
+            showDebugToast('正在注册推送...', true);
+            
+            try {
+                await registerServiceWorkerAndSubscribe();
+                alert('✅ 推送订阅成功！请查看诊断面板确认状态。');
+            } catch (err) {
+                console.error('[Manual] 订阅失败:', err);
+                alert('❌ 订阅失败: ' + err.message);
+            }
+        }
+
         // 页面加载初始化
         window.onload = async function() {
             await restoreSetting(); // 异步恢复DEXie数据
@@ -2847,6 +2866,15 @@
             // 初始化通知轮询 (15秒检查，更快响应后端触发)
             if (notifEnabled) {
                 startNotificationLoop(15);
+            }
+            
+            // ✅ 修复：页面加载时立即注册 Service Worker 和订阅推送
+            // 不再等待 startAutoChatLoop，而是立即执行
+            if (location.protocol === 'https:' || location.hostname === 'localhost') {
+                console.log('[Init] 立即注册 Service Worker 和订阅推送...');
+                await registerServiceWorkerAndSubscribe();
+            } else {
+                console.warn('[Init] 当前环境不支持 Service Worker (需要 HTTPS 或 localhost)');
             }
             
             // 启动主动聊天检测 (每分钟一次)
