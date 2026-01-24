@@ -2760,6 +2760,7 @@
         // 全局定时器变量
         let notifTimer = null;
         let autoChatTimer = null; // 主动聊天定时器
+        const autoChatLocks = new Set(); // 存储正在进行主动聊天的 charId，防止并发触发
         // 记录已知的通知ID，用于判断新消息
         let knownNotifIds = new Set();
         let isFirstLoad = true;
@@ -2796,21 +2797,11 @@
         // 本地测试请保持 http://localhost:5000/api
         const API_BASE = 'http://localhost:5000/api'; 
 
-        // 启动轮询（核心修改：改为定时无条件弹窗）
+        // 启动轮询
         function startNotificationLoop(seconds) {
             if (notifTimer) clearInterval(notifTimer);
 
             const loopTask = () => {
-                // --- 核心修改点：无条件定时弹窗 ---
-                // 无论是否有新消息，直接弹出。如果有缓存的最新消息就显示最新消息，否则显示默认文案
-                const title = latestNotification ? latestNotification.title : "系统通知";
-                const body = latestNotification ? latestNotification.content : "通知服务正在运行中，暂无历史消息...";
-                const timeStr = new Date().toLocaleTimeString();
-                
-                // 发送弹窗 (加上当前时间证明是实时触发的)
-                sendSystemNotification(title, `${body} (定时提醒 ${timeStr})`);
-
-                // 顺便去后端查一下最新数据，更新列表和红点
                 fetchNotifications();
             };
             
@@ -2896,7 +2887,16 @@
                     // 1. 统计未读
                     if (!item.is_read) unreadCount++;
 
-                    // 2. 渲染DOM
+                    // 2. 检查是否有新消息 (不在已知列表中，且非首次加载)
+                    if (!knownNotifIds.has(item.id)) {
+                        knownNotifIds.add(item.id);
+                        // 仅当非首次加载时弹窗，避免刷新页面时狂弹
+                        if (!isFirstLoad) {
+                            sendSystemNotification(item.title, item.content);
+                        }
+                    }
+
+                    // 3. 渲染DOM
                     const div = document.createElement('div');
                     div.className = `notif-item ${!item.is_read ? 'unread' : ''}`;
                     // 格式化时间戳
@@ -3944,8 +3944,12 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
         // --- 主动发消息逻辑 ---
         function startAutoChatLoop() {
             if (autoChatTimer) clearInterval(autoChatTimer);
-            // 每分钟检查一次
+            // 每60秒检查一次
+            console.log("[AutoChat] Loop started. Checking every 60s...");
             autoChatTimer = setInterval(checkAutoChat, 60 * 1000);
+            
+            // 立即检查一次（可选，方便调试，但可能会在刚加载时触发）
+            // setTimeout(checkAutoChat, 5000); 
         }
 
         async function checkAutoChat() {
@@ -3955,9 +3959,19 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 .filter(c => c.auto_reply_enabled === true && c.auto_reply_interval > 0)
                 .toArray();
 
+            if (chars.length > 0) {
+                console.log(`[AutoChat] Check triggered at ${new Date().toLocaleTimeString()} for ${chars.length} enabled chars.`);
+            }
+
             for (const char of chars) {
                 // 如果是好友状态才触发
                 if (char.wechat_status !== 'friend') continue;
+
+                // 防止并发：如果这个角色正在生成中，跳过
+                if (autoChatLocks.has(char.id)) {
+                    console.log(`[AutoChat] Skipping ${char.name} (locked/generating)`);
+                    continue;
+                }
 
                 // 检查上次消息时间
                 let lastTime = 0;
@@ -3970,15 +3984,20 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
 
                 const diffMinutes = (now - lastTime) / (1000 * 60);
                 
-                if (diffMinutes >= char.auto_reply_interval) {
+                // 宽容度 0.1 分钟（6秒），避免因为执行耗时导致刚好错过
+                // 例如间隔1分钟，diff是 0.95分钟，也允许触发
+                if (diffMinutes >= (char.auto_reply_interval - 0.1)) {
                     // 触发主动消息
-                    console.log(`[AutoChat] Triggering for ${char.name} (Last msg: ${diffMinutes.toFixed(1)} mins ago)`);
-                    await triggerAutoChat(char);
+                    console.log(`[AutoChat] Triggering for ${char.name} (Interval: ${char.auto_reply_interval}, Last msg: ${diffMinutes.toFixed(2)} mins ago)`);
+                    triggerAutoChat(char); // 不使用 await，让它异步去跑，不要阻塞循环
                 }
             }
         }
 
         async function triggerAutoChat(char) {
+            // 加锁
+            autoChatLocks.add(char.id);
+
             try {
                 // 1. 准备上下文
                 let userDesc = "";
@@ -4009,11 +4028,17 @@ ${userDesc}
 ${loreContext}
 
 现在距离上次对话已经过去了一段时间。请根据角色性格，主动向 ${userName} 发起新的话题，或者延续之前未尽的话题。
-回复要求：
-1. 简短自然，像微信聊天一样。
-2. 符合角色语气和性格。
-3. 不要重复输出名字前缀。
-4. 如果之前的对话已经结束，可以开启新话题（如问候、分享日常、询问对方在做什么等）。`;
+
+【重要指令 - 必须严格遵守】
+1. **必须**模拟微信连发消息的习惯：请生成 2 到 4 条短消息，不能只发一条！
+2. **必须**使用分隔符 "|||" 来隔开每一条消息。
+   正确示例：嘿在吗？|||刚刚看到个好玩的视频|||发给你看看
+   错误示例：嘿在吗？刚刚看到个好玩的视频，发给你看看（这是错误的，没有用|||分隔）
+3. 每条消息要简短，5-15个字最佳，像真实微信聊天一样分多条发送。
+4. 严禁只发送标点符号。每一条消息都必须有实际文字内容。
+5. 语气要自然、口语化，符合人设。
+
+请务必输出格式如：第一条消息内容|||第二条消息内容|||第三条消息内容`;
 
                 // 取最近 10 条历史记录作为参考
                 const recentHistory = (char.chat_history || []).slice(-10).map(m => ({
@@ -4030,36 +4055,101 @@ ${loreContext}
                 const replyText = await callAI(messages);
                 const cleanReply = replyText.trim();
                 
-                if (!cleanReply) return;
+                if (!cleanReply) {
+                    console.warn(`[AutoChat] AI returned empty reply for ${char.name}`);
+                    return;
+                }
 
-                // 4. 存入数据库
-                if (!char.chat_history) char.chat_history = [];
-                const newMsg = { 
-                    role: 'char', 
-                    content: cleanReply, 
-                    time: Date.now() 
-                };
-                char.chat_history.push(newMsg);
-                await db.characters.put(char);
-
-                // 5. 更新 UI 或 发送通知
-                // 如果当前正好打开了这个角色的窗口，直接追加
-                if (currentChatCharId === char.id) {
-                    appendMessageToUI('char', cleanReply, char.avatar);
+                // 4. 拆分逻辑 (增强版)
+                let segments = [];
+                console.log(`[AutoChat] Raw AI reply for ${char.name}: "${cleanReply}"`);
+                
+                // 优先尝试分隔符拆分
+                if (cleanReply.includes('|||')) {
+                    segments = cleanReply.split('|||').map(s => s.trim()).filter(s => s.length > 0);
+                    console.log(`[AutoChat] Split by ||| into ${segments.length} segments:`, segments);
                 } else {
-                    // 否则发送系统通知
-                    sendSystemNotification(char.name, cleanReply);
+                    console.log(`[AutoChat] No ||| found, using splitMessage fallback`);
+                    // 回退到标点拆分
+                    segments = splitMessage(cleanReply);
+                    console.log(`[AutoChat] splitMessage result: ${segments.length} segments:`, segments);
+                }
+                
+                // 过滤无效消息 (纯标点)
+                const beforeFilter = segments.length;
+                segments = segments.filter(seg => {
+                    // 移除常见标点后，如果长度为0，说明全是标点
+                    const textOnly = seg.replace(/[.,，。!?！？~…\s]/g, '');
+                    return textOnly.length > 0;
+                });
+                
+                if (beforeFilter !== segments.length) {
+                    console.log(`[AutoChat] Filtered ${beforeFilter - segments.length} invalid segments (pure punctuation)`);
+                }
+
+                // 兜底：如果过滤后没了，或者本身就没拆出来，但原文本看着还行
+                if (segments.length === 0 && cleanReply.replace(/[.,，。!?！？~…\s]/g, '').length > 0) {
+                     segments.push(cleanReply);
+                     console.log(`[AutoChat] Fallback: using entire reply as single segment`);
+                }
+
+                if (segments.length === 0) {
+                    console.warn(`[AutoChat] All segments filtered out as invalid for ${char.name}`);
+                    return;
+                }
+                
+                console.log(`[AutoChat] Final segments to send (${segments.length}):`, segments);
+
+                for (let i = 0; i < segments.length; i++) {
+                    const seg = segments[i];
                     
-                    // 如果在微信列表页，刷新列表以更新最后一条消息预览
-                    const wechatPage = document.getElementById('wechat-page');
-                    if (wechatPage.style.display !== 'none' && 
-                        document.querySelector('.wechat-tab-item.active .tab-name').innerText === '微信') {
-                        renderWechatList(document.getElementById('wechat-content'));
+                    // 延时：第一条稍快，后续模拟打字
+                    if (i > 0) {
+                        const delay = 500 + Math.min(seg.length * 80, 2000);
+                        await new Promise(r => setTimeout(r, delay));
+                    } else {
+                        // 第一条也稍微给点延时，感觉更自然
+                        await new Promise(r => setTimeout(r, 500));
+                    }
+
+                    // 重新获取最新的 char 数据
+                    const freshChar = await db.characters.get(char.id);
+                    if (!freshChar.chat_history) freshChar.chat_history = [];
+                    
+                    const newMsg = { 
+                        role: 'char', 
+                        content: seg, 
+                        time: Date.now() 
+                    };
+                    freshChar.chat_history.push(newMsg);
+                    await db.characters.put(freshChar);
+
+                    console.log(`[AutoChat] Sent part ${i+1}/${segments.length} for ${freshChar.name}: ${seg}`);
+
+                    // 5. 更新 UI 或 发送通知
+                    // 如果当前正好打开了这个角色的窗口，直接追加
+                    if (currentChatCharId === freshChar.id) {
+                        appendMessageToUI('char', seg, freshChar.avatar);
+                    } else {
+                        // 否则发送系统通知
+                        sendSystemNotification(freshChar.name, seg);
+                        
+                        // 如果在微信列表页，刷新列表以更新最后一条消息预览
+                        const wechatPage = document.getElementById('wechat-page');
+                        if (wechatPage.style.display !== 'none' && 
+                            document.querySelector('.wechat-tab-item.active .tab-name').innerText === '微信') {
+                            renderWechatList(document.getElementById('wechat-content'));
+                        }
                     }
                 }
 
             } catch (err) {
                 console.error(`[AutoChat] Failed for ${char.name}:`, err);
+                // 发送错误通知，让用户知道为什么没触发
+                sendSystemNotification("系统提示", `主动聊天触发失败(${char.name}): ${err.message}`);
+            } finally {
+                // 解锁
+                autoChatLocks.delete(char.id);
             }
         }
 
