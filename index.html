@@ -4600,49 +4600,17 @@ ${loreContext}
 
                     console.log(`[AutoChat] Sent part ${i+1}/${segments.length} for ${freshChar.name}: ${seg}`);
 
-                    // 5. 更新 UI（如果正在查看）
+                    // 5. 更新 UI 或 发送通知
+                    // 如果当前正好打开了这个角色的窗口，直接追加
                     if (currentChatCharId === freshChar.id) {
                         console.log(`[AutoChat] User is viewing ${freshChar.name}'s chat, appending to UI`);
                         appendMessageToUI('char', seg, freshChar.avatar);
-                    }
-                    
-                    // 6. 双重通知机制（前台+后台都能收到）
-                    console.log(`[AutoChat] Sending dual notifications for ${freshChar.name}...`);
-                    
-                    // 6.1 前端Notification（前台立即通知）
-                    if (Notification.permission === "granted") {
-                        try {
-                            new Notification(freshChar.name, {
-                                body: seg,
-                                icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png',
-                                tag: 'chat-message-' + freshChar.id,
-                                requireInteraction: false
-                            });
-                            console.log(`[AutoChat] ✓ 前端通知已发送`);
-                        } catch (err) {
-                            console.error(`[AutoChat] ✗ 前端通知失败:`, err);
-                        }
-                    }
-                    
-                    // 6.2 后端Web Push（后台通知，双保险）
-                    try {
-                        await fetch(`${API_BASE}/trigger_push`, {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({
-                                user_id: currentUserId,
-                                char_id: freshChar.id,
-                                char_name: freshChar.name,
-                                message: seg
-                            })
-                        });
-                        console.log(`[AutoChat] ✓ Web Push已发送`);
-                    } catch (err) {
-                        console.error(`[AutoChat] ✗ Web Push失败:`, err);
-                    }
-                    
-                    // 7. 如果在微信列表页，刷新列表以更新最后一条消息预览
-                    if (currentChatCharId !== freshChar.id) {
+                    } else {
+                        // 否则发送系统通知
+                        console.log(`[AutoChat] User is NOT viewing ${freshChar.name}'s chat (current: ${currentChatCharId}), sending notification`);
+                        sendSystemNotification(freshChar.name, seg);
+                        
+                        // 如果在微信列表页，刷新列表以更新最后一条消息预览
                         const wechatPage = document.getElementById('wechat-page');
                         if (wechatPage.style.display !== 'none' && 
                             document.querySelector('.wechat-tab-item.active .tab-name').innerText === '微信') {
