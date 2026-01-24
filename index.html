@@ -6396,26 +6396,39 @@ ${loreContext}
 
             const requestUrl = getSmartUrl(url.value, '/chat/completions');
             
-            const res = await fetch(requestUrl, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${key.value}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    model: model.value,
-                    messages: messages,
-                    temperature: temperature
-                })
-            });
+            // 使用后端代理发送请求
+            try {
+                const res = await fetch(`${API_BASE}/chat/proxy`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        apiUrl: requestUrl,
+                        apiKey: key.value,
+                        model: model.value,
+                        messages: messages,
+                        temperature: temperature
+                    })
+                });
 
-            if (!res.ok) {
-                const errText = await res.text();
-                throw new Error(`API 请求失败: ${res.status} - ${errText}`);
+                if (!res.ok) {
+                    const errText = await res.text();
+                    try {
+                        const errJson = JSON.parse(errText);
+                        if (errJson.error) {
+                            throw new Error(`AI请求失败: ${errJson.error} ${errJson.details || ''}`);
+                        }
+                    } catch(e) {}
+                    throw new Error(`API 请求失败: ${res.status} - ${errText.substring(0, 100)}`);
+                }
+
+                const data = await res.json();
+                return data.choices[0].message.content;
+            } catch (err) {
+                console.error("Call AI Error:", err);
+                throw err;
             }
-
-            const data = await res.json();
-            return data.choices[0].message.content;
         }
 
         // 生成虚拟身份

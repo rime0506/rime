@@ -3,6 +3,7 @@ import json
 import time
 import os
 import threading
+import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
@@ -321,6 +322,53 @@ def subscribe_push():
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
+
+# 新增：AI 聊天代理接口 (解决前端跨域和Mixed Content问题)
+@app.route('/api/chat/proxy', methods=['POST'])
+def chat_proxy():
+    data = request.json
+    api_url = data.get('apiUrl')
+    api_key = data.get('apiKey')
+    model = data.get('model')
+    messages = data.get('messages')
+    
+    # 允许部分参数从环境变量读取（如果未提供）
+    # 这里主要处理前端传来的参数
+    
+    if not all([api_url, api_key, messages]):
+        return jsonify({'error': 'Missing required parameters (apiUrl, apiKey, messages)'}), 400
+        
+    try:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        }
+        
+        # 构造请求体
+        payload = {
+            "model": model if model else "gpt-3.5-turbo",
+            "messages": messages,
+            "temperature": 0.7
+        }
+        
+        print(f"[Proxy] Forwarding request to {api_url}...")
+        # 设置超时时间，避免长时间挂起
+        response = requests.post(api_url, headers=headers, json=payload, timeout=60)
+        
+        if response.status_code != 200:
+            print(f"[Proxy] API Error: {response.status_code} - {response.text[:200]}")
+            return jsonify({
+                'error': f"Upstream API Error: {response.status_code}", 
+                'details': response.text
+            }), response.status_code
+            
+        return jsonify(response.json())
+        
+    except requests.exceptions.Timeout:
+        return jsonify({'error': 'Request timed out'}), 504
+    except Exception as e:
+        print(f"[Proxy] Exception: {e}")
+        return jsonify({'error': str(e)}), 500
 
 # 6. 同步角色配置
 @app.route('/api/characters/sync', methods=['POST'])
