@@ -28,12 +28,12 @@ def generate_vapid_keys_in_memory():
     try:
         print("[VAPID] 🔑 正在生成新的 VAPID 密钥...")
         
-        from pywebpush import vapid as vapid_gen
+        from py_vapid import Vapid
         from cryptography.hazmat.primitives import serialization
         import base64
         
         # 生成密钥对
-        v = vapid_gen.Vapid()
+        v = Vapid()
         v.generate_keys()
         
         # 获取私钥（PEM 格式）
