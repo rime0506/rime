@@ -4768,6 +4768,23 @@ ${loreContext}
                     console.log(`[AutoChat] Sending notification for ${freshChar.name}: ${seg}`);
                     sendSystemNotification(freshChar.name, seg);
                     
+                    // 7. 【关键修复】立即调用后端API发送Web Push推送
+                    try {
+                        await fetch(`${API_BASE}/trigger_push`, {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                user_id: currentUserId,
+                                char_id: freshChar.id,
+                                char_name: freshChar.name,
+                                message: seg
+                            })
+                        });
+                        console.log(`[AutoChat] ✓ Backend push API called for ${freshChar.name}`);
+                    } catch (err) {
+                        console.error(`[AutoChat] ✗ Backend push API failed:`, err);
+                    }
+                    
                     // 7. 如果在微信列表页，刷新列表以更新最后一条消息预览
                     if (currentChatCharId !== freshChar.id) {
                         const wechatPage = document.getElementById('wechat-page');
