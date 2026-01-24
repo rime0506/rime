@@ -2996,6 +2996,58 @@
             }, 3000);
         }
 
+        // 全局日志系统
+        const systemLogs = [];
+        const MAX_LOGS = 100;
+        
+        function addLog(type, message, data = null) {
+            const log = {
+                time: new Date().toLocaleTimeString(),
+                type: type, // 'info', 'success', 'warning', 'error'
+                message: message,
+                data: data
+            };
+            systemLogs.unshift(log);
+            if (systemLogs.length > MAX_LOGS) systemLogs.pop();
+            
+            // 如果诊断面板打开，实时更新
+            const logContainer = document.getElementById('diagnostic-logs');
+            if (logContainer) {
+                renderLogs();
+            }
+        }
+        
+        function renderLogs() {
+            const container = document.getElementById('diagnostic-logs');
+            if (!container) return;
+            
+            container.innerHTML = systemLogs.map(log => {
+                const colors = {
+                    info: '#007aff',
+                    success: '#34c759',
+                    warning: '#ff9500',
+                    error: '#ff3b30'
+                };
+                const icons = {
+                    info: 'ℹ️',
+                    success: '✅',
+                    warning: '⚠️',
+                    error: '❌'
+                };
+                
+                return `
+                    <div style="padding:8px; border-bottom:1px solid #eee; font-size:12px;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                            <span style="color:${colors[log.type]}; font-weight:bold;">${icons[log.type]} ${log.type.toUpperCase()}</span>
+                            <span style="color:#999;">${log.time}</span>
+                        </div>
+                        <div style="color:#333;">${log.message}</div>
+                        ${log.data ? `<pre style="background:#f5f5f5; padding:4px; border-radius:4px; margin-top:4px; font-size:10px; overflow-x:auto;">${JSON.stringify(log.data, null, 2)}</pre>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+        
         // 显示诊断面板
         async function showDiagnosticPanel() {
             const panel = document.createElement('div');
@@ -3096,7 +3148,21 @@
                 </div>`).join('')}
             </div>`;
             
+            // 7. 实时日志区域
+            diagnosticInfo += `<div style="margin-bottom:20px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <strong style="color:#007aff;">📋 实时日志 (最近${systemLogs.length}条)</strong>
+                    <button onclick="systemLogs.length=0; renderLogs();" style="padding:4px 8px; background:#ff3b30; color:#fff; border:none; border-radius:4px; font-size:11px;">清空</button>
+                </div>
+                <div id="diagnostic-logs" style="max-height:300px; overflow-y:auto; background:#f9f9f9; border-radius:8px; padding:10px;">
+                    ${systemLogs.length === 0 ? '<div style="text-align:center; color:#999; padding:20px;">暂无日志</div>' : ''}
+                </div>
+            </div>`;
+            
             content.innerHTML = diagnosticInfo;
+            
+            // 渲染日志
+            renderLogs();
             
             // 关闭按钮
             const closeBtn = document.createElement('button');
@@ -3221,10 +3287,12 @@
         function sendSystemNotification(title, body) {
             console.log(`[Notification] ========================================`);
             console.log(`[Notification] 🔔 尝试发送通知: "${title}" - "${body}"`);
+            addLog('info', `尝试发送通知: ${title}`, { body, caller: new Error().stack.split('\n')[2] });
             
             // 检查浏览器是否支持通知
             if (!("Notification" in window)) {
                 console.error('[Notification] ✗ 浏览器不支持通知');
+                addLog('error', '浏览器不支持通知');
                 showDebugToast('浏览器不支持通知');
                 return;
             }
@@ -3232,6 +3300,7 @@
             // 检查权限状态
             const permission = Notification.permission;
             console.log(`[Notification] 权限状态: ${permission}`);
+            addLog('info', `通知权限状态: ${permission}`);
             
             if (permission === "granted") {
                 try {
@@ -4757,15 +4826,20 @@ ${loreContext}
                     await db.characters.put(freshChar);
 
                     console.log(`[AutoChat] Sent part ${i+1}/${segments.length} for ${freshChar.name}: ${seg}`);
+                    addLog('success', `角色消息已存入DB: ${freshChar.name}`, { segment: i+1, total: segments.length, message: seg });
 
                     // 5. 更新 UI（如果正在查看）
                     if (currentChatCharId === freshChar.id) {
                         console.log(`[AutoChat] User is viewing ${freshChar.name}'s chat, appending to UI`);
+                        addLog('info', `正在查看聊天，更新UI: ${freshChar.name}`);
                         appendMessageToUI('char', seg, freshChar.avatar);
+                    } else {
+                        addLog('warning', `不在聊天窗口，应发送通知: ${freshChar.name}`, { currentChatCharId });
                     }
                     
                     // 6. 无论是否在查看，都发送通知（重要！）
                     console.log(`[AutoChat] Sending notification for ${freshChar.name}: ${seg}`);
+                    addLog('info', `调用sendSystemNotification: ${freshChar.name}`, { message: seg });
                     sendSystemNotification(freshChar.name, seg);
                     
                     // 7. 【关键修复】立即调用后端API发送Web Push推送
