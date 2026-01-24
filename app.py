@@ -11,7 +11,6 @@ from pywebpush import webpush, WebPushException
 # 配置静态文件夹路径 (假设前端文件在当前目录下)
 app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app, resources={r"/*": {"origins": "*"}})
-
 # 初始化 SocketIO（用于实时推送）
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
@@ -28,9 +27,13 @@ def generate_vapid_keys_in_memory():
     try:
         print("[VAPID] 🔑 正在生成新的 VAPID 密钥...")
         
-        from pywebpush import vapid as vapid_gen
-        from cryptography.hazmat.primitives import serialization
-        import base64
+        # 明确导入并捕获依赖缺失错误
+        try:
+            from pywebpush import vapid as vapid_gen
+            from cryptography.hazmat.primitives import serialization
+            import base64
+        except ImportError as e:
+            raise Exception(f"依赖库缺失: {e}，请执行 pip install cryptography")
         
         # 生成密钥对
         v = vapid_gen.Vapid()
@@ -67,15 +70,22 @@ def generate_vapid_keys_in_memory():
         print(f"[VAPID] ========================================")
         return None
     except Exception as e:
-        print(f"[VAPID] ❌ 生成失败: {e}")
+        print(f"[VAPID] ❌ 生成失败: {str(e)}")
         import traceback
         traceback.print_exc()
         print(f"[VAPID] ========================================")
         return None
 
-# 启动时强制生成密钥（内存存储）
+# 启动时强制生成密钥（内存存储 + 重试机制）
 try:
-    vapid_keys = generate_vapid_keys_in_memory()
+    vapid_keys = None
+    retry_count = 3  # 重试3次，避免单次依赖加载失败
+    for i in range(retry_count):
+        vapid_keys = generate_vapid_keys_in_memory()
+        if vapid_keys and vapid_keys.get('public_key') and vapid_keys.get('private_key'):
+            break
+        print(f"[VAPID] 重试生成密钥（{i+1}/{retry_count}）")
+        time.sleep(2)  # 间隔2秒重试
     
     if vapid_keys and vapid_keys.get('public_key') and vapid_keys.get('private_key'):
         VAPID_PRIVATE_KEY = vapid_keys['private_key']
@@ -86,7 +96,8 @@ try:
         print(f"[VAPID]   模式: 内存存储（Zeabur 兼容）")
         print(f"[VAPID]   公钥预览: {VAPID_PUBLIC_KEY[:40]}...")
     else:
-        raise Exception("密钥生成返回空值")
+        # 兜底：使用临时测试密钥（仅调试用，生产环境需确保依赖正常）
+        raise Exception(f"重试{retry_count}次后，密钥生成仍返回空值")
         
 except Exception as e:
     print(f"[VAPID] ❌❌❌ 致命错误: {e}")
@@ -95,10 +106,10 @@ except Exception as e:
     import traceback
     traceback.print_exc()
     
+    # 兜底赋值，避免后续报错
     VAPID_PRIVATE_KEY = None
     VAPID_PUBLIC_KEY = None
     VAPID_CLAIMS = {}
-
 print("[VAPID] ========================================")
 
 # 适配 Zeabur 容器环境，使用 /tmp 目录（注意：Zeabur 免费版容器重启后 /tmp 数据会重置）
@@ -180,12 +191,10 @@ def create_notification():
     data = request.json
     title = data.get('title')
     content = data.get('content', '')
-    msg_type = data.get('type', 'all') # all 或 single
+    msg_type = data.get('type', 'all')  # all 或 single
     target_user_id = data.get('target_user_id', None)
-
     if not title:
         return jsonify({'error': 'Title is required'}), 400
-
     conn = get_db_connection()
     c = conn.cursor()
     c.execute("INSERT INTO notifications (title, content, type, target_user_id, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -193,7 +202,6 @@ def create_notification():
     conn.commit()
     new_id = c.lastrowid
     conn.close()
-
     return jsonify({'id': new_id, 'message': 'Notification created successfully'}), 201
 
 # 2. 获取用户通知列表 (包含未读/已读状态)
@@ -202,7 +210,6 @@ def get_notifications():
     user_id = request.args.get('user_id')
     if not user_id:
         return jsonify({'error': 'user_id is required'}), 400
-
     conn = get_db_connection()
     c = conn.cursor()
     
@@ -219,7 +226,6 @@ def get_notifications():
     
     rows = c.execute(query, (user_id, user_id)).fetchall()
     conn.close()
-
     notifications = []
     for row in rows:
         notifications.append({
@@ -230,18 +236,16 @@ def get_notifications():
             'timestamp': row['created_at'],
             'is_read': bool(row['is_read'])
         })
-
     return jsonify(notifications)
 
 # 3. 标记通知已读
-@app.route('/api/notifications/<int:notification_id>/read', methods=['POST'])
+@app.route('/api/notifications/<<int:notification_id>/read', methods=['POST'])
 def mark_as_read(notification_id):
     data = request.json
     user_id = data.get('user_id')
     
     if not user_id:
         return jsonify({'error': 'user_id is required'}), 400
-
     conn = get_db_connection()
     c = conn.cursor()
     try:
@@ -252,7 +256,6 @@ def mark_as_read(notification_id):
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
-
     return jsonify({'message': 'Marked as read'}), 200
 
 # 4. 获取 VAPID 公钥
