@@ -23,31 +23,58 @@ def get_vapid_keys():
     if os.path.exists(VAPID_FILE):
         with open(VAPID_FILE, 'r') as f:
             keys = json.load(f)
-            print("[VAPID] Loaded existing keys")
+            print("[VAPID] ✓ Loaded existing keys from file")
             return keys
     else:
-        from pywebpush import vapid as vapid_gen
-        v = vapid_gen.Vapid()
-        v.generate_keys()
-        keys = {
-            'private_key': v.private_key.to_string().hex(),
-            'public_key': v.public_key.to_string().hex()
-        }
-        with open(VAPID_FILE, 'w') as f:
-            json.dump(keys, f)
-        print("[VAPID] Generated new keys")
-        return keys
+        print("[VAPID] Generating new VAPID keys...")
+        try:
+            from pywebpush import vapid as vapid_gen
+            import base64
+            
+            v = vapid_gen.Vapid()
+            v.generate_keys()
+            
+            # 获取原始字节
+            private_bytes = v.private_key.to_string()
+            public_bytes = v.public_key.to_string()
+            
+            # 转为URL-safe base64（前端需要这种格式）
+            public_key_b64 = base64.urlsafe_b64encode(public_bytes).decode('utf-8').rstrip('=')
+            
+            keys = {
+                'private_key': private_bytes.hex(),
+                'public_key': public_key_b64,
+                'public_key_raw': public_bytes.hex()
+            }
+            
+            with open(VAPID_FILE, 'w') as f:
+                json.dump(keys, f, indent=2)
+            
+            print(f"[VAPID] ✓ Generated new keys")
+            print(f"[VAPID] Public Key: {public_key_b64[:30]}...")
+            return keys
+            
+        except ImportError:
+            print("[VAPID] ✗ pywebpush not installed! Run: pip install pywebpush")
+            return None
+        except Exception as e:
+            print(f"[VAPID] ✗ Error generating keys: {e}")
+            return None
 
 try:
     vapid_keys = get_vapid_keys()
-    VAPID_PRIVATE_KEY = bytes.fromhex(vapid_keys['private_key'])
-    VAPID_PUBLIC_KEY = vapid_keys['public_key']
-    VAPID_CLAIMS = {"sub": "mailto:admin@example.com"}
-    print(f"[VAPID] Public Key: {VAPID_PUBLIC_KEY[:20]}...")
+    if vapid_keys:
+        VAPID_PRIVATE_KEY = bytes.fromhex(vapid_keys['private_key'])
+        VAPID_PUBLIC_KEY = vapid_keys['public_key']
+        VAPID_CLAIMS = {"sub": "mailto:admin@example.com"}
+        print(f"[VAPID] ✓ Ready to send push notifications")
+    else:
+        raise Exception("Failed to generate VAPID keys")
 except Exception as e:
-    print(f"[VAPID] Error loading keys: {e}")
+    print(f"[VAPID] ✗ Fatal error: {e}")
+    print("[VAPID] Please install pywebpush: pip install -r requirements.txt")
     VAPID_PRIVATE_KEY = None
-    VAPID_PUBLIC_KEY = "VAPID_KEY_ERROR"
+    VAPID_PUBLIC_KEY = None
     VAPID_CLAIMS = {}
 
 # 适配 Zeabur 容器环境，使用 /tmp 目录（注意：Zeabur 免费版容器重启后 /tmp 数据会重置）
