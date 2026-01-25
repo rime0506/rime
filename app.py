@@ -47,10 +47,20 @@ def load_or_generate_vapid_keys():
         try:
             print(f"[VAPID] 📂 发现现有密钥文件: {KEY_FILE}")
             with open(KEY_FILE, 'r') as f:
-                private_key_pem = f.read()
-            print("[VAPID] ✅ 成功加载私钥")
+                file_content = f.read()
+            
+            # 尝试解析以验证有效性
+            Vapid.from_string(file_content)
+            
+            private_key_pem = file_content
+            print("[VAPID] ✅ 成功加载并验证私钥")
         except Exception as e:
-            print(f"[VAPID] ⚠️ 加载密钥文件失败: {e}")
+            print(f"[VAPID] ⚠️ 密钥文件无效或损坏: {e}")
+            try:
+                os.remove(KEY_FILE)
+                print(f"[VAPID] 🗑️ 已删除损坏的密钥文件，将重新生成")
+            except Exception as remove_e:
+                print(f"[VAPID] ❌ 删除文件失败: {remove_e}")
     
     # 如果没有加载到，则生成新的
     if not private_key_pem:
