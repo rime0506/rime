@@ -32,9 +32,6 @@ print("[VAPID] ========================================")
 print("[VAPID] 🔧 初始化 VAPID 密钥")
 
 def load_or_generate_vapid_keys():
-    if 'KEY_FILE' not in globals():
-        print("[VAPID] ❌ 致命错误：KEY_FILE 未定义")
-        return None
     """
     加载或生成 VAPID 密钥，支持持久化到文件
     """
