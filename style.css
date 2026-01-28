@@ -16,7 +16,6 @@
         /* 固定页面，禁止滚动 */
         html, body {
             width: 100%;
-            height: auto; /* 🔥 不要 100% */
             margin: 0;
             padding: 0;
             overflow: hidden;
@@ -41,11 +40,11 @@
             background-repeat: no-repeat;
         }
         .phone {
-            position: fixed;
-            inset: 0; /* 👈 关键：撑满视口 */
+            width: 100vw;
+            height: 100vh;
             overflow: hidden;
+            position: relative;
             padding: 0 8px;
-            /* 移除 width: 100vw 和 height: var(--vh) */
         }
         
         /* 确保桌面页面不滚动 */
@@ -53,7 +52,7 @@
             overflow: hidden !important;
             position: fixed;
             width: 100%;
-            height: 100%; /* 适配 .phone 高度 */
+            height: 100vh;
         }
         /* 顶部磨砂小组件 */
         .top-widget {
@@ -111,11 +110,9 @@
         /* 应用容器 */
         .app-container {
             margin: 50px 24px 0; /* 增加上方间距，整体下移 */
-            padding-bottom: 0;
+            padding-bottom: 120px;
             z-index: 10;
             position: relative;
-            overflow: hidden; /* 禁止滚动 */
-            max-height: none; /* 最大高度限制 */
         }
         .grid {
             display: grid;
@@ -351,7 +348,7 @@
         /* 个性化设置 - 纯折叠展开式 核心样式 */
         .custom-page {
             width: 100vw;
-            height: 100%;
+            height: 100vh;
             background: #ffffff;
             padding: 50px 24px 20px;
             display: none;
@@ -551,7 +548,7 @@
             top: 0;
             left: 0;
             width: 100%;
-            height: 100%;
+            height: 100vh;
             background: #f2f2f7; /* iOS 设置背景色 */
             z-index: 100;
             display: none;
@@ -992,7 +989,7 @@
             top: 0;
             left: 0;
             width: 100%;
-            height: 100%;
+            height: 100vh;
             background: #ffffff; /* 纯白背景 */
             z-index: 150;
             display: none;
@@ -1153,7 +1150,7 @@
             top: 0;
             left: 0;
             width: 100vw;
-            height: 100%;
+            height: 100vh;
             padding: 0;
             overflow: hidden; /* 禁止页面级滚动 */
             display: none; /* 默认隐藏，通过JS控制显示 */
@@ -1470,7 +1467,7 @@
             top: 0;
             left: 0;
             width: 100%;
-            height: 100%;
+            height: 100vh;
             background: #f2f2f7;
             z-index: 210; /* 比聊天窗口高 */
             display: none;
@@ -1573,7 +1570,7 @@
             top: 0;
             left: 0;
             width: 100%;
-            height: 100%;
+            height: 100vh;
             background: #ffffff; /* 聊天背景改白 */
             z-index: 200;
             display: none;
