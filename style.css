@@ -16,7 +16,9 @@
         /* 固定页面，禁止滚动 */
         html, body {
             width: 100%;
-            height: 100%;
+            height: auto; /* 🔥 不要 100% */
+            margin: 0;
+            padding: 0;
             overflow: hidden;
         }
         /* 通用 SVG 图标样式 */
@@ -39,13 +41,11 @@
             background-repeat: no-repeat;
         }
         .phone {
-            width: 100vw;
-            height: var(--vh);
-            overflow: hidden;
             position: fixed;
-            top: 0;
-            left: 0;
+            inset: 0; /* 👈 关键：撑满视口 */
+            overflow: hidden;
             padding: 0 8px;
+            /* 移除 width: 100vw 和 height: var(--vh) */
         }
         
         /* 确保桌面页面不滚动 */
@@ -53,7 +53,7 @@
             overflow: hidden !important;
             position: fixed;
             width: 100%;
-            height: var(--vh);
+            height: 100%; /* 适配 .phone 高度 */
         }
         /* 顶部磨砂小组件 */
         .top-widget {
@@ -351,7 +351,7 @@
         /* 个性化设置 - 纯折叠展开式 核心样式 */
         .custom-page {
             width: 100vw;
-            height: var(--vh);
+            height: 100%;
             background: #ffffff;
             padding: 50px 24px 20px;
             display: none;
@@ -551,7 +551,7 @@
             top: 0;
             left: 0;
             width: 100%;
-            height: var(--vh);
+            height: 100%;
             background: #f2f2f7; /* iOS 设置背景色 */
             z-index: 100;
             display: none;
@@ -992,7 +992,7 @@
             top: 0;
             left: 0;
             width: 100%;
-            height: var(--vh);
+            height: 100%;
             background: #ffffff; /* 纯白背景 */
             z-index: 150;
             display: none;
@@ -1153,7 +1153,7 @@
             top: 0;
             left: 0;
             width: 100vw;
-            height: var(--vh);
+            height: 100%;
             padding: 0;
             overflow: hidden; /* 禁止页面级滚动 */
             display: none; /* 默认隐藏，通过JS控制显示 */
@@ -1470,7 +1470,7 @@
             top: 0;
             left: 0;
             width: 100%;
-            height: var(--vh);
+            height: 100%;
             background: #f2f2f7;
             z-index: 210; /* 比聊天窗口高 */
             display: none;
@@ -1573,7 +1573,7 @@
             top: 0;
             left: 0;
             width: 100%;
-            height: var(--vh);
+            height: 100%;
             background: #ffffff; /* 聊天背景改白 */
             z-index: 200;
             display: none;
