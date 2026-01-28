@@ -38,6 +38,16 @@ if (document.readyState === 'loading') {
     }
 }
 
+// iOS 100vh 修复：动态计算视口高度
+function setVh() {
+    // 获取视口高度，不包含浏览器 UI（如 Safari 底部栏）
+    let vh = window.innerHeight + 'px';
+    document.documentElement.style.setProperty('--vh', vh);
+}
+// 初始化并监听 resize
+setVh();
+window.addEventListener('resize', setVh);
+
 // 初始化DEXie数据库
 const db = new Dexie('DesktopDB');
 // 版本升级：增加 lorebooks 表

@@ -1,4 +1,5 @@
 :root {
+            --vh: 100vh; /* 默认值 */
             --ins-pink: #ffb6c1;
             --ins-pink-light: #ffe4e8;
             --ins-gray: #999999;
@@ -39,7 +40,7 @@
         }
         .phone {
             width: 100vw;
-            height: 100vh;
+            height: var(--vh);
             overflow: hidden;
             position: fixed;
             top: 0;
@@ -52,7 +53,7 @@
             overflow: hidden !important;
             position: fixed;
             width: 100%;
-            height: 100%;
+            height: var(--vh);
         }
         /* 顶部磨砂小组件 */
         .top-widget {
@@ -110,11 +111,11 @@
         /* 应用容器 */
         .app-container {
             margin: 50px 24px 0; /* 增加上方间距，整体下移 */
-            padding-bottom: 120px;
+            padding-bottom: 0;
             z-index: 10;
             position: relative;
             overflow: hidden; /* 禁止滚动 */
-            max-height: calc(100vh - 200px); /* 最大高度限制 */
+            max-height: none; /* 最大高度限制 */
         }
         .grid {
             display: grid;
@@ -350,7 +351,7 @@
         /* 个性化设置 - 纯折叠展开式 核心样式 */
         .custom-page {
             width: 100vw;
-            height: 100vh;
+            height: var(--vh);
             background: #ffffff;
             padding: 50px 24px 20px;
             display: none;
@@ -550,7 +551,7 @@
             top: 0;
             left: 0;
             width: 100%;
-            height: 100%;
+            height: var(--vh);
             background: #f2f2f7; /* iOS 设置背景色 */
             z-index: 100;
             display: none;
@@ -991,7 +992,7 @@
             top: 0;
             left: 0;
             width: 100%;
-            height: 100%;
+            height: var(--vh);
             background: #ffffff; /* 纯白背景 */
             z-index: 150;
             display: none;
@@ -1152,7 +1153,7 @@
             top: 0;
             left: 0;
             width: 100vw;
-            height: 100vh;
+            height: var(--vh);
             padding: 0;
             overflow: hidden; /* 禁止页面级滚动 */
             display: none; /* 默认隐藏，通过JS控制显示 */
@@ -1469,7 +1470,7 @@
             top: 0;
             left: 0;
             width: 100%;
-            height: 100%;
+            height: var(--vh);
             background: #f2f2f7;
             z-index: 210; /* 比聊天窗口高 */
             display: none;
@@ -1572,7 +1573,7 @@
             top: 0;
             left: 0;
             width: 100%;
-            height: 100%;
+            height: var(--vh);
             background: #ffffff; /* 聊天背景改白 */
             z-index: 200;
             display: none;
@@ -1636,6 +1637,7 @@
             border-top: 1px solid var(--ins-border);
             display: flex;
             flex-direction: column;
+            padding-bottom: env(safe-area-inset-bottom);
         }
         .chat-input-bar {
             min-height: 60px;
@@ -1644,15 +1646,6 @@
             display: flex;
             align-items: center;
             gap: 10px;
-        }
-        /* 适配 iPhone 底部 Home 条 */
-        @media (min-height: 800px) {
-            .chat-input-bar {
-                padding-bottom: 34px;
-            }
-            .chat-footer.panel-open .chat-input-bar {
-                padding-bottom: 10px; /* 面板打开时，输入栏不需要底部额外padding */
-            }
         }
         
         .chat-input {
@@ -1761,9 +1754,11 @@
         .message-row.self {
             flex-direction: row-reverse;
         }
-        .message-avatar {
-            width: 32px; /* 头像稍小 */
-            height: 32px;
+        /* 增加特异性，防止被后面message-page的样式覆盖 */
+        .chat-window .message-avatar,
+        .message-row .message-avatar {
+            width: 32px !important; /* 强制微信聊天头像小一点 */
+            height: 32px !important;
             border-radius: 50%; /* 圆形头像 */
             background-size: cover;
             background-position: center;
