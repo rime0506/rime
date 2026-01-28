@@ -1851,8 +1851,6 @@
             background: #ffffff;
             border-top: 1px solid var(--ins-border);
             display: flex;
-            padding-bottom: 34px; /* Home Indicator 避让 */
-        }
         .wechat-tab-item {
             flex: 1;
             display: flex;
