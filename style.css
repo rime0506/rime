@@ -1847,10 +1847,12 @@
             height: 100%;
         }
         .wechat-tabbar {
-            height: px; /* 包含 Home Indicator 区域 */
+            height: 83px; /* 包含 Home Indicator 区域 */
             background: #ffffff;
             border-top: 1px solid var(--ins-border);
             display: flex;
+            padding-bottom: 34px; /* Home Indicator 避让 */
+        }
         .wechat-tab-item {
             flex: 1;
             display: flex;
