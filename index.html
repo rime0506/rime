@@ -436,8 +436,30 @@
                     </button>
                 </div>
             </div>
+            
+            <!-- 数据管理 -->
+            <div class="setting-group-title">数据管理</div>
+            <div class="setting-group">
+                <div class="setting-item" onclick="exportAllData()">
+                    <div class="setting-item-text">导出数据</div>
+                    <div style="color: #999; font-size: 12px;">导出所有数据为JSON文件</div>
+                    <div class="setting-arrow">›</div>
+                </div>
+                <div class="setting-item" onclick="document.getElementById('import-data-input').click()">
+                    <div class="setting-item-text">导入数据</div>
+                    <div style="color: #999; font-size: 12px;">从JSON文件恢复数据</div>
+                    <div class="setting-arrow">›</div>
+                </div>
+                <div class="setting-item" onclick="clearAllDataConfirm()">
+                    <div class="setting-item-text" style="color: #ff3b30;">清空所有数据</div>
+                    <div style="color: #999; font-size: 12px;">谨慎操作，不可恢复</div>
+                </div>
+            </div>
         </div>
     </div>
+    
+    <!-- 隐藏的数据导入文件选择器 -->
+    <input type="file" id="import-data-input" style="display:none;" accept=".json" onchange="importAllData(this)">
 
     <!-- 通知中心弹窗 -->
     <div class="notification-center" id="notification-center">
@@ -516,6 +538,21 @@
             </div>
         </div>
         
+    </div>
+
+    <!-- 新的好友页面 -->
+    <div class="wechat-page" id="new-friends-page" style="display:none;">
+        <div class="wechat-header" style="background:#fff;">
+            <div class="back-btn" onclick="hideNewFriendsPage()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0; color:var(--ins-text);">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="wechat-title">新的好友</div>
+            <div style="width:40px;"></div>
+        </div>
+        
+        <div class="wechat-content" id="new-friends-content" style="display:block; padding:16px;">
+            <!-- 动态生成好友申请列表 -->
+        </div>
     </div>
 
     <!-- 搜索好友弹窗 -->
@@ -834,6 +871,10 @@
             
             <div style="padding:20px; text-align:center;">
                 <button onclick="clearChatHistory()" style="color:#ff3b30; background:none; border:none; font-size:16px;">清空聊天记录</button>
+            </div>
+            
+            <div style="padding:0 20px 20px; text-align:center;">
+                <button onclick="deleteFriendConfirm()" style="color:#ff3b30; background:none; border:none; font-size:16px; font-weight:600;">删除好友</button>
             </div>
         </div>
     </div>

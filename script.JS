@@ -76,6 +76,14 @@ db.version(5).stores({
     sticker_categories: '++id, name',
     moments: '++id, userId, time, ownerUserId' // 新增朋友圈表 (ownerUserId 用于账号隔离)
 });
+db.version(6).stores({
+    dexiData: 'key, value',
+    lorebooks: '++id, name',
+    characters: '++id, name, type',
+    sticker_categories: '++id, name',
+    moments: '++id, userId, time, ownerUserId',
+    friend_requests: '++id, fromCharId, toAccountId, status, time' // 新增好友申请表
+});
 
         let currentSelectIcon = '';
         let currentCharacterType = 'char'; // 默认为 char
@@ -590,6 +598,163 @@ db.version(5).stores({
         }
         function hideSettingPage() {
             document.getElementById('setting-page').style.display = 'none';
+        }
+
+        // ===== 数据导入导出功能 =====
+        
+        // 导出所有数据
+        async function exportAllData() {
+            try {
+                const exportData = {
+                    version: '1.0',
+                    exportTime: new Date().toISOString(),
+                    data: {}
+                };
+                
+                // 导出所有数据库表
+                exportData.data.dexiData = await db.dexiData.toArray();
+                exportData.data.lorebooks = await db.lorebooks.toArray();
+                exportData.data.characters = await db.characters.toArray();
+                exportData.data.sticker_categories = await db.sticker_categories.toArray();
+                exportData.data.moments = await db.moments.toArray();
+                exportData.data.friend_requests = await db.friend_requests.toArray();
+                
+                // 导出 localStorage 数据
+                exportData.localStorage = {
+                    user_id: localStorage.getItem('user_id'),
+                    current_my_char_id: localStorage.getItem('current_my_char_id'),
+                    notification_enabled: localStorage.getItem('notification_enabled'),
+                    debug_mode: localStorage.getItem('debug_mode'),
+                    keepalive_enabled: localStorage.getItem('keepalive_enabled')
+                };
+                
+                // 转换为JSON字符串
+                const jsonString = JSON.stringify(exportData, null, 2);
+                
+                // 创建下载链接
+                const blob = new Blob([jsonString], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `wechat_data_backup_${new Date().getTime()}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                alert('数据导出成功！');
+            } catch (error) {
+                console.error('导出数据失败:', error);
+                alert('导出数据失败: ' + error.message);
+            }
+        }
+        
+        // 导入所有数据
+        async function importAllData(input) {
+            const file = input.files[0];
+            if (!file) return;
+            
+            // 确认对话框
+            if (!confirm('导入数据将覆盖现有数据，是否继续？\n\n建议先导出当前数据作为备份。')) {
+                input.value = ''; // 清空文件选择
+                return;
+            }
+            
+            try {
+                const text = await file.text();
+                const importData = JSON.parse(text);
+                
+                // 验证数据格式
+                if (!importData.version || !importData.data) {
+                    throw new Error('数据格式不正确');
+                }
+                
+                // 清空现有数据
+                await db.dexiData.clear();
+                await db.lorebooks.clear();
+                await db.characters.clear();
+                await db.sticker_categories.clear();
+                await db.moments.clear();
+                await db.friend_requests.clear();
+                
+                // 导入数据库表数据
+                if (importData.data.dexiData) {
+                    await db.dexiData.bulkAdd(importData.data.dexiData);
+                }
+                if (importData.data.lorebooks) {
+                    await db.lorebooks.bulkAdd(importData.data.lorebooks);
+                }
+                if (importData.data.characters) {
+                    await db.characters.bulkAdd(importData.data.characters);
+                }
+                if (importData.data.sticker_categories) {
+                    await db.sticker_categories.bulkAdd(importData.data.sticker_categories);
+                }
+                if (importData.data.moments) {
+                    await db.moments.bulkAdd(importData.data.moments);
+                }
+                if (importData.data.friend_requests) {
+                    await db.friend_requests.bulkAdd(importData.data.friend_requests);
+                }
+                
+                // 导入 localStorage 数据
+                if (importData.localStorage) {
+                    Object.keys(importData.localStorage).forEach(key => {
+                        const value = importData.localStorage[key];
+                        if (value !== null) {
+                            localStorage.setItem(key, value);
+                        }
+                    });
+                }
+                
+                input.value = ''; // 清空文件选择
+                alert('数据导入成功！页面即将刷新...');
+                
+                // 刷新页面以应用导入的数据
+                setTimeout(() => {
+                    window.location.reload();
+                }, 500);
+                
+            } catch (error) {
+                console.error('导入数据失败:', error);
+                alert('导入数据失败: ' + error.message);
+                input.value = '';
+            }
+        }
+        
+        // 清空所有数据
+        async function clearAllDataConfirm() {
+            const confirm1 = confirm('⚠️ 警告：此操作将删除所有数据！\n\n包括：\n- 所有角色和聊天记录\n- 所有世界书\n- 所有表情包\n- 所有朋友圈\n- API设置\n\n此操作不可恢复，确定要继续吗？');
+            if (!confirm1) return;
+            
+            const confirm2 = prompt('请输入"确认删除"以继续：');
+            if (confirm2 !== '确认删除') {
+                alert('已取消操作');
+                return;
+            }
+            
+            try {
+                // 清空所有数据库表
+                await db.dexiData.clear();
+                await db.lorebooks.clear();
+                await db.characters.clear();
+                await db.sticker_categories.clear();
+                await db.moments.clear();
+                await db.friend_requests.clear();
+                
+                // 清空 localStorage
+                localStorage.clear();
+                
+                alert('所有数据已清空！页面即将刷新...');
+                
+                setTimeout(() => {
+                    window.location.reload();
+                }, 500);
+                
+            } catch (error) {
+                console.error('清空数据失败:', error);
+                alert('清空数据失败: ' + error.message);
+            }
         }
 
         // 显示通知中心
@@ -2126,12 +2291,12 @@ function showWechatPage() {
         // 渲染微信聊天列表
         async function renderWechatList(container) {
             const accountId = getCurrentAccountId();
-            // 获取所有角色，然后按账号过滤好友
+            // 获取所有角色，然后按账号过滤好友（包括已删除的）
             let allChars = await db.characters.toArray();
             let friends = allChars.filter(c => {
                 if (c.type === 'user') return false; // 排除User类型
                 const status = getFriendStatus(c, accountId);
-                return status === 'friend';
+                return status === 'friend' || status === 'deleted'; // 包括已删除的好友
             });
             
             // 排序逻辑：置顶 > 最后消息时间 > 更新时间
@@ -2208,6 +2373,9 @@ function showWechatPage() {
 
                 const avatarStyle = f.avatar ? `background-image:url(${f.avatar})` : 'background-color:#eee';
                 
+                // 检查是否是已删除的好友
+                const isDeleted = getFriendStatus(f, accountId) === 'deleted';
+                
                 let lastMsg = '';
                 let lastTimeStr = '';
                 const history = getChatHistory(f, accountId);
@@ -2226,12 +2394,19 @@ function showWechatPage() {
                         lastTimeStr = `${d.getMonth()+1}/${d.getDate()}`;
                     }
                 }
+                
+                // 如果是已删除的好友，添加标识
+                const deletedBadge = isDeleted ? '<span style="background:#ff9500; color:#fff; font-size:10px; padding:2px 6px; border-radius:3px; margin-left:6px;">已删除</span>' : '';
+                const textColor = isDeleted ? '#999' : '#333';
 
                 contentDiv.innerHTML = `
-                    <div style="width:48px; height:48px; border-radius:6px; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0;"></div>
+                    <div style="width:48px; height:48px; border-radius:6px; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; ${isDeleted ? 'opacity:0.6;' : ''}"></div>
                     <div style="flex:1; min-width:0;">
-                        <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                            <div style="font-size:16px; font-weight:500; color:#333;">${f.name}</div>
+                        <div style="display:flex; justify-content:space-between; margin-bottom:4px; align-items:center;">
+                            <div style="display:flex; align-items:center;">
+                                <div style="font-size:16px; font-weight:500; color:${textColor};">${f.name}</div>
+                                ${deletedBadge}
+                            </div>
                             <div style="font-size:12px; color:#999;">${lastTimeStr}</div>
                         </div>
                         <div style="font-size:14px; color:#999; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${lastMsg}</div>
@@ -2338,38 +2513,71 @@ function showWechatPage() {
                 return status === 'friend';
             });
             
-            if (friends.length === 0) {
-                container.innerHTML = `
-                    <div class="wechat-empty-state">
-                        <svg class="svg-icon" style="width:48px; height:48px; stroke:#ccc;" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
-                        <div>通讯录为空</div>
-                    </div>
-                `;
-                return;
-            }
-
             container.innerHTML = '';
             const listDiv = document.createElement('div');
             listDiv.style.width = '100%';
             listDiv.style.background = '#fff';
             
-            friends.forEach(f => {
-                const item = document.createElement('div');
-                item.style.display = 'flex';
-                item.style.padding = '10px 16px';
-                item.style.borderBottom = '0.5px solid #f0f0f0';
-                item.style.alignItems = 'center';
-                item.style.gap = '12px';
-                item.onclick = () => openChatWindow(f.id);
-
-                const avatarStyle = f.avatar ? `background-image:url(${f.avatar})` : 'background-color:#eee';
-                
-                item.innerHTML = `
-                    <div style="width:40px; height:40px; border-radius:4px; ${avatarStyle}; background-size:cover; background-position:center;"></div>
-                    <div style="font-size:16px; font-weight:500; color:#333;">${f.name}</div>
+            // 添加"新的好友"入口
+            const allRequests = await db.friend_requests.toArray();
+            const pendingRequests = allRequests.filter(req => 
+                req.toCharId === parseInt(accountId) && req.status === 'pending'
+            );
+            const newFriendItem = document.createElement('div');
+            newFriendItem.style.display = 'flex';
+            newFriendItem.style.padding = '12px 16px';
+            newFriendItem.style.borderBottom = '0.5px solid #f0f0f0';
+            newFriendItem.style.alignItems = 'center';
+            newFriendItem.style.gap = '12px';
+            newFriendItem.style.cursor = 'pointer';
+            newFriendItem.onclick = () => showNewFriendsPage();
+            
+            const badgeHtml = pendingRequests.length > 0 ? 
+                `<div style="background:#ff3b30; color:#fff; font-size:12px; padding:2px 6px; border-radius:10px; min-width:18px; text-align:center;">${pendingRequests.length}</div>` : '';
+            
+            newFriendItem.innerHTML = `
+                <div style="width:40px; height:40px; border-radius:4px; background:linear-gradient(135deg, #ffc2d1 0%, #ff8fab 100%); display:flex; align-items:center; justify-content:center;">
+                    <svg class="svg-icon" style="width:24px; height:24px; stroke:#fff;" viewBox="0 0 24 24">
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="8.5" cy="7" r="4"></circle>
+                        <line x1="20" y1="8" x2="20" y2="14"></line>
+                        <line x1="23" y1="11" x2="17" y2="11"></line>
+                    </svg>
+                </div>
+                <div style="flex:1; font-size:16px; font-weight:500; color:#333;">新的好友</div>
+                ${badgeHtml}
+            `;
+            listDiv.appendChild(newFriendItem);
+            
+            if (friends.length === 0) {
+                const emptyDiv = document.createElement('div');
+                emptyDiv.style.textAlign = 'center';
+                emptyDiv.style.padding = '40px 20px';
+                emptyDiv.style.color = '#999';
+                emptyDiv.innerHTML = `
+                    <svg class="svg-icon" style="width:48px; height:48px; stroke:#ccc; margin-bottom:10px;" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+                    <div>通讯录为空</div>
                 `;
-                listDiv.appendChild(item);
-            });
+                listDiv.appendChild(emptyDiv);
+            } else {
+                friends.forEach(f => {
+                    const item = document.createElement('div');
+                    item.style.display = 'flex';
+                    item.style.padding = '10px 16px';
+                    item.style.borderBottom = '0.5px solid #f0f0f0';
+                    item.style.alignItems = 'center';
+                    item.style.gap = '12px';
+                    item.onclick = () => openChatWindow(f.id);
+
+                    const avatarStyle = f.avatar ? `background-image:url(${f.avatar})` : 'background-color:#eee';
+                    
+                    item.innerHTML = `
+                        <div style="width:40px; height:40px; border-radius:4px; ${avatarStyle}; background-size:cover; background-position:center;"></div>
+                        <div style="font-size:16px; font-weight:500; color:#333;">${f.name}</div>
+                    `;
+                    listDiv.appendChild(item);
+                });
+            }
             container.appendChild(listDiv);
         }
 
@@ -2500,7 +2708,10 @@ function showWechatPage() {
             }
             
             if (allContext.length > 0) {
-                return `【相关世界书设定】:\n${allContext.join('\n')}\n`;
+                // 简单截断，防止爆 Token
+                const fullText = allContext.join('\n');
+                const safeText = fullText.length > 10000 ? fullText.slice(0, 10000) + '...(已截断)' : fullText;
+                return `【相关世界书设定】:\n${safeText}\n`;
             }
             return "";
         }
@@ -2600,13 +2811,17 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
 要求：
 1. 必须符合角色性格。如果是高冷/谨慎的角色，可能会拒绝陌生人；如果是外向/认识的角色，则会通过。
 2. 仔细检查世界书和设定中是否有两人的关系描述。
-3. 如果通过，请给出一句符合角色性格、线上聊天风格（短句、口语化、可能带颜文字）的通过回复。
+3. 如果通过，请给出 2 到 3 条符合角色性格、线上聊天风格的回复。
+   - **必须**使用分隔符 "|||" 来隔开每一条消息。
+   - **严禁使用逗号**（包括中文逗号和英文逗号）。如果想表达停顿，请直接拆分成下一条消息，或者用空格代替。
+   - 错误示例：你好，我是XXX，很高兴认识你
+   - 正确示例：你好|||我是XXX|||很高兴认识你
 4. 如果拒绝，请给出简短的心理活动或拒绝理由（作为 reply 返回）。
 
 请严格返回 JSON 格式：
 {
     "accepted": true, // 或 false
-    "reply": "回复内容"
+    "reply": "回复内容|||第二条内容"
 }`;
 
                 // 5. 调用 AI
@@ -2619,7 +2834,7 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 
                 if (!result) {
                     console.error("JSON提取/解析失败");
-                    result = { accepted: true, reply: "你好呀！(解析失败兜底)" }; 
+                    result = { accepted: true, reply: "你好呀|||我是新朋友(解析失败兜底)" }; 
                 }
 
                 if (result.accepted) {
@@ -2633,12 +2848,30 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                     // 获取当前账号的聊天记录
                     let history = getChatHistory(char, accountId);
                     
-                    // 存入第一句话
+                    // 1. 存入系统固定消息
                     history.push({
-                        role: 'char',
-                        content: result.reply,
+                        role: 'char', // 这里虽然是系统消息，但在微信里通常显示为中间的灰色小字，或者对方发的第一句话。
+                        // 为了符合“第一条消息是对方同意了您的好友申请”的需求，这里模拟系统提示
+                        // 但如果是作为对方发出的消息（气泡），则role='char'。
+                        // 如果想要中间灰色小字，可能需要新的type，这里暂且用特殊内容或char角色发
+                        // 根据需求"应该有第一条消息是对方同意了您的好友申请"，这里模拟微信的系统提示
+                        role: 'char', 
+                        content: '我通过了你的好友验证请求，现在我们可以开始聊天了',
                         time: Date.now()
                     });
+
+                    // 2. 处理 AI 回复（清洗逗号 + 拆分）
+                    let cleanReply = result.reply.replace(/[,，]/g, ' '); 
+                    let segments = cleanReply.split('|||').map(s => s.trim()).filter(s => s);
+                    
+                    // 依次存入
+                    for (let i = 0; i < segments.length; i++) {
+                        history.push({
+                            role: 'char',
+                            content: segments[i],
+                            time: Date.now() + (i + 1) * 500 // 稍微错开时间
+                        });
+                    }
                     
                     await setChatHistory(char, accountId, history);
                     
@@ -2648,7 +2881,8 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                     }
 
                     // 发送通知
-                    sendSystemNotification("微信", `${char.name} 通过了你的验证: ${result.reply}`);
+                    const notifyText = segments.length > 0 ? segments[0] : '我通过了你的好友验证请求';
+                    sendSystemNotification("微信", `${char.name} 通过了你的验证: ${notifyText}`);
                 } else {
                     sendSystemNotification("微信", `${searchTargetChar.name} 拒绝了申请: ${result.reply}`);
                 }
@@ -2717,6 +2951,521 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 }
             }
         }
+
+        // --- 新的好友页面逻辑 ---
+        async function showNewFriendsPage() {
+            document.getElementById('new-friends-page').style.display = 'flex';
+            await renderNewFriendsPage();
+        }
+
+        function hideNewFriendsPage() {
+            document.getElementById('new-friends-page').style.display = 'none';
+        }
+
+        async function renderNewFriendsPage() {
+            const accountId = getCurrentAccountId();
+            if (!accountId) {
+                document.getElementById('new-friends-content').innerHTML = `
+                    <div style="text-align:center; padding:60px 20px; color:#999;">
+                        请先切换到你的账号（User类型角色）
+                    </div>
+                `;
+                return;
+            }
+            
+            const container = document.getElementById('new-friends-content');
+            
+            // 获取所有相关的好友申请：发给我的 + 我发送的
+            const allRequests = await db.friend_requests.toArray();
+            const myRequests = allRequests.filter(req => 
+                req.toCharId === parseInt(accountId) || req.fromCharId === parseInt(accountId)
+            ).sort((a, b) => b.time - a.time);
+            
+            if (myRequests.length === 0) {
+                container.innerHTML = `
+                    <div style="text-align:center; padding:60px 20px; color:#999;">
+                        <svg class="svg-icon" style="width:48px; height:48px; stroke:#ccc; margin-bottom:10px;" viewBox="0 0 24 24">
+                            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                            <circle cx="8.5" cy="7" r="4"></circle>
+                            <line x1="20" y1="8" x2="20" y2="14"></line>
+                            <line x1="23" y1="11" x2="17" y2="11"></line>
+                        </svg>
+                        <div>暂无好友申请</div>
+                    </div>
+                `;
+                return;
+            }
+            
+            container.innerHTML = '';
+            const listDiv = document.createElement('div');
+            listDiv.style.width = '100%';
+            listDiv.style.background = '#fff';
+            
+            for (const req of myRequests) {
+                const isReceived = req.toCharId === parseInt(accountId);
+                const relatedCharId = isReceived ? req.fromCharId : req.toCharId;
+                const relatedChar = await db.characters.get(relatedCharId);
+                if (!relatedChar) continue;
+                
+                const item = document.createElement('div');
+                item.style.display = 'flex';
+                item.style.padding = '12px 16px';
+                item.style.borderBottom = '0.5px solid #f0f0f0';
+                item.style.alignItems = 'center';
+                item.style.gap = '12px';
+                
+                const avatarStyle = relatedChar.avatar ? `background-image:url(${relatedChar.avatar})` : 'background-color:#eee';
+                
+                let buttons = '';
+                let statusLabel = '';
+                
+                if (isReceived) {
+                    // 收到的申请
+                    if (req.status === 'pending') {
+                        buttons = `
+                            <button onclick="acceptFriendRequest(${req.id})" style="background:var(--ins-pink); color:#fff; border:none; padding:6px 16px; border-radius:4px; font-size:14px; margin-right:8px;">接受</button>
+                            <button onclick="rejectFriendRequest(${req.id})" style="background:#f0f0f0; color:#666; border:none; padding:6px 16px; border-radius:4px; font-size:14px;">拒绝</button>
+                        `;
+                    } else if (req.status === 'accepted') {
+                        statusLabel = '<div style="color:#999; font-size:12px;">已添加</div>';
+                    } else {
+                        statusLabel = '<div style="color:#999; font-size:12px;">已拒绝</div>';
+                    }
+                } else {
+                    // 发送的申请
+                    if (req.status === 'pending') {
+                        statusLabel = '<div style="color:#999; font-size:12px;">等待验证</div>';
+                    } else if (req.status === 'accepted') {
+                        statusLabel = '<div style="color:#07c160; font-size:12px;">已接受</div>';
+                    } else {
+                        statusLabel = '<div style="color:#999; font-size:12px;">已拒绝</div>';
+                    }
+                }
+                
+                const messageText = isReceived ? (req.message || '请求添加你为好友') : `你已发送好友申请`;
+                
+                item.innerHTML = `
+                    <div style="width:48px; height:48px; border-radius:4px; ${avatarStyle}; background-size:cover; background-position:center;"></div>
+                    <div style="flex:1;">
+                        <div style="font-size:16px; font-weight:500; color:#333; margin-bottom:4px;">${relatedChar.name}</div>
+                        <div style="font-size:12px; color:#999;">${messageText}</div>
+                    </div>
+                    <div style="display:flex; align-items:center;">
+                        ${buttons}${statusLabel}
+                    </div>
+                `;
+                listDiv.appendChild(item);
+            }
+            
+            container.appendChild(listDiv);
+        }
+
+        async function acceptFriendRequest(requestId) {
+            const request = await db.friend_requests.get(requestId);
+            if (!request) return;
+            
+            const char = await db.characters.get(request.fromCharId);
+            if (!char) return;
+            
+            const accountId = getCurrentAccountId();
+            
+            // 更新好友状态
+            await setFriendStatus(char, accountId, 'friend');
+            
+            // 更新申请状态
+            request.status = 'accepted';
+            await db.friend_requests.put(request);
+            
+            // 刷新页面
+            await renderNewFriendsPage();
+            
+            // 如果当前在通讯录页面，也刷新通讯录
+            const activeTab = document.querySelector('.wechat-tab-item.active');
+            if (activeTab && activeTab.innerText.includes('通讯录')) {
+                await renderContactList(document.getElementById('wechat-content'));
+            }
+            
+            alert(`已添加 ${char.name} 为好友`);
+        }
+
+        async function rejectFriendRequest(requestId) {
+            const request = await db.friend_requests.get(requestId);
+            if (!request) return;
+            
+            // 更新申请状态
+            request.status = 'rejected';
+            await db.friend_requests.put(request);
+            
+            // 刷新页面
+            await renderNewFriendsPage();
+        }
+
+        async function deleteFriendConfirm() {
+            if (!currentChatCharId) return;
+            
+            const char = await db.characters.get(currentChatCharId);
+            if (!char) return;
+            
+            if (confirm(`确定要删除好友 ${char.name} 吗？删除后将无法直接发送消息，需要重新发送好友申请。`)) {
+                await deleteFriendAction(currentChatCharId);
+            }
+        }
+
+        async function deleteFriendAction(charId) {
+            const char = await db.characters.get(charId);
+            if (!char) return;
+            
+            const accountId = getCurrentAccountId();
+            
+            // 将好友状态改为陌生人（不删除聊天记录）
+            await setFriendStatus(char, accountId, 'deleted');
+            
+            // 初始化等待好友申请的设置
+            if (!char.wait_friend_settings) {
+                char.wait_friend_settings = {};
+            }
+            if (!char.wait_friend_settings[accountId]) {
+                char.wait_friend_settings[accountId] = {
+                    enabled: false,
+                    interval: 60, // 默认60分钟
+                    lastCheckTime: Date.now(),
+                    nextCheckTime: null
+                };
+            }
+            await db.characters.put(char);
+            
+            // 关闭聊天详情页但保持聊天窗口打开，显示等待界面
+            hideChatDetail();
+            
+            // 刷新聊天窗口显示等待界面
+            if (currentChatCharId === charId) {
+                await renderChatBody(char);
+            }
+            
+            // 刷新微信页面
+            const activeTab = document.querySelector('.wechat-tab-item.active');
+            if (activeTab) {
+                const tabIndex = Array.from(document.querySelectorAll('.wechat-tab-item')).indexOf(activeTab);
+                switchWechatTab(tabIndex);
+            }
+            
+            alert(`已删除好友 ${char.name}，聊天记录已保留`);
+        }
+
+        async function sendFriendRequestTo(charId, message) {
+            const accountId = getCurrentAccountId();
+            if (!accountId) {
+                alert('请先切换到你的账号（User类型角色）');
+                return;
+            }
+            
+            const targetChar = await db.characters.get(charId);
+            if (!targetChar) return;
+            
+            // 检查是否已经发送过申请
+            const existingRequest = await db.friend_requests
+                .where({fromCharId: parseInt(accountId), toCharId: charId, status: 'pending'})
+                .first();
+            
+            if (existingRequest) {
+                alert('已发送过好友申请，请等待对方处理');
+                return;
+            }
+            
+            // 创建好友申请记录
+            const requestId = await db.friend_requests.add({
+                fromCharId: parseInt(accountId),
+                toCharId: charId,
+                message: message || '请求添加你为好友',
+                status: 'pending',
+                time: Date.now()
+            });
+            
+            // 如果目标角色是Char或NPC类型（非User），自动接受申请
+            if (targetChar.type !== 'user') {
+                // 模拟自动接受
+                setTimeout(async () => {
+                    const request = await db.friend_requests.get(requestId);
+                    if (request && request.status === 'pending') {
+                        // 自动接受
+                        request.status = 'accepted';
+                        await db.friend_requests.put(request);
+                        
+                        // 添加为好友
+                        await setFriendStatus(targetChar, accountId, 'friend');
+                        
+                        alert(`${targetChar.name} 已接受你的好友申请`);
+                        
+                        // 刷新界面
+                        const activeTab = document.querySelector('.wechat-tab-item.active');
+                        if (activeTab) {
+                            const tabIndex = Array.from(document.querySelectorAll('.wechat-tab-item')).indexOf(activeTab);
+                            switchWechatTab(tabIndex);
+                        }
+                    }
+                }, 1000); // 1秒后自动接受
+                
+                alert('好友申请已发送，等待对方回应...');
+            } else {
+                alert('好友申请已发送，等待对方接受');
+            }
+        }
+        
+        async function showAddFriendToCurrentChat() {
+            if (!currentChatCharId) return;
+            
+            const char = await db.characters.get(currentChatCharId);
+            if (!char) return;
+            
+            const message = prompt(`发送好友申请给 ${char.name}\n\n请输入申请理由（可选）：`, '我是' + (await getCurrentUserName()));
+            if (message !== null) {
+                await sendFriendRequestTo(currentChatCharId, message);
+            }
+        }
+        
+        // ===== 等待好友申请相关功能 =====
+        
+        // 开启/关闭自动检测
+        async function toggleWaitFriendCheck(charId) {
+            const char = await db.characters.get(charId);
+            if (!char) return;
+            
+            const accountId = getCurrentAccountId();
+            if (!char.wait_friend_settings) char.wait_friend_settings = {};
+            if (!char.wait_friend_settings[accountId]) {
+                char.wait_friend_settings[accountId] = {
+                    enabled: false,
+                    interval: 60,
+                    lastCheckTime: Date.now(),
+                    nextCheckTime: null
+                };
+            }
+            
+            const settings = char.wait_friend_settings[accountId];
+            settings.enabled = !settings.enabled;
+            
+            if (settings.enabled) {
+                // 启用时设置下次检测时间
+                settings.lastCheckTime = Date.now();
+                settings.nextCheckTime = Date.now() + settings.interval * 60 * 1000;
+                startWaitFriendTimer();
+            } else {
+                settings.nextCheckTime = null;
+            }
+            
+            await db.characters.put(char);
+            
+            // 刷新界面
+            if (currentChatCharId === charId) {
+                await renderChatBody(char);
+            }
+        }
+        
+        // 保存检测间隔
+        async function saveWaitFriendInterval(charId) {
+            const char = await db.characters.get(charId);
+            if (!char) return;
+            
+            const accountId = getCurrentAccountId();
+            const intervalInput = document.getElementById('wait-friend-interval');
+            const interval = parseInt(intervalInput.value) || 60;
+            
+            if (!char.wait_friend_settings) char.wait_friend_settings = {};
+            if (!char.wait_friend_settings[accountId]) {
+                char.wait_friend_settings[accountId] = {
+                    enabled: false,
+                    interval: interval,
+                    lastCheckTime: Date.now(),
+                    nextCheckTime: null
+                };
+            }
+            
+            char.wait_friend_settings[accountId].interval = interval;
+            
+            // 如果已启用，重新计算下次检测时间
+            if (char.wait_friend_settings[accountId].enabled) {
+                char.wait_friend_settings[accountId].nextCheckTime = 
+                    char.wait_friend_settings[accountId].lastCheckTime + interval * 60 * 1000;
+            }
+            
+            await db.characters.put(char);
+            
+            // 刷新界面
+            if (currentChatCharId === charId) {
+                await renderChatBody(char);
+            }
+        }
+        
+        // 快进检测
+        async function fastForwardCheck(charId) {
+            const minutes = prompt('快进多少分钟？', '60');
+            if (minutes === null) return;
+            
+            const minutesNum = parseInt(minutes);
+            if (isNaN(minutesNum) || minutesNum <= 0) {
+                alert('请输入有效的分钟数');
+                return;
+            }
+            
+            await checkCharacterSendFriendRequest(charId, minutesNum);
+        }
+        
+        // 手动发送好友申请（用户主动）
+        async function manualSendFriendRequest(charId) {
+            const char = await db.characters.get(charId);
+            if (!char) return;
+            
+            const message = prompt(`发送好友申请给 ${char.name}\n\n请输入申请理由（可选）：`, '我是' + (await getCurrentUserName()));
+            if (message !== null) {
+                await sendFriendRequestTo(charId, message);
+            }
+        }
+        
+        // AI检测是否发送好友申请
+        async function checkCharacterSendFriendRequest(charId, elapsedMinutes) {
+            const char = await db.characters.get(charId);
+            if (!char) return;
+            
+            const accountId = getCurrentAccountId();
+            const myChar = await db.characters.get(parseInt(accountId));
+            if (!myChar) return;
+            
+            // 获取聊天历史
+            const history = getChatHistory(char, accountId);
+            const recentMessages = history.slice(-10); // 最近10条消息
+            
+            // 构建提示词
+            const chatContext = recentMessages.map(msg => {
+                const role = msg.role === 'user' ? myChar.name : char.name;
+                return `${role}: ${msg.content}`;
+            }).join('\n');
+            
+            const prompt = `你是${char.name}。
+
+你的人设：
+${char.description || '（无详细人设）'}
+
+你和${myChar.name}之前是好友，但${myChar.name}删除了你。你们之前的聊天记录：
+
+${chatContext || '（没有聊天记录）'}
+
+现在时间已经过去了${elapsedMinutes}分钟。
+
+请根据你的性格、和${myChar.name}的关系、以及你们的聊天历史，决定你是否要主动发送好友申请给${myChar.name}。
+
+请直接回答"是"或"否"，并简要说明理由（不超过50字）。
+
+格式：是/否 | 理由`;
+
+            // 显示加载提示
+            const body = document.getElementById('chat-body');
+            const loadingDiv = document.createElement('div');
+            loadingDiv.style.cssText = 'position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:rgba(0,0,0,0.8); color:#fff; padding:20px 30px; border-radius:8px; z-index:9999;';
+            loadingDiv.textContent = 'AI思考中...';
+            document.body.appendChild(loadingDiv);
+            
+            try {
+                const response = await callAI([
+                    { role: 'user', content: prompt }
+                ]);
+                
+                document.body.removeChild(loadingDiv);
+                
+                // 解析AI回复
+                const answer = response.trim();
+                const isYes = answer.startsWith('是') || answer.toLowerCase().startsWith('yes');
+                
+                if (isYes) {
+                    // 角色决定发送好友申请
+                    const reasonMatch = answer.match(/[|｜]\s*(.+)$/);
+                    const reason = reasonMatch ? reasonMatch[1].trim() : '想和你继续保持联系';
+                    
+                    // 创建好友申请（反向：从角色发给用户）
+                    await db.friend_requests.add({
+                        fromCharId: charId,
+                        toCharId: parseInt(accountId),
+                        message: reason,
+                        status: 'pending',
+                        time: Date.now()
+                    });
+                    
+                    alert(`${char.name} 发送了好友申请！\n\n理由：${reason}\n\n请前往"新的好友"页面查看。`);
+                    
+                    // 更新最后检测时间
+                    if (!char.wait_friend_settings) char.wait_friend_settings = {};
+                    if (char.wait_friend_settings[accountId]) {
+                        char.wait_friend_settings[accountId].lastCheckTime = Date.now();
+                        if (char.wait_friend_settings[accountId].enabled) {
+                            char.wait_friend_settings[accountId].nextCheckTime = 
+                                Date.now() + char.wait_friend_settings[accountId].interval * 60 * 1000;
+                        }
+                        await db.characters.put(char);
+                    }
+                    
+                    // 刷新通讯录红点
+                    const activeTab = document.querySelector('.wechat-tab-item.active');
+                    if (activeTab && activeTab.innerText.includes('通讯录')) {
+                        await renderContactList(document.getElementById('wechat-content'));
+                    }
+                } else {
+                    // 角色决定不发送
+                    const reasonMatch = answer.match(/[|｜]\s*(.+)$/);
+                    const reason = reasonMatch ? reasonMatch[1].trim() : answer;
+                    
+                    alert(`${char.name} 决定暂时不发送好友申请\n\n${reason}`);
+                    
+                    // 更新最后检测时间
+                    if (!char.wait_friend_settings) char.wait_friend_settings = {};
+                    if (char.wait_friend_settings[accountId]) {
+                        char.wait_friend_settings[accountId].lastCheckTime = Date.now();
+                        if (char.wait_friend_settings[accountId].enabled) {
+                            char.wait_friend_settings[accountId].nextCheckTime = 
+                                Date.now() + char.wait_friend_settings[accountId].interval * 60 * 1000;
+                        }
+                        await db.characters.put(char);
+                    }
+                }
+                
+                // 刷新界面
+                if (currentChatCharId === charId) {
+                    await renderChatBody(char);
+                }
+                
+            } catch (error) {
+                document.body.removeChild(loadingDiv);
+                alert('AI调用失败：' + error.message);
+            }
+        }
+        
+        // 定时器：检查所有需要检测的角色
+        let waitFriendCheckTimer = null;
+        
+        function startWaitFriendTimer() {
+            if (waitFriendCheckTimer) return; // 已启动
+            
+            waitFriendCheckTimer = setInterval(async () => {
+                const now = Date.now();
+                const accountId = getCurrentAccountId();
+                if (!accountId) return;
+                
+                // 获取所有角色
+                const allChars = await db.characters.toArray();
+                
+                for (const char of allChars) {
+                    const settings = char.wait_friend_settings?.[accountId];
+                    if (!settings || !settings.enabled) continue;
+                    
+                    // 检查是否到达检测时间
+                    if (settings.nextCheckTime && now >= settings.nextCheckTime) {
+                        // 触发检测
+                        await checkCharacterSendFriendRequest(char.id, settings.interval);
+                    }
+                }
+            }, 60000); // 每分钟检查一次
+        }
+        
+        // 初始化时启动定时器
+        startWaitFriendTimer();
 
         // --- 聊天窗口逻辑 ---
         async function openChatWindow(charId) {
@@ -3473,11 +4222,12 @@ ${loreContext}
 【重要指令 - 必须严格遵守】
 1. **必须**模拟微信连发消息的习惯：请生成 2 到 4 条短消息，不能只发一条！
 2. **必须**使用分隔符 "|||" 来隔开每一条消息。
-   正确示例：嘿在吗？|||刚刚看到个好玩的视频|||发给你看看
-   错误示例：嘿在吗？刚刚看到个好玩的视频，发给你看看（这是错误的，没有用|||分隔）
-3. 每条消息要简短，5-15个字最佳，像真实微信聊天一样分多条发送。
-4. 严禁只发送标点符号。每一条消息都必须有实际文字内容。
-5. 语气要自然、口语化，符合人设。
+3. **严禁使用逗号**（包括中文逗号和英文逗号）。如果想表达停顿，请直接拆分成下一条消息，或者用空格代替。
+   - 错误示例：嘿在吗？刚刚看到个好玩的视频，发给你看看
+   - 正确示例：嘿在吗？|||刚刚看到个好玩的视频|||发给你看看
+4. 每条消息要简短，5-15个字最佳，像真实微信聊天一样分多条发送。
+5. 严禁只发送标点符号。每一条消息都必须有实际文字内容。
+6. 语气要自然、口语化，符合人设。
 
 请务必输出格式如：第一条消息内容|||第二条消息内容|||第三条消息内容
 
@@ -3495,10 +4245,12 @@ ${loreContext}
 
                 // 取最近 10 条历史记录作为参考（按账号）
                 const history = getChatHistory(char, accountId);
-                const recentHistory = (history || []).slice(-10).map(m => ({
-                    role: m.role === 'char' ? 'assistant' : 'user',
-                    content: m.content
-                }));
+                const recentHistory = (history || []).slice(-10)
+                    .filter(m => m.content && m.content.trim()) // 过滤空消息
+                    .map(m => ({
+                        role: m.role === 'char' ? 'assistant' : 'user',
+                        content: m.content
+                    }));
 
                 const messages = [
                     { role: 'system', content: systemPrompt },
@@ -3712,6 +4464,9 @@ ${loreContext}
                 let segments = [];
                 console.log(`[AutoChat] Raw AI reply for ${char.name}: "${cleanReplyProcessed}"`);
                 
+                // 强制清洗逗号
+                cleanReplyProcessed = cleanReplyProcessed.replace(/[,，]/g, ' ');
+
                 // 优先尝试分隔符拆分
                 if (cleanReplyProcessed.includes('|||')) {
                     segments = cleanReplyProcessed.split('|||').map(s => cleanMessage(s.trim())).filter(s => s.length > 0);
@@ -3905,14 +4660,29 @@ ${loreContext}
             const text = input.value.trim();
             if (!text || !currentChatCharId) return;
 
+            // 1. 获取当前角色
+            const char = await db.characters.get(currentChatCharId);
+            if (!char) return;
+            
+            const accountId = getCurrentAccountId();
+            
+            // 检查好友状态
+            const friendStatus = getFriendStatus(char, accountId);
+            if (friendStatus !== 'friend') {
+                // 不是好友，不能发送消息
+                if (confirm(`你还不是 ${char.name} 的好友，是否发送好友申请？`)) {
+                    const message = prompt('请输入申请理由（可选）：', '我是' + (await getCurrentUserName()));
+                    if (message !== null) {
+                        await sendFriendRequestTo(currentChatCharId, message);
+                    }
+                }
+                return;
+            }
+
             input.value = ''; 
             handleChatInputChange(input); // 重置按钮状态
             closeChatPanel(); // 发送时关闭面板
 
-            // 1. 获取当前角色
-            const char = await db.characters.get(currentChatCharId);
-            if (!char) return;
-            const accountId = getCurrentAccountId();
             let history = getChatHistory(char, accountId);
 
             // 2. 追加并显示用户消息
@@ -3926,6 +4696,13 @@ ${loreContext}
             
             // ✅ 不再自动触发 AI 回复，需要用户点击"接受回复"按钮
             // triggerAiReply(); 
+        }
+        
+        async function getCurrentUserName() {
+            const accountId = getCurrentAccountId();
+            if (!accountId) return '我';
+            const myChar = await db.characters.get(parseInt(accountId));
+            return myChar ? myChar.name : '我';
         }
 
         function hideChatWindow() {
@@ -4334,6 +5111,87 @@ ${loreContext}
             }
             
             const accountId = getCurrentAccountId();
+            
+            // 检查好友状态
+            const friendStatus = getFriendStatus(char, accountId);
+            if (friendStatus === 'deleted') {
+                // 已删除好友，显示等待好友申请界面
+                const settings = char.wait_friend_settings?.[accountId] || {
+                    enabled: false,
+                    interval: 60,
+                    lastCheckTime: Date.now(),
+                    nextCheckTime: null
+                };
+                
+                const nextCheckText = settings.enabled && settings.nextCheckTime ? 
+                    `下次检测: ${new Date(settings.nextCheckTime).toLocaleTimeString()}` : '未启用';
+                
+                body.innerHTML = `
+                    <div style="display:flex; flex-direction:column; height:100%; padding:20px;">
+                        <div style="text-align:center; padding:20px 0; border-bottom:1px solid #f0f0f0;">
+                            <div style="width:60px; height:60px; border-radius:8px; background-image:url(${char.avatar}); background-size:cover; background-position:center; margin:0 auto 12px;"></div>
+                            <div style="font-size:16px; font-weight:600; margin-bottom:6px; color:#333;">${char.name}</div>
+                            <div style="font-size:13px; color:#999;">你已删除该好友</div>
+                        </div>
+                        
+                        <div style="flex:1; overflow-y:auto; padding:16px 0;">
+                            <div style="background:#f9f9f9; border-radius:8px; padding:16px; margin-bottom:16px;">
+                                <div style="font-size:14px; font-weight:600; margin-bottom:12px; color:#333;">⏰ 等待好友申请</div>
+                                <div style="font-size:12px; color:#666; line-height:1.6; margin-bottom:12px;">
+                                    可以设置定时检测，AI将根据角色性格和你们的聊天历史，决定是否主动发送好友申请。
+                                </div>
+                                
+                                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; padding:8px 0;">
+                                    <div style="font-size:13px; color:#333;">启用自动检测</div>
+                                    <label class="ios-switch" style="transform:scale(0.8);">
+                                        <input type="checkbox" id="wait-friend-enabled" ${settings.enabled ? 'checked' : ''} onchange="toggleWaitFriendCheck(${char.id})">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                                
+                                <div style="display:flex; align-items:center; margin-bottom:8px;">
+                                    <div style="font-size:13px; color:#333; margin-right:12px;">检测间隔</div>
+                                    <input type="number" id="wait-friend-interval" value="${settings.interval}" min="1" max="1440" 
+                                           style="flex:1; padding:6px 10px; border:1px solid #ddd; border-radius:4px; font-size:13px;" 
+                                           onchange="saveWaitFriendInterval(${char.id})">
+                                    <div style="font-size:13px; color:#666; margin-left:8px;">分钟</div>
+                                </div>
+                                
+                                <div style="font-size:12px; color:#999; margin-top:8px;">${nextCheckText}</div>
+                            </div>
+                            
+                            <button onclick="fastForwardCheck(${char.id})" style="width:100%; padding:12px; background:#fff; border:1px solid var(--ins-pink); color:var(--ins-pink); border-radius:8px; font-size:14px; font-weight:600; margin-bottom:12px;">
+                                ⏩ 快进检测
+                            </button>
+                            
+                            <button onclick="manualSendFriendRequest(${char.id})" style="width:100%; padding:12px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px; font-size:14px; font-weight:600;">
+                                主动发送好友申请
+                            </button>
+                        </div>
+                    </div>
+                `;
+                return;
+            } else if (friendStatus === 'stranger') {
+                // 陌生人，显示发送好友申请界面
+                body.innerHTML = `
+                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; padding:40px 20px; text-align:center;">
+                        <div style="width:80px; height:80px; border-radius:8px; background-image:url(${char.avatar}); background-size:cover; background-position:center; margin-bottom:20px;"></div>
+                        <div style="font-size:18px; font-weight:600; margin-bottom:10px; color:#333;">${char.name}</div>
+                        <div style="font-size:14px; color:#999; margin-bottom:30px;">你还不是对方的好友，无法发送消息</div>
+                        <button onclick="showAddFriendToCurrentChat()" style="background:var(--ins-pink); color:#fff; border:none; padding:12px 40px; border-radius:8px; font-size:16px; font-weight:600;">发送好友申请</button>
+                    </div>
+                `;
+                return;
+            } else if (friendStatus !== 'friend') {
+                // 其他状态，显示默认提示
+                body.innerHTML = `
+                    <div style="display:flex; align-items:center; justify-content:center; height:100%; padding:40px 20px; text-align:center;">
+                        <div style="font-size:14px; color:#999;">无法发送消息</div>
+                    </div>
+                `;
+                return;
+            }
+            
             const history = getChatHistory(char, accountId);
             if (!history || history.length === 0) return;
 
@@ -4633,13 +5491,14 @@ ${loreContext}
             if (!confirm(`确定要删除选中的 ${selectedIndices.size} 条消息吗？`)) return;
 
             const char = await db.characters.get(currentChatCharId);
-            const history = char.chat_history || [];
+            const accountId = getCurrentAccountId();
+            const history = getChatHistory(char, accountId);
             
             // 过滤掉被选中的索引
             // 技巧：创建一个保留的新数组
             const newHistory = history.filter((_, idx) => !selectedIndices.has(idx));
             
-            char.chat_history = newHistory;
+            await setChatHistory(char, accountId, newHistory);
             await db.characters.put(char);
             
             exitSelectionMode(); // 删除后自动退出多选
@@ -5212,33 +6071,75 @@ ${loreContext}
         }
 
         async function triggerAiReply(additionalSystemInfo = null) {
+            console.log('[triggerAiReply] ⚡ 触发 AI 回复');
             if (!currentChatCharId) return;
             const targetCharId = currentChatCharId; // 锁定目标ID
             const char = await db.characters.get(targetCharId);
             if (!char) return;
+            
+            const accountId = getCurrentAccountId();
+            console.log('[triggerAiReply] 当前账号 ID:', accountId);
+            console.log('[triggerAiReply] 角色名称:', char.name);
+            
+            // 获取聊天历史并打印
+            const fullHistory = getChatHistory(char, accountId);
+            console.log('[triggerAiReply] 📚 完整聊天历史条数:', fullHistory.length);
+            if (fullHistory.length > 0) {
+                console.log('[triggerAiReply] 最近5条消息:');
+                fullHistory.slice(-5).forEach((msg, idx) => {
+                    console.log(`  [${fullHistory.length - 5 + idx}] ${msg.role}: ${msg.content}`);
+                });
+            } else {
+                console.warn('[triggerAiReply] ⚠️ 聊天历史为空！');
+            }
 
-            // 显示正在输入状态
-            const loadingId = 'loading-' + Date.now();
-            appendMessageToUI('char', '...', char.avatar, loadingId);
+            // 修改标题为正在输入
+            const chatTitleEl = document.getElementById('chat-title');
+            // 防止重复获取"正在输入"作为标题
+            let originalTitle = char.remark || char.name;
+            if (chatTitleEl && chatTitleEl.innerText !== "对方正在输入中...") {
+                originalTitle = chatTitleEl.innerText;
+            }
+            if (chatTitleEl) chatTitleEl.innerText = "对方正在输入中...";
 
             try {
                 // 1. 获取关联数据 (User 和 Lorebook)
+                console.log('[triggerAiReply] 📖 开始加载上下文信息...');
+                
                 let userDesc = "";
                 let userName = "用户";
                 if (char.linked_user_id) {
+                    console.log('[triggerAiReply] 👤 检测到关联的用户 ID:', char.linked_user_id);
                     const user = await db.characters.get(char.linked_user_id);
                     if (user) {
                         userName = user.name;
                         userDesc = `\n\n【对话对象(User)信息】\n名字：${user.name}\n设定：${user.description || '无'}`;
+                        console.log('[triggerAiReply] ✅ 用户人设已加载:');
+                        console.log('  - 用户名:', userName);
+                        console.log('  - 用户设定:', user.description || '无');
+                    } else {
+                        console.warn('[triggerAiReply] ⚠️ 未找到关联的用户数据');
                     }
+                } else {
+                    console.log('[triggerAiReply] ℹ️ 未设置关联用户');
                 }
                 
                 let loreContext = "";
                 const lorebookIds = char.lorebookIds || (char.lorebookId ? [char.lorebookId] : []);
+                console.log('[triggerAiReply] 📚 关联的世界书 ID:', lorebookIds);
                 if (lorebookIds.length > 0) {
-                    // 获取最近对话用于关键词匹配
-                    const recentText = (char.chat_history || []).slice(-10).map(m => m.content).join(' ');
+                    // 获取最近对话用于关键词匹配（使用正确的聊天历史）
+                    const recentText = fullHistory.slice(-10).map(m => m.content).join(' ');
+                    console.log('[triggerAiReply] 🔍 用于匹配世界书的关键词文本（前100字）:', recentText.substring(0, 100));
                     loreContext = await getLorebookContext(lorebookIds, `${char.name} ${userName} ${recentText}`);
+                    if (loreContext) {
+                        console.log('[triggerAiReply] ✅ 世界书内容已加载（长度）:', loreContext.length);
+                        console.log('[triggerAiReply] 世界书内容预览:', loreContext.substring(0, 200) + '...');
+                    } else {
+                        console.log('[triggerAiReply] ℹ️ 没有匹配到世界书条目');
+                    }
+                } else {
+                    console.log('[triggerAiReply] ℹ️ 未设置世界书');
                 }
 
                 // 计算虚拟时间
@@ -5303,37 +6204,83 @@ ${loreContext}
    
 **注意**：转账是特殊功能，不是每轮对话都需要。大部分对话应该使用普通文字或语音消息。只有在符合上述特殊场景且符合角色人设时，才考虑使用转账。
 
+【重要回复规则 - 必须严格遵守】
+1. **必须**模拟微信连发消息的习惯：请生成 2 到 4 条短消息，不能只发一条！
+2. **必须**使用分隔符 "|||" 来隔开每一条消息。
+3. **严禁使用逗号**（包括中文逗号和英文逗号）。如果想表达停顿，请直接拆分成下一条消息，或者用空格代替。
+   - 错误示例：嘿在吗？刚刚看到个好玩的视频，发给你看看
+   - 正确示例：嘿在吗？|||刚刚看到个好玩的视频|||发给你看看
+4. 每条消息要简短，5-15个字最佳，像真实微信聊天一样分多条发送。
+5. 严禁只发送标点符号。每一条消息都必须有实际文字内容。
+6. 语气要自然、口语化，符合人设。
+
 【重要】你需要同时生成两个内容：
 1. **回复内容**：对用户消息的回复（可以是文字、语音格式，或转账指令 ((TRANSFER: 金额, 备注))）
 2. **心声内容**：角色当前的心理活动、想法、感受或状态变化（可以是内心独白、情绪变化、想法等）
 
 请以JSON格式返回，格式如下：
 {
-  "reply": "你的回复内容或[voice:语音内容]或((TRANSFER: 金额, 备注))",
+  "reply": "你的回复内容|||第二条内容",
   "thought": "角色的心声/心理活动/想法"
 }
 
 请严格返回JSON格式，不要包含Markdown代码块标记。`;
 
+                // 显示 System Prompt 的关键信息
+                console.log('[triggerAiReply] 📝 System Prompt 构建完成');
+                console.log('[triggerAiReply] - 角色名称:', char.name);
+                console.log('[triggerAiReply] - 角色设定长度:', (char.description || '').length);
+                console.log('[triggerAiReply] - 用户人设:', userName, userDesc ? '✅已包含' : '❌未包含');
+                console.log('[triggerAiReply] - 世界书:', loreContext ? `✅已包含(${loreContext.length}字)` : '❌未包含');
+                console.log('[triggerAiReply] - System Prompt 总长度:', systemPrompt.length);
+
                 // 取最近 N 条历史记录（使用自定义的上下文条数，默认20条）
                 const contextCount = char.context_message_count || 20;
-                const recentHistory = (char.chat_history || []).slice(-contextCount).map(m => {
-                    let content = m.content;
-                    // 如果有图片描述，拼接在后面给 AI 看
-                    if (m.imageDescription) {
-                        content += `
-(图片描述: ${m.imageDescription})`;
-                    }
-                    return {
-                        role: m.role === 'char' ? 'assistant' : 'user',
-                        content: content
-                    };
-                });
+                console.log('[triggerAiReply] 📊 上下文消息数配置:', contextCount);
+                
+                // ❌ BUG 发现：这里使用的是 char.chat_history，而不是前面获取的 getChatHistory(char, accountId)
+                // 应该使用 fullHistory 而不是 char.chat_history
+                const recentHistory = fullHistory.slice(-contextCount)
+                    .map(m => {
+                        let content = m.content || '';
+                        // 如果有图片描述，拼接在后面给 AI 看
+                        if (m.imageDescription) {
+                            content += `\n(图片描述: ${m.imageDescription})`;
+                        }
+                        return {
+                            role: m.role === 'char' ? 'assistant' : 'user',
+                            content: content
+                        };
+                    })
+                    .filter(m => m.content && m.content.trim()); // 过滤空消息
+                    
+                console.log('[triggerAiReply] 📝 处理后的历史消息数:', recentHistory.length);
 
                 const messages = [
                     { role: 'system', content: systemPrompt },
                     ...recentHistory
                 ];
+                
+                // 添加详细日志查看发送给 AI 的完整消息
+                console.log('='.repeat(80));
+                console.log('[triggerAiReply] 📤 准备发送给 AI - 完整信息汇总');
+                console.log('='.repeat(80));
+                console.log('【上下文信息】');
+                console.log(`  ✅ 聊天历史: ${recentHistory.length} 条消息（配置: ${contextCount} 条）`);
+                console.log(`  ${userDesc ? '✅' : '❌'} 用户人设: ${userName}${userDesc ? ` (${(userDesc).length}字)` : ' (未设置)'}`);
+                console.log(`  ${loreContext ? '✅' : '❌'} 世界书: ${loreContext ? `已加载 (${loreContext.length}字)` : '未设置或未匹配'}`);
+                console.log(`  ✅ 角色设定: ${char.name} (${(char.description || '').length}字)`);
+                console.log('');
+                console.log('【发送的消息结构】');
+                console.log(`  - System Prompt: ${systemPrompt.length} 字符`);
+                console.log(`  - 历史消息: ${recentHistory.length} 条`);
+                console.log('');
+                console.log('【最近的对话内容】');
+                recentHistory.slice(-3).forEach((msg, index) => {
+                    const displayContent = msg.content.substring(0, 100) + (msg.content.length > 100 ? '...' : '');
+                    console.log(`  ${msg.role === 'user' ? '👤' : '🤖'} ${msg.role}: ${displayContent}`);
+                });
+                console.log('='.repeat(80));
 
                 // 2. 调用 AI（已经是防御式解析，直接拿到内容）
                 const aiResponse = await callAI(messages);
@@ -5405,9 +6352,8 @@ ${loreContext}
                         }
                     }
 
-                // 3. 移除 loading
-                const loadingBubble = document.getElementById(loadingId);
-                if (loadingBubble) loadingBubble.remove();
+                // 3. 恢复标题
+                if (chatTitleEl) chatTitleEl.innerText = originalTitle;
                 
                 // ✅ 关键改动：在拆分前，先检测是否包含"指令型消息"（转账等）
                 // 检测 ((TRANSFER: 金额, 备注)) 格式
@@ -5427,7 +6373,7 @@ ${loreContext}
                     
                     const freshChar = await db.characters.get(targetCharId);
                     if (freshChar) {
-                        if(!freshChar.chat_history) freshChar.chat_history = [];
+                        let history = getChatHistory(freshChar, accountId);
                         
                         // 1. 先发送文字消息（如果有）
                         if (textBeforeTransfer) {
@@ -5436,7 +6382,8 @@ ${loreContext}
                                 content: textBeforeTransfer,
                                 time: Date.now()
                             };
-                            freshChar.chat_history.push(textMsg);
+                            history.push(textMsg);
+                            await setChatHistory(freshChar, accountId, history);
                             
                             // 渲染文字消息
                             if (currentChatCharId === targetCharId) {
@@ -5447,7 +6394,7 @@ ${loreContext}
                             await new Promise(r => setTimeout(r, 300));
                         }
                         
-                        // 2. 再发送转账卡片
+                            // 2. 再发送转账卡片
                         const transferData = {
                             amount: amount.toFixed(2),
                             desc: note,
@@ -5462,7 +6409,8 @@ ${loreContext}
                             id: 'trans_' + Date.now()
                         };
                         
-                        let history = getChatHistory(freshChar, accountId);
+                        // 重新获取最新的历史记录（因为刚才可能插入了文字消息）
+                        history = getChatHistory(freshChar, accountId);
                         history.push(transferMsg);
                         await setChatHistory(freshChar, accountId, history);
                         
@@ -5485,7 +6433,7 @@ ${loreContext}
                         if (parsed.amount && parsed.desc !== undefined && parsed.status) {
                             const freshChar = await db.characters.get(targetCharId);
                             if (freshChar) {
-                                if(!freshChar.chat_history) freshChar.chat_history = [];
+                                let history = getChatHistory(freshChar, accountId);
                                 
                                 const newMsg = { 
                                     role: 'char', 
@@ -5495,8 +6443,8 @@ ${loreContext}
                                     id: 'trans_' + Date.now()
                                 };
                                 
-                                freshChar.chat_history.push(newMsg);
-                                await db.characters.put(freshChar);
+                                history.push(newMsg);
+                                await setChatHistory(freshChar, accountId, history);
                                 
                                 if (currentChatCharId === targetCharId) {
                                     renderChatBody(freshChar);
@@ -5511,15 +6459,25 @@ ${loreContext}
                     }
                 }
                 
-                // 4. 普通消息：拆分并拟人化延时发送
-                const segments = splitMessage(replyText);
-                if (segments.length === 0 && replyText.trim()) segments.push(replyText.trim());
+                // 4. 普通消息：强制清洗逗号 + 拆分
+                let cleanText = replyText.replace(/[,，]/g, ' ');
+                let segments = [];
+                
+                // 优先使用 ||| 拆分
+                if (cleanText.includes('|||')) {
+                    segments = cleanText.split('|||').map(s => cleanMessage(s.trim())).filter(s => s);
+                } else {
+                    // 回退到标点拆分逻辑 (但逗号已经被干掉了)
+                    segments = splitMessage(cleanText);
+                }
+                
+                // 兜底：如果没拆出来，但有内容，就当成一条
+                if (segments.length === 0 && cleanText.trim()) {
+                    segments.push(cleanMessage(cleanText.trim()));
+                }
 
                 for (let i = 0; i < segments.length; i++) {
                     let seg = segments[i];
-                    
-                    // ✅ 修复：清理每个分段末尾多余的 ]
-                    seg = cleanMessage(seg);
                     
                     // 延时：第一条直接发(前面loading已经是等待了)，后续模拟打字
                     if (i > 0) {
@@ -5531,7 +6489,7 @@ ${loreContext}
                     // 始终存入 DB
                     const freshChar = await db.characters.get(targetCharId);
                     if (freshChar) {
-                        if(!freshChar.chat_history) freshChar.chat_history = [];
+                        let history = getChatHistory(freshChar, accountId);
                         
                         const newMsg = { 
                             role: 'char', 
@@ -5539,8 +6497,8 @@ ${loreContext}
                             time: Date.now()
                         };
                         
-                        freshChar.chat_history.push(newMsg);
-                        await db.characters.put(freshChar);
+                        history.push(newMsg);
+                        await setChatHistory(freshChar, accountId, history);
                         
                         // 只有在当前窗口匹配时才渲染 UI
                         if (currentChatCharId === targetCharId) {
@@ -5558,11 +6516,12 @@ ${loreContext}
                 
             } catch (err) {
                 console.error("AI 回复失败", err);
-                const loadingBubble = document.getElementById(loadingId);
-                if (loadingBubble) {
-                    loadingBubble.querySelector('.message-content').innerText = `[触发失败] ${err.message}`;
-                    loadingBubble.querySelector('.message-content').style.color = 'red';
-                }
+                if (chatTitleEl) chatTitleEl.innerText = originalTitle;
+                
+                // 显示错误消息
+                await appendMessageToUI('char', `[触发失败] ${err.message}`, char.avatar);
+                const lastContent = document.querySelector('#chat-body .message-row:last-child .message-content');
+                if (lastContent) lastContent.style.color = 'red';
             }
         }
 
@@ -5571,7 +6530,10 @@ ${loreContext}
             if (!currentChatCharId) return;
             
             const char = await db.characters.get(currentChatCharId);
-            if (!char || !char.chat_history || char.chat_history.length === 0) {
+            const accountId = getCurrentAccountId();
+            const history = getChatHistory(char, accountId);
+            
+            if (!char || !history || history.length === 0) {
                 // 没有聊天记录，无法重新生成
                 return;
             }
@@ -5581,8 +6543,8 @@ ${loreContext}
             let lastAiMessageEndIndex = -1;
             
             // 从后往前找最后一条AI消息
-            for (let i = char.chat_history.length - 1; i >= 0; i--) {
-                if (char.chat_history[i].role === 'char') {
+            for (let i = history.length - 1; i >= 0; i--) {
+                if (history[i].role === 'char') {
                     lastAiMessageEndIndex = i;
                     break;
                 }
@@ -5598,7 +6560,7 @@ ${loreContext}
             // 从最后一条AI消息往前找，找到连续的所有AI消息
             lastAiMessageStartIndex = lastAiMessageEndIndex;
             for (let i = lastAiMessageEndIndex - 1; i >= 0; i--) {
-                if (char.chat_history[i].role === 'user') {
+                if (history[i].role === 'user') {
                     // 遇到用户消息，停止
                     break;
                 }
@@ -5608,7 +6570,8 @@ ${loreContext}
             
             // 删除所有连续的AI消息（不删除用户消息）
             const deleteCount = lastAiMessageEndIndex - lastAiMessageStartIndex + 1;
-            char.chat_history.splice(lastAiMessageStartIndex, deleteCount);
+            history.splice(lastAiMessageStartIndex, deleteCount);
+            await setChatHistory(char, accountId, history);
             await db.characters.put(char);
             
             // 重新渲染聊天界面（移除AI回复消息）
@@ -6063,14 +7026,94 @@ ${loreContext}
             if (!url || !key || !model) {
                 throw new Error("请先在设置中配置 API 地址、密钥并选择模型");
             }
+            
+            // 验证配置值
+            const apiKeyValue = key.value ? key.value.trim() : '';
+            const modelValue = model.value ? model.value.trim() : '';
+            
+            if (!apiKeyValue) {
+                throw new Error("API 密钥不能为空，请在设置中配置");
+            }
+            
+            if (!modelValue) {
+                throw new Error("模型名称不能为空，请在设置中选择模型");
+            }
+            
+            // 检查 API Key 格式（基本检查）
+            if (apiKeyValue.length < 10) {
+                console.warn('[callAI] API Key 长度异常，可能无效:', apiKeyValue.length);
+            }
 
             // 获取温度配置
             const tempItem = await db.dexiData.get('aiTemperature');
-            const temperature = tempItem ? parseFloat(tempItem.value) : 0.7;
+            let temperature = tempItem ? parseFloat(tempItem.value) : 0.7;
+            
+            // 验证温度值
+            if (isNaN(temperature) || temperature < 0 || temperature > 2) {
+                console.warn('[callAI] 温度值无效:', temperature, '，使用默认值 0.7');
+                temperature = 0.7;
+            }
 
             const requestUrl = getSmartUrl(url.value, '/chat/completions');
             
+            // ✅ 全局防御：清洗 messages，防止空内容或非法格式导致 400 错误
+            const cleanMessages = messages.map(m => {
+                // 验证 role 字段
+                let role = m.role;
+                if (!role || !['system', 'user', 'assistant'].includes(role)) {
+                    console.warn('[callAI] 无效的 role:', role, '，使用 user');
+                    role = 'user';
+                }
+                
+                // 确保 content 是字符串
+                let content = m.content;
+                if (content === null || content === undefined) content = "";
+                if (typeof content !== 'string') content = String(content);
+                
+                return {
+                    role: role,
+                    content: content.trim()
+                };
+            }).filter(m => m.content.length > 0); // 再次过滤空消息
+
+            // 如果过滤后只剩下 system 消息，有些模型可能会报错，但大多数支持。
+            // 这里我们不做 System 的强制检查，只要不为空即可。
+            if (cleanMessages.length === 0) {
+                throw new Error("请求中止：没有有效的消息内容（可能是因为消息被撤回或为空）");
+            }
+            
+            // 验证是否至少有一条非 system 消息
+            const hasNonSystemMessage = cleanMessages.some(m => m.role !== 'system');
+            if (!hasNonSystemMessage) {
+                console.warn('[callAI] 只有 system 消息，添加一个占位 user 消息');
+                cleanMessages.push({
+                    role: 'user',
+                    content: '请继续对话'
+                });
+            }
+
             let rawText = '';
+            
+            // 构建请求体
+            const requestBody = {
+                apiUrl: requestUrl,
+                apiKey: apiKeyValue,
+                model: modelValue,
+                messages: cleanMessages,
+                temperature: temperature
+            };
+            
+            // 添加详细的调试日志
+            console.log('[callAI] 🚀 准备发送请求');
+            console.log('[callAI] API URL:', requestUrl);
+            console.log('[callAI] Model:', modelValue);
+            console.log('[callAI] API Key length:', apiKeyValue.length);
+            console.log('[callAI] Temperature:', temperature);
+            console.log('[callAI] Messages count:', cleanMessages.length);
+            console.log('[callAI] Messages preview:', cleanMessages.map(m => ({
+                role: m.role,
+                content: m.content.substring(0, 100) + (m.content.length > 100 ? '...' : '')
+            })));
             
             // 使用后端代理发送请求 - 采用防御式解析
             try {
@@ -6079,24 +7122,30 @@ ${loreContext}
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({
-                        apiUrl: requestUrl,
-                        apiKey: key.value,
-                        model: model.value,
-                        messages: messages,
-                        temperature: temperature
-                    })
+                    body: JSON.stringify(requestBody)
                 });
 
                 if (!res.ok) {
                     const errText = await res.text();
+                    console.error('[callAI] ❌ API 请求失败');
+                    console.error('[callAI] 状态码:', res.status);
+                    console.error('[callAI] 错误响应:', errText);
+                    
                     try {
                         const errJson = JSON.parse(errText);
+                        console.error('[callAI] 解析后的错误:', errJson);
                         if (errJson.error) {
-                            throw new Error(`AI请求失败: ${errJson.error} ${errJson.details || ''}`);
+                            const errorMsg = `AI请求失败 (${res.status}): ${errJson.error}${errJson.details ? '\n详情: ' + errJson.details : ''}`;
+                            throw new Error(errorMsg);
                         }
-                    } catch(e) {}
-                    throw new Error(`API 请求失败: ${res.status} - ${errText.substring(0, 100)}`);
+                    } catch(parseErr) {
+                        // 如果不是 JSON 格式的错误
+                        if (parseErr instanceof SyntaxError) {
+                            console.error('[callAI] 错误响应不是 JSON 格式');
+                        }
+                    }
+                    
+                    throw new Error(`API 请求失败: ${res.status} - ${errText.substring(0, 200)}`);
                 }
 
                 // ✅ 关键改动：先获取原始文本，而不是直接 .json()
