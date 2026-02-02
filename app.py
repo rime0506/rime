@@ -168,6 +168,49 @@ def init_db():
                   content TEXT,
                   timestamp REAL)''')
     
+    # ========== 联机社交功能表 ==========
+    
+    # 用户表（联机账号）
+    c.execute('''CREATE TABLE IF NOT EXISTS online_users
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  username TEXT UNIQUE NOT NULL,
+                  password TEXT NOT NULL,
+                  social_id TEXT UNIQUE NOT NULL,
+                  wechat_id TEXT UNIQUE,
+                  nickname TEXT,
+                  avatar TEXT,
+                  bio TEXT,
+                  created_at REAL,
+                  last_online REAL)''')
+    
+    # 好友关系表
+    c.execute('''CREATE TABLE IF NOT EXISTS friendships
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id INTEGER NOT NULL,
+                  friend_id INTEGER NOT NULL,
+                  created_at REAL,
+                  UNIQUE(user_id, friend_id))''')
+    
+    # 好友请求表
+    c.execute('''CREATE TABLE IF NOT EXISTS friend_requests
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  from_user_id INTEGER NOT NULL,
+                  to_user_id INTEGER NOT NULL,
+                  message TEXT,
+                  status TEXT DEFAULT 'pending',
+                  created_at REAL,
+                  updated_at REAL)''')
+    
+    # 用户间私聊消息表
+    c.execute('''CREATE TABLE IF NOT EXISTS user_messages
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  from_user_id INTEGER NOT NULL,
+                  to_user_id INTEGER NOT NULL,
+                  content TEXT NOT NULL,
+                  msg_type TEXT DEFAULT 'text',
+                  is_read INTEGER DEFAULT 0,
+                  created_at REAL)''')
+    
     conn.commit()
     conn.close()
 
@@ -333,6 +376,581 @@ def subscribe_push():
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
+
+# ========== 联机社交功能 API ==========
+
+import hashlib
+import secrets
+
+def hash_password(password):
+    """简单密码哈希"""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def generate_social_id():
+    """生成唯一社交ID（6位字母数字）"""
+    import string
+    import random
+    chars = string.ascii_uppercase + string.digits
+    while True:
+        social_id = ''.join(random.choices(chars, k=6))
+        conn = get_db_connection()
+        exists = conn.execute('SELECT 1 FROM online_users WHERE social_id = ?', (social_id,)).fetchone()
+        conn.close()
+        if not exists:
+            return social_id
+
+# 用户注册
+@app.route('/api/online/register', methods=['POST'])
+def online_register():
+    """用户注册联机账号"""
+    data = request.json
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
+    nickname = data.get('nickname', '').strip()
+    wechat_id = data.get('wechat_id', '').strip()  # 角色档案的微信号
+    avatar = data.get('avatar', '')
+    
+    if not username or not password:
+        return jsonify({'error': '用户名和密码不能为空'}), 400
+    
+    if len(username) < 3 or len(username) > 20:
+        return jsonify({'error': '用户名长度需在3-20个字符之间'}), 400
+    
+    if len(password) < 6:
+        return jsonify({'error': '密码长度至少6个字符'}), 400
+    
+    if not wechat_id:
+        return jsonify({'error': '请先在角色档案中设置虚拟账号'}), 400
+    
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    # 检查用户名是否已存在
+    if c.execute('SELECT 1 FROM online_users WHERE username = ?', (username,)).fetchone():
+        conn.close()
+        return jsonify({'error': '用户名已被注册'}), 400
+    
+    # 检查虚拟账号是否已被绑定
+    if c.execute('SELECT 1 FROM online_users WHERE wechat_id = ?', (wechat_id,)).fetchone():
+        conn.close()
+        return jsonify({'error': '该虚拟账号已被其他账号绑定'}), 400
+    
+    # 生成唯一社交ID（备用）
+    social_id = generate_social_id()
+    
+    try:
+        c.execute('''INSERT INTO online_users (username, password, social_id, wechat_id, nickname, avatar, created_at, last_online)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (username, hash_password(password), social_id, wechat_id, nickname or username, avatar, time.time(), time.time()))
+        conn.commit()
+        user_id = c.lastrowid
+        conn.close()
+        
+        print(f"[Online] ✓ 用户注册成功: {username}, wechat_id: {wechat_id}")
+        return jsonify({
+            'message': '注册成功',
+            'user': {
+                'id': user_id,
+                'username': username,
+                'social_id': social_id,
+                'wechat_id': wechat_id,
+                'nickname': nickname or username,
+                'avatar': avatar
+            }
+        }), 201
+    except Exception as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 500
+
+# 用户登录
+@app.route('/api/online/login', methods=['POST'])
+def online_login():
+    """用户登录"""
+    data = request.json
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
+    
+    if not username or not password:
+        return jsonify({'error': '请输入用户名和密码'}), 400
+    
+    conn = get_db_connection()
+    user = conn.execute('SELECT * FROM online_users WHERE username = ?', (username,)).fetchone()
+    
+    if not user or user['password'] != hash_password(password):
+        conn.close()
+        return jsonify({'error': '用户名或密码错误'}), 401
+    
+    # 更新最后在线时间
+    conn.execute('UPDATE online_users SET last_online = ? WHERE id = ?', (time.time(), user['id']))
+    conn.commit()
+    conn.close()
+    
+    print(f"[Online] ✓ 用户登录: {username}")
+    return jsonify({
+        'message': '登录成功',
+        'user': {
+            'id': user['id'],
+            'username': user['username'],
+            'social_id': user['social_id'],
+            'wechat_id': user['wechat_id'],
+            'nickname': user['nickname'],
+            'avatar': user['avatar'],
+            'bio': user['bio']
+        }
+    }), 200
+
+# 更新用户资料
+@app.route('/api/online/profile', methods=['PUT'])
+def update_profile():
+    """更新用户资料"""
+    data = request.json
+    user_id = data.get('user_id')
+    
+    if not user_id:
+        return jsonify({'error': '缺少user_id'}), 400
+    
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    updates = []
+    params = []
+    
+    if 'nickname' in data:
+        updates.append('nickname = ?')
+        params.append(data['nickname'])
+    if 'avatar' in data:
+        updates.append('avatar = ?')
+        params.append(data['avatar'])
+    if 'bio' in data:
+        updates.append('bio = ?')
+        params.append(data['bio'])
+    
+    if updates:
+        params.append(user_id)
+        c.execute(f'UPDATE online_users SET {", ".join(updates)} WHERE id = ?', params)
+        conn.commit()
+    
+    conn.close()
+    return jsonify({'message': '更新成功'}), 200
+
+# 搜索用户（通过微信号）
+@app.route('/api/online/search', methods=['GET'])
+def search_user():
+    """通过微信号搜索用户"""
+    wechat_id = request.args.get('wechat_id', '').strip()
+    social_id = request.args.get('social_id', '').strip().upper()  # 兼容社交ID搜索
+    current_user_id = request.args.get('current_user_id')
+    
+    if not wechat_id and not social_id:
+        return jsonify({'error': '请输入虚拟账号'}), 400
+    
+    conn = get_db_connection()
+    
+    # 优先通过微信号搜索，其次通过社交ID
+    if wechat_id:
+        user = conn.execute('SELECT id, username, social_id, wechat_id, nickname, avatar, bio FROM online_users WHERE wechat_id = ?', (wechat_id,)).fetchone()
+    else:
+        user = conn.execute('SELECT id, username, social_id, wechat_id, nickname, avatar, bio FROM online_users WHERE social_id = ?', (social_id,)).fetchone()
+    
+    if not user:
+        conn.close()
+        return jsonify({'error': '未找到该用户，对方可能还没有开通联机功能'}), 404
+    
+    # 检查是否已经是好友
+    is_friend = False
+    has_pending_request = False
+    
+    if current_user_id:
+        friendship = conn.execute('SELECT 1 FROM friendships WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)',
+                                 (current_user_id, user['id'], user['id'], current_user_id)).fetchone()
+        is_friend = friendship is not None
+        
+        # 检查是否有待处理的好友请求
+        pending = conn.execute('SELECT 1 FROM friend_requests WHERE from_user_id = ? AND to_user_id = ? AND status = "pending"',
+                              (current_user_id, user['id'])).fetchone()
+        has_pending_request = pending is not None
+    
+    conn.close()
+    
+    return jsonify({
+        'user': {
+            'id': user['id'],
+            'username': user['username'],
+            'social_id': user['social_id'],
+            'wechat_id': user['wechat_id'],
+            'nickname': user['nickname'],
+            'avatar': user['avatar'],
+            'bio': user['bio'],
+            'is_friend': is_friend,
+            'has_pending_request': has_pending_request
+        }
+    }), 200
+
+# 发送好友请求
+@app.route('/api/online/friend_request', methods=['POST'])
+def send_friend_request():
+    """发送好友请求"""
+    data = request.json
+    from_user_id = data.get('from_user_id')
+    to_user_id = data.get('to_user_id')
+    message = data.get('message', '')
+    
+    if not from_user_id or not to_user_id:
+        return jsonify({'error': '缺少参数'}), 400
+    
+    if from_user_id == to_user_id:
+        return jsonify({'error': '不能添加自己为好友'}), 400
+    
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    # 检查是否已经是好友
+    if c.execute('SELECT 1 FROM friendships WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)',
+                (from_user_id, to_user_id, to_user_id, from_user_id)).fetchone():
+        conn.close()
+        return jsonify({'error': '你们已经是好友了'}), 400
+    
+    # 检查是否已有待处理请求
+    existing = c.execute('SELECT * FROM friend_requests WHERE from_user_id = ? AND to_user_id = ? AND status = "pending"',
+                        (from_user_id, to_user_id)).fetchone()
+    if existing:
+        conn.close()
+        return jsonify({'error': '已发送过好友请求，请等待对方处理'}), 400
+    
+    # 检查对方是否也向我发送了请求（直接成为好友）
+    reverse = c.execute('SELECT * FROM friend_requests WHERE from_user_id = ? AND to_user_id = ? AND status = "pending"',
+                       (to_user_id, from_user_id)).fetchone()
+    if reverse:
+        # 双方互相添加，直接成为好友
+        c.execute('UPDATE friend_requests SET status = "accepted", updated_at = ? WHERE id = ?',
+                 (time.time(), reverse['id']))
+        c.execute('INSERT INTO friendships (user_id, friend_id, created_at) VALUES (?, ?, ?)',
+                 (from_user_id, to_user_id, time.time()))
+        c.execute('INSERT INTO friendships (user_id, friend_id, created_at) VALUES (?, ?, ?)',
+                 (to_user_id, from_user_id, time.time()))
+        conn.commit()
+        conn.close()
+        
+        # 通过WebSocket通知双方
+        socketio.emit('friend_added', {'user_id': from_user_id, 'friend_id': to_user_id})
+        socketio.emit('friend_added', {'user_id': to_user_id, 'friend_id': from_user_id})
+        
+        return jsonify({'message': '对方也想添加你，你们已成为好友！', 'status': 'accepted'}), 200
+    
+    # 创建好友请求
+    c.execute('INSERT INTO friend_requests (from_user_id, to_user_id, message, status, created_at, updated_at) VALUES (?, ?, ?, "pending", ?, ?)',
+             (from_user_id, to_user_id, message, time.time(), time.time()))
+    conn.commit()
+    request_id = c.lastrowid
+    conn.close()
+    
+    # 通过WebSocket通知对方
+    socketio.emit('new_friend_request', {'to_user_id': to_user_id, 'from_user_id': from_user_id})
+    
+    print(f"[Online] 好友请求: {from_user_id} -> {to_user_id}")
+    return jsonify({'message': '好友请求已发送', 'request_id': request_id}), 200
+
+# 获取好友请求列表
+@app.route('/api/online/friend_requests', methods=['GET'])
+def get_friend_requests():
+    """获取收到的好友请求"""
+    user_id = request.args.get('user_id')
+    
+    if not user_id:
+        return jsonify({'error': '缺少user_id'}), 400
+    
+    conn = get_db_connection()
+    rows = conn.execute('''
+        SELECT fr.*, u.username, u.social_id, u.wechat_id, u.nickname, u.avatar
+        FROM friend_requests fr
+        JOIN online_users u ON fr.from_user_id = u.id
+        WHERE fr.to_user_id = ? AND fr.status = "pending"
+        ORDER BY fr.created_at DESC
+    ''', (user_id,)).fetchall()
+    conn.close()
+    
+    requests = []
+    for row in rows:
+        requests.append({
+            'id': row['id'],
+            'from_user': {
+                'id': row['from_user_id'],
+                'username': row['username'],
+                'social_id': row['social_id'],
+                'wechat_id': row['wechat_id'],
+                'nickname': row['nickname'],
+                'avatar': row['avatar']
+            },
+            'message': row['message'],
+            'created_at': row['created_at']
+        })
+    
+    return jsonify({'requests': requests}), 200
+
+# 处理好友请求
+@app.route('/api/online/friend_request/<int:request_id>', methods=['PUT'])
+def handle_friend_request(request_id):
+    """接受或拒绝好友请求"""
+    data = request.json
+    action = data.get('action')  # 'accept' or 'reject'
+    user_id = data.get('user_id')
+    
+    if action not in ['accept', 'reject']:
+        return jsonify({'error': '无效的操作'}), 400
+    
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    req = c.execute('SELECT * FROM friend_requests WHERE id = ? AND to_user_id = ? AND status = "pending"',
+                   (request_id, user_id)).fetchone()
+    
+    if not req:
+        conn.close()
+        return jsonify({'error': '请求不存在或已处理'}), 404
+    
+    if action == 'accept':
+        # 更新请求状态
+        c.execute('UPDATE friend_requests SET status = "accepted", updated_at = ? WHERE id = ?',
+                 (time.time(), request_id))
+        # 创建双向好友关系
+        c.execute('INSERT OR IGNORE INTO friendships (user_id, friend_id, created_at) VALUES (?, ?, ?)',
+                 (req['from_user_id'], req['to_user_id'], time.time()))
+        c.execute('INSERT OR IGNORE INTO friendships (user_id, friend_id, created_at) VALUES (?, ?, ?)',
+                 (req['to_user_id'], req['from_user_id'], time.time()))
+        
+        # 通知双方
+        socketio.emit('friend_added', {'user_id': req['from_user_id'], 'friend_id': req['to_user_id']})
+        socketio.emit('friend_added', {'user_id': req['to_user_id'], 'friend_id': req['from_user_id']})
+        
+        message = '已添加好友'
+    else:
+        c.execute('UPDATE friend_requests SET status = "rejected", updated_at = ? WHERE id = ?',
+                 (time.time(), request_id))
+        message = '已拒绝请求'
+    
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'message': message}), 200
+
+# 获取好友列表
+@app.route('/api/online/friends', methods=['GET'])
+def get_friends():
+    """获取好友列表"""
+    user_id = request.args.get('user_id')
+    
+    if not user_id:
+        return jsonify({'error': '缺少user_id'}), 400
+    
+    conn = get_db_connection()
+    rows = conn.execute('''
+        SELECT u.id, u.username, u.social_id, u.wechat_id, u.nickname, u.avatar, u.bio, u.last_online
+        FROM friendships f
+        JOIN online_users u ON f.friend_id = u.id
+        WHERE f.user_id = ?
+        ORDER BY u.last_online DESC
+    ''', (user_id,)).fetchall()
+    conn.close()
+    
+    friends = []
+    for row in rows:
+        friends.append({
+            'id': row['id'],
+            'username': row['username'],
+            'social_id': row['social_id'],
+            'wechat_id': row['wechat_id'],
+            'nickname': row['nickname'],
+            'avatar': row['avatar'],
+            'bio': row['bio'],
+            'last_online': row['last_online']
+        })
+    
+    return jsonify({'friends': friends}), 200
+
+# 删除好友
+@app.route('/api/online/friend/<int:friend_id>', methods=['DELETE'])
+def delete_friend(friend_id):
+    """删除好友"""
+    user_id = request.args.get('user_id')
+    
+    if not user_id:
+        return jsonify({'error': '缺少user_id'}), 400
+    
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('DELETE FROM friendships WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)',
+             (user_id, friend_id, friend_id, user_id))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'message': '已删除好友'}), 200
+
+# 发送用户间消息
+@app.route('/api/online/message', methods=['POST'])
+def send_user_message():
+    """发送用户间私聊消息"""
+    data = request.json
+    from_user_id = data.get('from_user_id')
+    to_user_id = data.get('to_user_id')
+    content = data.get('content', '').strip()
+    msg_type = data.get('msg_type', 'text')
+    
+    if not from_user_id or not to_user_id or not content:
+        return jsonify({'error': '缺少参数'}), 400
+    
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    # 验证是否是好友关系
+    if not c.execute('SELECT 1 FROM friendships WHERE user_id = ? AND friend_id = ?',
+                    (from_user_id, to_user_id)).fetchone():
+        conn.close()
+        return jsonify({'error': '你们还不是好友'}), 403
+    
+    # 保存消息
+    now = time.time()
+    c.execute('INSERT INTO user_messages (from_user_id, to_user_id, content, msg_type, created_at) VALUES (?, ?, ?, ?, ?)',
+             (from_user_id, to_user_id, content, msg_type, now))
+    conn.commit()
+    msg_id = c.lastrowid
+    conn.close()
+    
+    # 通过WebSocket实时推送给对方
+    socketio.emit('new_user_message', {
+        'id': msg_id,
+        'from_user_id': from_user_id,
+        'to_user_id': to_user_id,
+        'content': content,
+        'msg_type': msg_type,
+        'created_at': now
+    })
+    
+    return jsonify({'message': '发送成功', 'msg_id': msg_id, 'created_at': now}), 200
+
+# 获取聊天记录
+@app.route('/api/online/messages', methods=['GET'])
+def get_user_messages():
+    """获取与某用户的聊天记录"""
+    user_id = request.args.get('user_id')
+    friend_id = request.args.get('friend_id')
+    limit = request.args.get('limit', 50, type=int)
+    before_id = request.args.get('before_id', type=int)
+    
+    if not user_id or not friend_id:
+        return jsonify({'error': '缺少参数'}), 400
+    
+    conn = get_db_connection()
+    
+    query = '''
+        SELECT * FROM user_messages
+        WHERE (from_user_id = ? AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = ?)
+    '''
+    params = [user_id, friend_id, friend_id, user_id]
+    
+    if before_id:
+        query += ' AND id < ?'
+        params.append(before_id)
+    
+    query += ' ORDER BY created_at DESC LIMIT ?'
+    params.append(limit)
+    
+    rows = conn.execute(query, params).fetchall()
+    
+    # 标记消息已读
+    conn.execute('UPDATE user_messages SET is_read = 1 WHERE from_user_id = ? AND to_user_id = ? AND is_read = 0',
+                (friend_id, user_id))
+    conn.commit()
+    conn.close()
+    
+    messages = []
+    for row in rows:
+        messages.append({
+            'id': row['id'],
+            'from_user_id': row['from_user_id'],
+            'to_user_id': row['to_user_id'],
+            'content': row['content'],
+            'msg_type': row['msg_type'],
+            'is_read': row['is_read'],
+            'created_at': row['created_at']
+        })
+    
+    # 按时间正序返回
+    messages.reverse()
+    return jsonify({'messages': messages}), 200
+
+# 获取未读消息数
+@app.route('/api/online/unread_count', methods=['GET'])
+def get_unread_count():
+    """获取未读消息数"""
+    user_id = request.args.get('user_id')
+    
+    if not user_id:
+        return jsonify({'error': '缺少user_id'}), 400
+    
+    conn = get_db_connection()
+    
+    # 获取每个好友的未读数
+    rows = conn.execute('''
+        SELECT from_user_id, COUNT(*) as count
+        FROM user_messages
+        WHERE to_user_id = ? AND is_read = 0
+        GROUP BY from_user_id
+    ''', (user_id,)).fetchall()
+    conn.close()
+    
+    unread = {}
+    total = 0
+    for row in rows:
+        unread[row['from_user_id']] = row['count']
+        total += row['count']
+    
+    return jsonify({'unread': unread, 'total': total}), 200
+
+# 获取会话列表（带最后一条消息）
+@app.route('/api/online/conversations', methods=['GET'])
+def get_conversations():
+    """获取会话列表"""
+    user_id = request.args.get('user_id')
+    
+    if not user_id:
+        return jsonify({'error': '缺少user_id'}), 400
+    
+    conn = get_db_connection()
+    
+    # 获取所有好友及最后消息
+    rows = conn.execute('''
+        SELECT 
+            u.id, u.nickname, u.avatar, u.social_id,
+            (SELECT content FROM user_messages 
+             WHERE (from_user_id = u.id AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = u.id)
+             ORDER BY created_at DESC LIMIT 1) as last_message,
+            (SELECT created_at FROM user_messages 
+             WHERE (from_user_id = u.id AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = u.id)
+             ORDER BY created_at DESC LIMIT 1) as last_time,
+            (SELECT COUNT(*) FROM user_messages 
+             WHERE from_user_id = u.id AND to_user_id = ? AND is_read = 0) as unread_count
+        FROM friendships f
+        JOIN online_users u ON f.friend_id = u.id
+        WHERE f.user_id = ?
+        ORDER BY last_time DESC NULLS LAST
+    ''', (user_id, user_id, user_id, user_id, user_id, user_id)).fetchall()
+    conn.close()
+    
+    conversations = []
+    for row in rows:
+        conversations.append({
+            'friend_id': row['id'],
+            'nickname': row['nickname'],
+            'avatar': row['avatar'],
+            'social_id': row['social_id'],
+            'last_message': row['last_message'],
+            'last_time': row['last_time'],
+            'unread_count': row['unread_count']
+        })
+    
+    return jsonify({'conversations': conversations}), 200
+
+# ========== 联机社交功能 API 结束 ==========
 
 # 新增：AI 聊天代理接口 (解决前端跨域和Mixed Content问题)
 @app.route('/api/chat/proxy', methods=['POST'])
@@ -768,6 +1386,26 @@ def handle_connect():
 @socketio.on('disconnect')
 def handle_disconnect():
     print(f"[WebSocket] ✗ Client disconnected")
+
+# 用户加入自己的房间（用于接收私聊消息）
+@socketio.on('join_user_room')
+def handle_join_user_room(data):
+    user_id = data.get('user_id')
+    if user_id:
+        from flask_socketio import join_room
+        join_room(f'user_{user_id}')
+        print(f"[WebSocket] ✓ User {user_id} joined room user_{user_id}")
+
+# 用户上线通知
+@socketio.on('user_online')
+def handle_user_online(data):
+    user_id = data.get('user_id')
+    if user_id:
+        conn = get_db_connection()
+        conn.execute('UPDATE online_users SET last_online = ? WHERE id = ?', (time.time(), user_id))
+        conn.commit()
+        conn.close()
+        emit('user_status_changed', {'user_id': user_id, 'status': 'online'}, broadcast=True)
 
 if __name__ == '__main__':
     # 获取环境变量 PORT，Zeabur 会自动注入此变量，本地默认使用 5000
