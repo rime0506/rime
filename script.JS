@@ -8941,6 +8941,10 @@ ${chatContext || '（没有聊天记录）'}
         async function openChatWindow(charId) {
             currentChatCharId = charId;
             window.currentGroupChatId = null; // 清除群聊ID，确保是私聊模式
+            window.currentMixedGroupId = null; // 清除混合群聊ID
+            window.currentMixedGroupInfo = null;
+            currentRealFriendId = null; // 清除真人聊天ID
+            currentRealFriendInfo = null;
             const char = await db.characters.get(charId);
             
             // 优先显示备注名
@@ -13203,6 +13207,13 @@ messages:
         async function triggerAiReply(additionalSystemInfo = null) {
             console.log('[triggerAiReply] ⚡ 触发 AI 回复');
             
+            // 如果是混合群聊模式，调用混合群聊回复函数
+            if (window.currentMixedGroupId) {
+                console.log('[triggerAiReply] 检测到混合群聊，调用 triggerMixedGroupCharReply');
+                await triggerMixedGroupCharReply();
+                return;
+            }
+            
             // 如果是群聊模式，调用群聊回复函数
             if (window.currentGroupChatId) {
                 await triggerGroupMemberReply();
@@ -14590,20 +14601,9 @@ ${loreContext}
                     content: '请继续对话'
                 });
             }
-
-            let rawText = '';
-            
-            // 构建请求体
-            const requestBody = {
-                apiUrl: requestUrl,
-                apiKey: apiKeyValue,
-                model: modelValue,
-                messages: cleanMessages,
-                temperature: temperature
-            };
             
             // 添加详细的调试日志
-            console.log('[callAI] 🚀 准备发送请求');
+            console.log('[callAI] 🚀 准备发送请求（直接前端调用）');
             console.log('[callAI] API URL:', requestUrl);
             console.log('[callAI] Model:', modelValue);
             console.log('[callAI] API Key length:', apiKeyValue.length);
@@ -14614,14 +14614,21 @@ ${loreContext}
                 content: m.content.substring(0, 100) + (m.content.length > 100 ? '...' : '')
             })));
             
-            // 使用后端代理发送请求 - 采用防御式解析
+            let rawText = '';
+            
+            // ✅ 直接前端调用API，不经过后端代理
             try {
-                const res = await fetch(`${API_BASE}/chat/proxy`, {
+                const res = await fetch(requestUrl, {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKeyValue}`
                     },
-                    body: JSON.stringify(requestBody)
+                    body: JSON.stringify({
+                        model: modelValue,
+                        messages: cleanMessages,
+                        temperature: temperature
+                    })
                 });
 
                 if (!res.ok) {
@@ -14634,20 +14641,21 @@ ${loreContext}
                         const errJson = JSON.parse(errText);
                         console.error('[callAI] 解析后的错误:', errJson);
                         if (errJson.error) {
-                            const errorMsg = `AI请求失败 (${res.status}): ${errJson.error}${errJson.details ? '\n详情: ' + errJson.details : ''}`;
-                            throw new Error(errorMsg);
+                            const errorMsg = errJson.error.message || errJson.error;
+                            throw new Error(`AI请求失败 (${res.status}): ${errorMsg}`);
                         }
                     } catch(parseErr) {
-                        // 如果不是 JSON 格式的错误
                         if (parseErr instanceof SyntaxError) {
                             console.error('[callAI] 错误响应不是 JSON 格式');
+                        } else {
+                            throw parseErr;
                         }
                     }
                     
                     throw new Error(`API 请求失败: ${res.status} - ${errText.substring(0, 200)}`);
                 }
 
-                // ✅ 关键改动：先获取原始文本，而不是直接 .json()
+                // 获取原始文本
                 rawText = await res.text();
                 
                 // 尝试解析为 JSON
@@ -14655,38 +14663,33 @@ ${loreContext}
                 try {
                     data = JSON.parse(rawText);
                 } catch (parseErr) {
-                    // 返回的不是 JSON（可能是 HTML 错误页、纯文本等）
                     console.warn('[callAI] 返回内容不是有效的 JSON，直接使用原始文本');
                     console.log('[callAI] 原始返回:', rawText.substring(0, 500));
                     
-                    // 直接返回原始文本（去除 HTML 标签和特殊字符）
                     return rawText
-                        .replace(/<[^>]*>/g, '') // 移除 HTML 标签
-                        .replace(/[◇◆★☆●○■□▲△]/g, '') // 移除装饰字符
+                        .replace(/<[^>]*>/g, '')
+                        .replace(/[◇◆★☆●○■□▲△]/g, '')
                         .trim();
                 }
                 
-                // ✅ 兼容多种返回路径
+                // 兼容多种返回路径
                 const content = 
-                    data?.choices?.[0]?.message?.content ??  // OpenAI 标准格式
-                    data?.choices?.[0]?.text ??              // 一些旧版 API
-                    data?.output_text ??                     // 一些自定义格式
-                    data?.message ??                         // 简化格式
-                    data?.content ??                         // 直接返回内容
-                    data?.reply ??                           // 自定义字段
+                    data?.choices?.[0]?.message?.content ??
+                    data?.choices?.[0]?.text ??
+                    data?.output_text ??
+                    data?.message ??
+                    data?.content ??
+                    data?.reply ??
                     '';
                 
                 if (!content) {
-                    // 如果所有路径都没有内容，尝试直接使用原始文本
-                    console.warn('[callAI] 无法从标准路径提取内容，尝试使用原始返回');
+                    console.warn('[callAI] 无法从标准路径提取内容');
                     console.log('[callAI] 解析后的数据结构:', JSON.stringify(data).substring(0, 300));
                     
-                    // 如果data本身就是字符串，直接返回
                     if (typeof data === 'string') {
                         return data;
                     }
                     
-                    // 否则返回清理后的原始文本
                     return rawText
                         .replace(/<[^>]*>/g, '')
                         .replace(/[◇◆★☆●○■□▲△]/g, '')
@@ -14697,7 +14700,7 @@ ${loreContext}
                 
             } catch (err) {
                 console.error("[callAI] 错误详情:", err);
-                console.log("[callAI] 原始返回内容:", rawText.substring(0, 500));
+                if (rawText) console.log("[callAI] 原始返回内容:", rawText.substring(0, 500));
                 throw err;
             }
         }
