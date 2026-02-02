@@ -14,10 +14,10 @@ app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # 初始化 SocketIO（用于实时推送）
-# 生产环境使用 gevent，本地开发使用 threading
+# 生产环境使用 eventlet，本地开发使用 threading
 import os
 if os.environ.get('RENDER') or os.environ.get('PORT'):
-    socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
+    socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 else:
     socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
