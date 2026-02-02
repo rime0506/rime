@@ -6240,8 +6240,30 @@ ${loreContext}
                 _groupId: g.id
             }));
             
-            // 合并好友和群聊列表
-            let allItems = [...friends.map(f => ({...f, _isGroup: false})), ...groupItems];
+            // 获取真人好友列表（联机功能）
+            let realFriends = [];
+            try {
+                if (onlineUser) {
+                    const res = await fetch(`${ONLINE_API_BASE}/api/online/conversations?user_id=${onlineUser.id}`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        realFriends = (data.conversations || []).map(c => ({
+                            ...c,
+                            _isRealFriend: true,
+                            _realFriendId: c.friend_id
+                        }));
+                    }
+                }
+            } catch (e) {
+                console.log('获取真人好友列表失败:', e);
+            }
+            
+            // 合并好友、群聊、真人好友列表
+            let allItems = [
+                ...friends.map(f => ({...f, _isGroup: false, _isRealFriend: false})), 
+                ...groupItems,
+                ...realFriends
+            ];
             
             // 排序逻辑：置顶 > 最后消息时间 > 更新时间
             allItems.sort((a, b) => {
@@ -6251,7 +6273,9 @@ ${loreContext}
                 
                 // 2. 时间判断
                 const getLastTime = (item) => {
-                    if (item._isGroup) {
+                    if (item._isRealFriend) {
+                        return item.last_time ? item.last_time * 1000 : 0;
+                    } else if (item._isGroup) {
                         const history = item.chat_history || [];
                         if (history.length > 0) {
                             return history[history.length - 1].time;
@@ -6348,7 +6372,54 @@ ${loreContext}
                     return;
                 }
                 
-                // 好友项渲染（原有代码）
+                // 真人好友项渲染
+                if (f._isRealFriend) {
+                    const itemContainer = document.createElement('div');
+                    itemContainer.className = 'wechat-list-item-container';
+                    
+                    const contentDiv = document.createElement('div');
+                    contentDiv.className = 'wechat-list-item-content';
+                    contentDiv.style.cssText = 'display:flex; padding:12px 16px; border-bottom:0.5px solid #f0f0f0; align-items:center; gap:12px; background-color:#fff;';
+                    
+                    contentDiv.onclick = () => openRealFriendChat(f._realFriendId, f.nickname, f.avatar);
+                    
+                    const avatarStyle = f.avatar ? `background-image:url(${f.avatar})` : 'background:linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                    
+                    let lastMsg = f.last_message || '';
+                    let lastTimeStr = '';
+                    if (f.last_time) {
+                        const d = new Date(f.last_time * 1000);
+                        const now = new Date();
+                        if (d.toDateString() === now.toDateString()) {
+                            lastTimeStr = `${d.getHours()}:${d.getMinutes().toString().padStart(2,'0')}`;
+                        } else {
+                            lastTimeStr = `${d.getMonth()+1}/${d.getDate()}`;
+                        }
+                    }
+                    
+                    const unreadBadge = f.unread_count > 0 ? `<span style="background:#ff3b30; color:#fff; font-size:10px; padding:2px 6px; border-radius:10px; margin-left:6px;">${f.unread_count}</span>` : '';
+                    
+                    contentDiv.innerHTML = `
+                        <div style="width:48px; height:48px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:20px;">${f.avatar ? '' : '👤'}</div>
+                        <div style="flex:1; min-width:0;">
+                            <div style="display:flex; justify-content:space-between; margin-bottom:4px; align-items:center;">
+                                <div style="display:flex; align-items:center;">
+                                    <div style="font-size:16px; font-weight:500; color:#333;">${f.nickname || '用户'}</div>
+                                    <span style="background:#667eea; color:#fff; font-size:9px; padding:1px 4px; border-radius:2px; margin-left:6px;">真人</span>
+                                    ${unreadBadge}
+                                </div>
+                                <div style="font-size:12px; color:#999;">${lastTimeStr}</div>
+                            </div>
+                            <div style="font-size:14px; color:#999; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${lastMsg}</div>
+                        </div>
+                    `;
+                    
+                    itemContainer.appendChild(contentDiv);
+                    listDiv.appendChild(itemContainer);
+                    return;
+                }
+                
+                // AI好友项渲染（原有代码）
                 // 容器
                 const itemContainer = document.createElement('div');
                 itemContainer.className = 'wechat-list-item-container';
@@ -10415,6 +10486,14 @@ ${loreContext}
                 return;
             }
             
+            // 检查是否是真人聊天
+            if (currentRealFriendId) {
+                if (!text) return;
+                input.value = '';
+                await sendRealFriendMessage(text);
+                return;
+            }
+            
             if (!text || !currentChatCharId) return;
 
             // 1. 获取当前角色
@@ -10906,10 +10985,17 @@ ${groupContextStr}
             }, 300);
             currentChatCharId = null;
             window.currentGroupChatId = null; // 清除群聊ID
+            currentRealFriendId = null; // 清除真人聊天ID
+            currentRealFriendInfo = null;
             
             // 恢复输入框显示（查岗模式可能隐藏了它）
             const chatFooter = document.getElementById('chat-footer');
-            if (chatFooter) chatFooter.style.display = 'flex';
+            if (chatFooter) {
+                chatFooter.style.display = 'flex';
+                // 恢复魔法棒按钮显示
+                const magicBtn = chatFooter.querySelector('.chat-icon-btn');
+                if (magicBtn) magicBtn.style.display = '';
+            }
             
             // 退出多选模式
             if (isSelectionMode) exitSelectionMode();
@@ -22327,11 +22413,35 @@ function connectOnlineSocket() {
     window.onlineSocket.on('new_user_message', (data) => {
         console.log('[Online] New message:', data);
         if (data.to_user_id == onlineUser.id) {
-            // 如果当前正在和这个人聊天，刷新消息
+            // 如果当前正在和这个人聊天（微信窗口），实时显示
+            if (currentRealFriendId == data.from_user_id) {
+                // 添加消息到聊天窗口
+                const chatBody = document.getElementById('chat-body');
+                if (chatBody) {
+                    const msgDiv = document.createElement('div');
+                    msgDiv.className = 'message-row other';
+                    
+                    const avatarUrl = currentRealFriendInfo?.avatar || '';
+                    const avatarStyle = avatarUrl ? `background-image:url(${avatarUrl})` : 'background:linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                    
+                    msgDiv.innerHTML = `
+                        <div class="message-avatar" style="${avatarStyle}; background-size:cover; background-position:center;"></div>
+                        <div class="message-content ai-bubble">${data.content}</div>
+                    `;
+                    
+                    chatBody.appendChild(msgDiv);
+                    chatBody.scrollTop = chatBody.scrollHeight;
+                }
+            }
+            // 如果在设置页的聊天窗口
             if (onlineChatFriendId == data.from_user_id) {
                 appendOnlineMessage(data);
             }
-            // 可以添加通知提醒
+            // 刷新微信聊天列表
+            const wechatContent = document.getElementById('wechat-content');
+            if (wechatContent && document.getElementById('wechat-page').style.display !== 'none') {
+                renderWechatList(wechatContent);
+            }
         }
     });
     
@@ -23070,3 +23180,249 @@ async function saveOnlineProfile() {
 document.addEventListener('DOMContentLoaded', function() {
     initOnlineFeature();
 });
+
+// ========== 微信页面 - 添加真人好友功能 ==========
+
+// 显示添加真人好友模态框
+function showAddRealFriendModal() {
+    toggleWechatMenu(); // 关闭菜单
+    document.getElementById('add-real-friend-modal').style.display = 'flex';
+    
+    const loginCheck = document.getElementById('real-friend-login-check');
+    const searchArea = document.getElementById('real-friend-search-area');
+    
+    if (!onlineUser) {
+        loginCheck.innerHTML = `
+            <div style="text-align:center; padding:20px;">
+                <div style="font-size:48px; margin-bottom:16px;">🔐</div>
+                <div style="font-size:15px; color:#666; margin-bottom:16px;">需要先登录联机账号才能添加真人好友</div>
+                <button onclick="hideAddRealFriendModal(); showSettingPage(); setTimeout(toggleOnlineSettings, 300);" 
+                        style="padding:12px 24px; border:none; border-radius:8px; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:#fff; font-size:15px; cursor:pointer;">
+                    去登录/注册
+                </button>
+            </div>
+        `;
+        searchArea.style.display = 'none';
+    } else {
+        loginCheck.innerHTML = `
+            <div style="display:flex; align-items:center; padding:12px; background:#f5f5f5; border-radius:8px; margin-bottom:16px;">
+                <div style="width:36px; height:36px; border-radius:50%; background:${onlineUser.avatar ? `url(${onlineUser.avatar}) center/cover` : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'}; margin-right:10px; display:flex; align-items:center; justify-content:center; color:#fff;">${onlineUser.avatar ? '' : '👤'}</div>
+                <div>
+                    <div style="font-size:14px; font-weight:500;">${onlineUser.nickname || onlineUser.username}</div>
+                    <div style="font-size:12px; color:#999;">已登录</div>
+                </div>
+            </div>
+        `;
+        searchArea.style.display = 'block';
+        document.getElementById('real-friend-search-input').value = '';
+        document.getElementById('real-friend-search-result').innerHTML = '<div style="text-align:center; color:#999; font-size:14px; padding:20px;">输入对方角色档案的虚拟账号</div>';
+    }
+}
+
+function hideAddRealFriendModal() {
+    document.getElementById('add-real-friend-modal').style.display = 'none';
+}
+
+// 搜索真人好友
+async function searchRealFriend() {
+    const account = document.getElementById('real-friend-search-input').value.trim();
+    const resultDiv = document.getElementById('real-friend-search-result');
+    
+    if (!account) {
+        resultDiv.innerHTML = '<div style="text-align:center; color:#ff3b30; padding:20px;">请输入虚拟账号</div>';
+        return;
+    }
+    
+    resultDiv.innerHTML = '<div style="text-align:center; color:#07c160; padding:20px;">搜索中...</div>';
+    
+    try {
+        const res = await fetch(`${ONLINE_API_BASE}/api/online/search?wechat_id=${encodeURIComponent(account)}&current_user_id=${onlineUser.id}`);
+        const data = await res.json();
+        
+        if (!res.ok) {
+            resultDiv.innerHTML = `<div style="text-align:center; color:#ff3b30; padding:20px;">${data.error || '未找到用户'}</div>`;
+            return;
+        }
+        
+        const user = data.user;
+        let actionBtn = '';
+        
+        if (user.id == onlineUser.id) {
+            actionBtn = '<span style="color:#999;">这是你自己</span>';
+        } else if (user.is_friend) {
+            actionBtn = '<button onclick="hideAddRealFriendModal(); openRealFriendChat(' + user.id + ', \'' + (user.nickname || user.username).replace(/'/g, "\\'") + '\', \'' + (user.avatar || '').replace(/'/g, "\\'") + '\')" style="padding:8px 16px; border:none; border-radius:6px; background:#07c160; color:#fff; cursor:pointer;">发消息</button>';
+        } else if (user.has_pending_request) {
+            actionBtn = '<span style="color:#999;">已发送请求</span>';
+        } else {
+            actionBtn = '<button onclick="sendRealFriendRequest(' + user.id + ')" style="padding:8px 16px; border:none; border-radius:6px; background:#07c160; color:#fff; cursor:pointer;">添加好友</button>';
+        }
+        
+        resultDiv.innerHTML = `
+            <div style="display:flex; align-items:center; padding:14px; background:#f9f9f9; border-radius:10px;">
+                <div style="width:48px; height:48px; border-radius:50%; background:${user.avatar ? `url(${user.avatar}) center/cover` : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'}; display:flex; align-items:center; justify-content:center; color:#fff; margin-right:12px;">${user.avatar ? '' : '👤'}</div>
+                <div style="flex:1;">
+                    <div style="font-size:15px; font-weight:500;">${user.nickname || user.username}</div>
+                    <div style="font-size:12px; color:#667eea;">虚拟账号: ${user.wechat_id}</div>
+                </div>
+                <div>${actionBtn}</div>
+            </div>
+        `;
+        
+    } catch (e) {
+        resultDiv.innerHTML = `<div style="text-align:center; color:#ff3b30; padding:20px;">网络错误: ${e.message}</div>`;
+    }
+}
+
+// 发送真人好友请求
+async function sendRealFriendRequest(toUserId) {
+    try {
+        const res = await fetch(`${ONLINE_API_BASE}/api/online/friend_request`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ from_user_id: onlineUser.id, to_user_id: toUserId })
+        });
+        
+        const data = await res.json();
+        
+        if (!res.ok) {
+            alert(data.error || '发送失败');
+            return;
+        }
+        
+        if (data.status === 'accepted') {
+            alert(data.message);
+            hideAddRealFriendModal();
+            // 刷新聊天列表
+            const container = document.getElementById('wechat-content');
+            if (container) renderWechatList(container);
+        } else {
+            alert('好友请求已发送！等待对方同意');
+            searchRealFriend(); // 刷新显示
+        }
+        
+    } catch (e) {
+        alert('网络错误: ' + e.message);
+    }
+}
+
+// 当前真人聊天好友信息
+let currentRealFriendId = null;
+let currentRealFriendInfo = null;
+
+// 打开真人好友聊天（使用和AI聊天一样的窗口）
+async function openRealFriendChat(friendId, nickname, avatar) {
+    // 清除AI聊天状态
+    currentChatCharId = null;
+    window.currentGroupChatId = null;
+    
+    // 设置真人聊天状态
+    currentRealFriendId = friendId;
+    currentRealFriendInfo = { id: friendId, nickname, avatar };
+    
+    // 设置标题
+    const titleEl = document.getElementById('chat-title');
+    titleEl.innerText = nickname || '聊天';
+    titleEl.style.cursor = 'default';
+    titleEl.onclick = null;
+    
+    // 显示聊天窗口
+    document.getElementById('chat-window').style.display = 'flex';
+    
+    // 显示输入框
+    const chatFooter = document.getElementById('chat-footer');
+    chatFooter.style.display = 'flex';
+    
+    // 隐藏AI相关的按钮（魔法棒等）
+    const magicBtn = chatFooter.querySelector('.chat-icon-btn');
+    if (magicBtn) magicBtn.style.display = 'none';
+    
+    // 渲染真人聊天记录
+    await renderRealFriendChatBody();
+}
+
+// 渲染真人好友聊天记录
+async function renderRealFriendChatBody() {
+    const chatBody = document.getElementById('chat-body');
+    chatBody.innerHTML = '<div style="text-align:center; color:#999; padding:40px;">加载中...</div>';
+    
+    if (!currentRealFriendId || !onlineUser) {
+        chatBody.innerHTML = '<div style="text-align:center; color:#999; padding:40px;">加载失败</div>';
+        return;
+    }
+    
+    try {
+        const res = await fetch(`${ONLINE_API_BASE}/api/online/messages?user_id=${onlineUser.id}&friend_id=${currentRealFriendId}&limit=100`);
+        const data = await res.json();
+        
+        if (!data.messages || data.messages.length === 0) {
+            chatBody.innerHTML = '<div style="text-align:center; color:#999; padding:40px; font-size:14px;">暂无消息，发送第一条消息开始聊天吧！</div>';
+            return;
+        }
+        
+        chatBody.innerHTML = '';
+        
+        data.messages.forEach(msg => {
+            const isMe = msg.from_user_id == onlineUser.id;
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message-row ${isMe ? 'self' : 'other'}`;
+            
+            // 使用和AI聊天一样的样式
+            const avatarUrl = isMe ? (onlineUser.avatar || '') : (currentRealFriendInfo.avatar || '');
+            const avatarStyle = avatarUrl ? `background-image:url(${avatarUrl})` : 'background:linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+            
+            msgDiv.innerHTML = `
+                <div class="message-avatar" style="${avatarStyle}; background-size:cover; background-position:center;"></div>
+                <div class="message-content ${isMe ? 'user-bubble' : 'ai-bubble'}">${msg.content}</div>
+            `;
+            
+            chatBody.appendChild(msgDiv);
+        });
+        
+        // 滚动到底部
+        chatBody.scrollTop = chatBody.scrollHeight;
+        
+    } catch (e) {
+        chatBody.innerHTML = `<div style="text-align:center; color:#ff3b30; padding:40px;">加载失败: ${e.message}</div>`;
+    }
+}
+
+// 发送真人聊天消息
+async function sendRealFriendMessage(content) {
+    if (!content || !currentRealFriendId || !onlineUser) return;
+    
+    // 立即显示到界面
+    const chatBody = document.getElementById('chat-body');
+    
+    // 移除空状态提示
+    const emptyTip = chatBody.querySelector('div[style*="暂无消息"]');
+    if (emptyTip) chatBody.innerHTML = '';
+    
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'message-row self';
+    
+    const avatarUrl = onlineUser.avatar || '';
+    const avatarStyle = avatarUrl ? `background-image:url(${avatarUrl})` : 'background:linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+    
+    msgDiv.innerHTML = `
+        <div class="message-avatar" style="${avatarStyle}; background-size:cover; background-position:center;"></div>
+        <div class="message-content user-bubble">${content}</div>
+    `;
+    
+    chatBody.appendChild(msgDiv);
+    chatBody.scrollTop = chatBody.scrollHeight;
+    
+    // 发送到后端
+    try {
+        await fetch(`${ONLINE_API_BASE}/api/online/message`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                from_user_id: onlineUser.id,
+                to_user_id: currentRealFriendId,
+                content: content
+            })
+        });
+    } catch (e) {
+        console.error('发送消息失败:', e);
+    }
+}
