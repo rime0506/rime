@@ -24070,24 +24070,23 @@ async function loadMixedGroupMessages(groupId) {
             const isSelf = msg.sender_type === 'user' && msg.sender_user_id == onlineUser.id;
             
             const msgEl = document.createElement('div');
-            msgEl.className = `message-row ${isSelf ? 'self' : 'other'}`;
-            msgEl.style.cssText = `display:flex; margin-bottom:12px; ${isSelf ? 'flex-direction:row-reverse;' : ''}`;
+            msgEl.style.cssText = `display:flex; margin-bottom:8px; align-items:flex-start; ${isSelf ? 'flex-direction:row-reverse; padding-left:50px;' : 'padding-right:50px;'}`;
             
             // 区分角色和用户的名字颜色
             let senderLabel;
             if (msg.sender_type === 'char') {
-                senderLabel = `<span style="font-size:11px; color:#e74c3c;">🤖 ${msg.sender_name}</span>`;
+                senderLabel = `<span style="font-size:10px; color:#e74c3c; display:block; margin-bottom:2px;">🤖 ${msg.sender_name}</span>`;
             } else {
-                senderLabel = `<span style="font-size:11px; color:#667eea;">👤 ${msg.sender_name}</span>`;
+                senderLabel = `<span style="font-size:10px; color:#667eea; display:block; margin-bottom:2px;">👤 ${msg.sender_name}</span>`;
             }
             
             msgEl.innerHTML = `
-                <div style="width:36px; height:36px; border-radius:50%; background:${msg.sender_avatar ? `url(${msg.sender_avatar}) center/cover` : '#eee'}; flex-shrink:0; margin:${isSelf ? '0 0 0 8px' : '0 8px 0 0'};"></div>
-                <div style="max-width:70%; ${isSelf ? 'text-align:right;' : ''}">
+                <div style="width:32px; height:32px; min-width:32px; border-radius:50%; background:${msg.sender_avatar ? `url(${msg.sender_avatar}) center/cover` : '#ddd'}; flex-shrink:0; margin:${isSelf ? '0 0 0 8px' : '0 8px 0 0'};"></div>
+                <div style="display:flex; flex-direction:column; ${isSelf ? 'align-items:flex-end;' : 'align-items:flex-start;'}">
                     ${senderLabel}
-                    <div class="message-content" style="padding:10px 14px; border-radius:18px; background:${isSelf ? 'var(--ins-pink-light)' : '#f2f2f7'}; margin-top:4px; word-wrap:break-word;">
+                    <span style="display:inline-block; padding:8px 12px; border-radius:18px; background:${isSelf ? '#ffe4e8' : '#f2f2f7'}; font-size:14px; line-height:1.4; ${isSelf ? 'border-bottom-right-radius:4px;' : 'border-bottom-left-radius:4px;'}">
                         ${msg.content}
-                    </div>
+                    </span>
                 </div>
             `;
             
@@ -24146,7 +24145,14 @@ async function triggerMixedGroupCharReply() {
         return;
     }
     
-    // 广播输入状态
+    // 本地立即显示输入状态（不等WebSocket）
+    showMixedGroupTypingStatus({
+        group_id: window.currentMixedGroupId,
+        sender_name: myMember.char_name,
+        is_generating: true
+    });
+    
+    // 广播输入状态给其他用户
     if (window.onlineSocket) {
         window.onlineSocket.emit('mixed_group_typing_status', {
             group_id: window.currentMixedGroupId,
@@ -24181,8 +24187,11 @@ async function triggerMixedGroupCharReply() {
         
         systemPrompt += `\n## 回复要求:\n`;
         systemPrompt += `- 保持角色性格一致\n`;
-        systemPrompt += `- 回复自然、简洁\n`;
-        systemPrompt += `- 只输出对话内容，不要输出动作描述\n`;
+        systemPrompt += `- 像真人聊天一样，把回复拆成多条短消息\n`;
+        systemPrompt += `- 每条消息用|||分隔，比如: "嗯？|||怎么了|||有什么事吗"\n`;
+        systemPrompt += `- 每条消息要简短自然，可以是几个字到一句话\n`;
+        systemPrompt += `- 不要有动作描述、括号、引号，只要纯对话\n`;
+        systemPrompt += `- 输出2-5条消息\n`;
         
         // 构建消息历史
         const messages = [{ role: 'system', content: systemPrompt }];
@@ -24251,28 +24260,61 @@ async function triggerMixedGroupCharReply() {
             
             // 清理回复内容
             reply = reply.replace(new RegExp(`^${myMember.char_name}:\\s*`, 'i'), '');
+            reply = reply.replace(/^["'「]|["'」]$/g, ''); // 移除引号
             
-            // 发送角色消息
-            await fetch(`${ONLINE_API_BASE}/api/mixed_group/${window.currentMixedGroupId}/message`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    sender_type: 'char',
-                    sender_user_id: onlineUser.id,
-                    sender_char_id: myMember.char_id,
-                    sender_name: myMember.char_name,
-                    sender_avatar: myMember.char_avatar,
-                    content: reply
-                })
-            });
+            // 按|||分割成多条消息
+            let messages = reply.split('|||').map(m => m.trim()).filter(m => m.length > 0);
+            
+            // 如果没有分隔符，尝试按换行或句号分割
+            if (messages.length <= 1 && reply.length > 10) {
+                messages = reply.split(/[。！？\n]+/).map(m => m.trim()).filter(m => m.length > 0);
+            }
+            
+            // 确保至少有一条消息
+            if (messages.length === 0) {
+                messages = [reply];
+            }
+            
+            console.log('[MixedGroup] 分割后的消息:', messages);
+            
+            // 逐条发送消息，每条间隔300-800ms模拟打字
+            for (let i = 0; i < messages.length; i++) {
+                const msgContent = messages[i].replace(/^["'「]|["'」]$/g, '').trim();
+                if (!msgContent) continue;
+                
+                await fetch(`${ONLINE_API_BASE}/api/mixed_group/${window.currentMixedGroupId}/message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sender_type: 'char',
+                        sender_user_id: onlineUser.id,
+                        sender_char_id: myMember.char_id,
+                        sender_name: myMember.char_name,
+                        sender_avatar: myMember.char_avatar,
+                        content: msgContent
+                    })
+                });
+                
+                // 间隔一下再发下一条
+                if (i < messages.length - 1) {
+                    await new Promise(r => setTimeout(r, 300 + Math.random() * 500));
+                }
+            }
         }
         
     } catch (e) {
         console.error('AI生成失败:', e);
         alert('生成回复失败: ' + e.message);
     } finally {
-        // 取消输入状态
-        if (window.onlineSocket) {
+        // 本地立即清除输入状态
+        showMixedGroupTypingStatus({
+            group_id: window.currentMixedGroupId,
+            sender_name: myMember?.char_name || '',
+            is_generating: false
+        });
+        
+        // 广播取消输入状态给其他用户
+        if (window.onlineSocket && myMember) {
             window.onlineSocket.emit('mixed_group_typing_status', {
                 group_id: window.currentMixedGroupId,
                 sender_name: myMember.char_name,
@@ -24350,24 +24392,23 @@ function appendMixedGroupMessage(msg) {
     const isSelf = msg.sender_type === 'user' && msg.sender_user_id == onlineUser.id;
     
     const msgEl = document.createElement('div');
-    msgEl.className = `message-row ${isSelf ? 'self' : 'other'}`;
-    msgEl.style.cssText = `display:flex; margin-bottom:12px; ${isSelf ? 'flex-direction:row-reverse;' : ''}`;
+    msgEl.style.cssText = `display:flex; margin-bottom:8px; align-items:flex-start; ${isSelf ? 'flex-direction:row-reverse; padding-left:50px;' : 'padding-right:50px;'}`;
     
     // 区分角色和用户的名字颜色
     let senderLabel;
     if (msg.sender_type === 'char') {
-        senderLabel = `<span style="font-size:11px; color:#e74c3c;">🤖 ${msg.sender_name}</span>`;
+        senderLabel = `<span style="font-size:10px; color:#e74c3c; display:block; margin-bottom:2px;">🤖 ${msg.sender_name}</span>`;
     } else {
-        senderLabel = `<span style="font-size:11px; color:#667eea;">👤 ${msg.sender_name}</span>`;
+        senderLabel = `<span style="font-size:10px; color:#667eea; display:block; margin-bottom:2px;">👤 ${msg.sender_name}</span>`;
     }
     
     msgEl.innerHTML = `
-        <div style="width:36px; height:36px; border-radius:50%; background:${msg.sender_avatar ? `url(${msg.sender_avatar}) center/cover` : '#eee'}; flex-shrink:0; margin:${isSelf ? '0 0 0 8px' : '0 8px 0 0'};"></div>
-        <div style="max-width:70%; ${isSelf ? 'text-align:right;' : ''}">
+        <div style="width:32px; height:32px; min-width:32px; border-radius:50%; background:${msg.sender_avatar ? `url(${msg.sender_avatar}) center/cover` : '#ddd'}; flex-shrink:0; margin:${isSelf ? '0 0 0 8px' : '0 8px 0 0'};"></div>
+        <div style="display:flex; flex-direction:column; ${isSelf ? 'align-items:flex-end;' : 'align-items:flex-start;'}">
             ${senderLabel}
-            <div class="message-content" style="padding:10px 14px; border-radius:18px; background:${isSelf ? 'var(--ins-pink-light)' : '#f2f2f7'}; margin-top:4px; word-wrap:break-word;">
+            <span style="display:inline-block; padding:8px 12px; border-radius:18px; background:${isSelf ? '#ffe4e8' : '#f2f2f7'}; font-size:14px; line-height:1.4; ${isSelf ? 'border-bottom-right-radius:4px;' : 'border-bottom-left-radius:4px;'}">
                 ${msg.content}
-            </div>
+            </span>
         </div>
     `;
     
@@ -24377,17 +24418,46 @@ function appendMixedGroupMessage(msg) {
 
 // 显示输入状态
 function showMixedGroupTypingStatus(data) {
-    // 可以在聊天界面顶部显示 "xxx 正在输入..." 或 "xxx 正在生成回复..."
-    const chatHeader = document.querySelector('.chat-header .chat-title');
-    if (chatHeader && data.is_generating) {
-        chatHeader.innerHTML = `<span style="font-size:12px; color:#999;">${data.sender_name} 正在生成回复...</span>`;
+    console.log('[MixedGroup] Typing status:', data);
+    
+    const chatTitleEl = document.getElementById('chat-title');
+    
+    if (data.is_generating) {
+        // 保存原始标题
+        if (!window._mixedGroupOriginalTitle) {
+            window._mixedGroupOriginalTitle = chatTitleEl?.textContent || '联机群聊';
+        }
         
-        // 3秒后恢复
-        setTimeout(() => {
-            if (window.currentMixedGroupId) {
-                chatHeader.textContent = document.getElementById('chat-title')?.textContent || '联机群聊';
-            }
-        }, 3000);
+        // 显示正在输入状态
+        if (chatTitleEl) {
+            chatTitleEl.innerHTML = `<span style="color:#e74c3c;">🤖 ${data.sender_name} 正在输入...</span>`;
+        }
+        
+        // 同时在聊天区域底部显示提示
+        let typingIndicator = document.getElementById('mixed-typing-indicator');
+        if (!typingIndicator) {
+            typingIndicator = document.createElement('div');
+            typingIndicator.id = 'mixed-typing-indicator';
+            typingIndicator.style.cssText = 'text-align:center; padding:10px; color:#e74c3c; font-size:13px; background:rgba(231,76,60,0.05); border-radius:8px; margin:8px 16px;';
+            document.getElementById('chat-body')?.appendChild(typingIndicator);
+        }
+        typingIndicator.innerHTML = `🤖 ${data.sender_name} 正在输入<span class="typing-dots">...</span>`;
+        typingIndicator.style.display = 'block';
+        
+        // 滚动到底部
+        const chatBody = document.getElementById('chat-body');
+        if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
+    } else {
+        // 恢复原始标题
+        if (chatTitleEl && window._mixedGroupOriginalTitle) {
+            chatTitleEl.textContent = window._mixedGroupOriginalTitle;
+        }
+        
+        // 隐藏输入指示器
+        const typingIndicator = document.getElementById('mixed-typing-indicator');
+        if (typingIndicator) {
+            typingIndicator.style.display = 'none';
+        }
     }
 }
 
