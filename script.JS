@@ -6240,10 +6240,14 @@ ${loreContext}
                 _groupId: g.id
             }));
             
-            // 获取真人好友列表（联机功能）
+            // 获取真人好友列表（联机功能）- 只显示当前账号的好友
             let realFriends = [];
             try {
-                if (onlineUser) {
+                // 获取当前账号信息
+                const currentAccountInfo = await getCurrentAccountOnlineInfo();
+                
+                // 只有当前账号已开通联机，且正在登录的联机账号是当前账号时，才显示真人好友
+                if (onlineUser && currentAccountInfo && onlineUser.wechat_id === currentAccountInfo.account) {
                     const res = await fetch(`${ONLINE_API_BASE}/api/online/conversations?user_id=${onlineUser.id}`);
                     if (res.ok) {
                         const data = await res.json();
@@ -23183,22 +23187,70 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // ========== 微信页面 - 添加真人好友功能 ==========
 
+// 获取当前角色档案的虚拟账号信息
+async function getCurrentAccountOnlineInfo() {
+    const accountId = getCurrentAccountId();
+    if (!accountId) return null;
+    
+    // 获取当前用户角色
+    const users = await db.characters.where('type').equals('user').toArray();
+    for (const user of users) {
+        if (user.identity && user.identity.wechat_registered) {
+            // 检查是否是当前账号
+            if (user.id == accountId || (user.identity.account && user.identity.account === accountId)) {
+                return {
+                    account: user.identity.account,
+                    nickname: user.name,
+                    avatar: user.avatar,
+                    charId: user.id
+                };
+            }
+        }
+    }
+    
+    // 如果找不到，尝试直接用accountId查找
+    const char = await db.characters.get(parseInt(accountId));
+    if (char && char.identity && char.identity.account) {
+        return {
+            account: char.identity.account,
+            nickname: char.name,
+            avatar: char.avatar,
+            charId: char.id
+        };
+    }
+    
+    return null;
+}
+
 // 显示添加真人好友模态框
-function showAddRealFriendModal() {
+async function showAddRealFriendModal() {
     toggleWechatMenu(); // 关闭菜单
     document.getElementById('add-real-friend-modal').style.display = 'flex';
     
     const loginCheck = document.getElementById('real-friend-login-check');
     const searchArea = document.getElementById('real-friend-search-area');
     
-    if (!onlineUser) {
+    // 获取当前账号的虚拟账号信息
+    const currentAccountInfo = await getCurrentAccountOnlineInfo();
+    
+    if (!currentAccountInfo || !currentAccountInfo.account) {
+        loginCheck.innerHTML = `
+            <div style="text-align:center; padding:20px;">
+                <div style="font-size:48px; margin-bottom:16px;">⚠️</div>
+                <div style="font-size:15px; color:#666; margin-bottom:16px;">当前角色档案未设置虚拟账号<br>请先在角色档案中设置虚拟账号</div>
+            </div>
+        `;
+        searchArea.style.display = 'none';
+    } else if (!onlineUser || onlineUser.wechat_id !== currentAccountInfo.account) {
+        // 当前账号未注册联机或不是当前登录的联机账号
         loginCheck.innerHTML = `
             <div style="text-align:center; padding:20px;">
                 <div style="font-size:48px; margin-bottom:16px;">🔐</div>
-                <div style="font-size:15px; color:#666; margin-bottom:16px;">需要先登录联机账号才能添加真人好友</div>
+                <div style="font-size:14px; color:#666; margin-bottom:8px;">当前账号：<strong>${currentAccountInfo.account}</strong></div>
+                <div style="font-size:15px; color:#666; margin-bottom:16px;">需要先为此账号开通联机功能</div>
                 <button onclick="hideAddRealFriendModal(); showSettingPage(); setTimeout(toggleOnlineSettings, 300);" 
                         style="padding:12px 24px; border:none; border-radius:8px; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:#fff; font-size:15px; cursor:pointer;">
-                    去登录/注册
+                    去开通联机
                 </button>
             </div>
         `;
@@ -23206,10 +23258,10 @@ function showAddRealFriendModal() {
     } else {
         loginCheck.innerHTML = `
             <div style="display:flex; align-items:center; padding:12px; background:#f5f5f5; border-radius:8px; margin-bottom:16px;">
-                <div style="width:36px; height:36px; border-radius:50%; background:${onlineUser.avatar ? `url(${onlineUser.avatar}) center/cover` : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'}; margin-right:10px; display:flex; align-items:center; justify-content:center; color:#fff;">${onlineUser.avatar ? '' : '👤'}</div>
+                <div style="width:36px; height:36px; border-radius:50%; background:${currentAccountInfo.avatar ? `url(${currentAccountInfo.avatar}) center/cover` : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'}; margin-right:10px; display:flex; align-items:center; justify-content:center; color:#fff;">${currentAccountInfo.avatar ? '' : '👤'}</div>
                 <div>
-                    <div style="font-size:14px; font-weight:500;">${onlineUser.nickname || onlineUser.username}</div>
-                    <div style="font-size:12px; color:#999;">已登录</div>
+                    <div style="font-size:14px; font-weight:500;">${currentAccountInfo.nickname}</div>
+                    <div style="font-size:12px; color:#667eea;">虚拟账号: ${currentAccountInfo.account}</div>
                 </div>
             </div>
         `;
@@ -23233,6 +23285,11 @@ async function searchRealFriend() {
         return;
     }
     
+    if (!onlineUser) {
+        resultDiv.innerHTML = '<div style="text-align:center; color:#ff3b30; padding:20px;">请先登录联机账号</div>';
+        return;
+    }
+    
     resultDiv.innerHTML = '<div style="text-align:center; color:#07c160; padding:20px;">搜索中...</div>';
     
     try {
@@ -23247,14 +23304,17 @@ async function searchRealFriend() {
         const user = data.user;
         let actionBtn = '';
         
-        if (user.id == onlineUser.id) {
-            actionBtn = '<span style="color:#999;">这是你自己</span>';
+        // 检查是否是自己的账号
+        if (user.wechat_id === onlineUser.wechat_id) {
+            actionBtn = '<span style="color:#999;">这是你自己的账号</span>';
         } else if (user.is_friend) {
-            actionBtn = '<button onclick="hideAddRealFriendModal(); openRealFriendChat(' + user.id + ', \'' + (user.nickname || user.username).replace(/'/g, "\\'") + '\', \'' + (user.avatar || '').replace(/'/g, "\\'") + '\')" style="padding:8px 16px; border:none; border-radius:6px; background:#07c160; color:#fff; cursor:pointer;">发消息</button>';
+            const nickname = (user.nickname || user.username || '').replace(/'/g, "\\'").replace(/"/g, '\\"');
+            const avatar = (user.avatar || '').replace(/'/g, "\\'").replace(/"/g, '\\"');
+            actionBtn = `<button onclick="hideAddRealFriendModal(); openRealFriendChat(${user.id}, '${nickname}', '${avatar}')" style="padding:8px 16px; border:none; border-radius:6px; background:#07c160; color:#fff; cursor:pointer;">发消息</button>`;
         } else if (user.has_pending_request) {
             actionBtn = '<span style="color:#999;">已发送请求</span>';
         } else {
-            actionBtn = '<button onclick="sendRealFriendRequest(' + user.id + ')" style="padding:8px 16px; border:none; border-radius:6px; background:#07c160; color:#fff; cursor:pointer;">添加好友</button>';
+            actionBtn = `<button onclick="sendRealFriendRequest(${user.id})" style="padding:8px 16px; border:none; border-radius:6px; background:#07c160; color:#fff; cursor:pointer;">添加好友</button>`;
         }
         
         resultDiv.innerHTML = `
@@ -23269,12 +23329,18 @@ async function searchRealFriend() {
         `;
         
     } catch (e) {
+        console.error('搜索失败:', e);
         resultDiv.innerHTML = `<div style="text-align:center; color:#ff3b30; padding:20px;">网络错误: ${e.message}</div>`;
     }
 }
 
 // 发送真人好友请求
 async function sendRealFriendRequest(toUserId) {
+    if (!onlineUser) {
+        alert('请先登录联机账号');
+        return;
+    }
+    
     try {
         const res = await fetch(`${ONLINE_API_BASE}/api/online/friend_request`, {
             method: 'POST',
