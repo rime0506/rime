@@ -10550,6 +10550,15 @@ ${loreContext}
             const input = document.getElementById('chat-input-box');
             const text = input.value.trim();
             
+            // 检查是否是混合群聊
+            if (window.currentMixedGroupId) {
+                if (!text) return;
+                input.value = '';
+                handleChatInputChange(input);
+                await sendMixedGroupUserMessage(text);
+                return;
+            }
+            
             // 检查是否是群聊
             if (window.currentGroupChatId) {
                 await sendGroupMessage(text);
@@ -11057,6 +11066,8 @@ ${groupContextStr}
             window.currentGroupChatId = null; // 清除群聊ID
             currentRealFriendId = null; // 清除真人聊天ID
             currentRealFriendInfo = null;
+            window.currentMixedGroupId = null; // 清除混合群聊ID
+            window.currentMixedGroupInfo = null;
             
             // 恢复输入框显示（查岗模式可能隐藏了它）
             const chatFooter = document.getElementById('chat-footer');
@@ -22447,15 +22458,29 @@ let onlineChatFriendId = null;
 
 // 初始化联机功能
 async function initOnlineFeature() {
+    console.log('[Online] 初始化联机功能...');
     // 从localStorage恢复登录状态
     const savedUser = localStorage.getItem('onlineUser');
+    console.log('[Online] localStorage中的用户数据:', savedUser ? '存在' : '不存在');
+    
     if (savedUser) {
         try {
             onlineUser = JSON.parse(savedUser);
-            updateOnlineUI();
+            console.log('[Online] 恢复登录状态成功:', onlineUser.username, '虚拟账号:', onlineUser.wechat_id);
+            
+            // 延迟更新UI，确保DOM已加载
+            setTimeout(() => {
+                try {
+                    updateOnlineUI();
+                } catch (e) {
+                    console.log('[Online] updateOnlineUI 延迟执行中...');
+                }
+            }, 500);
+            
             // 连接WebSocket
             connectOnlineSocket();
         } catch (e) {
+            console.error('[Online] 恢复登录状态失败:', e);
             localStorage.removeItem('onlineUser');
         }
     }
@@ -23562,7 +23587,8 @@ async function sendRealFriendMessage(content) {
 // ========== 混合群聊功能 ==========
 
 // 当前混合群聊状态
-let currentMixedGroupId = null;
+window.currentMixedGroupId = null;
+window.currentMixedGroupInfo = null;
 let mixedGroupStep = 1;
 let selectedMixedFriends = [];
 let selectedMixedChar = null;
@@ -23944,7 +23970,14 @@ async function confirmBindChar() {
 
 // 打开混合群聊
 async function openMixedGroupChat(groupId) {
-    currentMixedGroupId = groupId;
+    // 清除其他聊天状态
+    currentChatCharId = null;
+    window.currentGroupChatId = null;
+    currentRealFriendId = null;
+    currentRealFriendInfo = null;
+    
+    // 设置混合群聊ID（使用window确保全局可访问）
+    window.currentMixedGroupId = groupId;
     
     try {
         // 获取群聊详情
@@ -23958,6 +23991,9 @@ async function openMixedGroupChat(groupId) {
         
         const group = data.group;
         const members = data.members;
+        
+        // 存储群聊信息供后续使用
+        window.currentMixedGroupInfo = { group, members };
         
         // 检查是否已绑定角色
         const myMember = members.find(m => m.user_id == onlineUser.id);
@@ -23977,9 +24013,19 @@ async function openMixedGroupChat(groupId) {
         // 设置标题
         document.getElementById('chat-title').textContent = group.name || '联机群聊';
         
-        // 隐藏AI相关按钮
-        const aiButtons = document.querySelectorAll('.chat-icon-btn');
-        aiButtons.forEach(btn => btn.style.display = 'none');
+        // 显示魔法棒按钮（用于触发角色回复）
+        const magicWandBtn = document.getElementById('btn-magic-wand');
+        if (magicWandBtn) {
+            magicWandBtn.style.display = 'flex';
+            // 修改点击事件为触发混合群聊角色回复
+            magicWandBtn.onclick = () => triggerMixedGroupCharReply();
+        }
+        
+        // 隐藏其他按钮（表情、菜单等）
+        const otherButtons = document.querySelectorAll('.chat-icon-btn:not(#btn-magic-wand)');
+        otherButtons.forEach(btn => {
+            btn.style.display = 'none';
+        });
         
         // 清空并加载消息
         await loadMixedGroupMessages(groupId);
@@ -24052,20 +24098,20 @@ async function loadMixedGroupMessages(groupId) {
 }
 
 // 发送混合群聊消息（用户消息）
-async function sendMixedGroupUserMessage() {
-    if (!currentMixedGroupId || !onlineUser) return;
+async function sendMixedGroupUserMessage(inputContent) {
+    if (!window.currentMixedGroupId || !onlineUser) return;
     
     const input = document.getElementById('chat-input-box');
-    const content = input.value.trim();
+    const content = inputContent || input.value.trim();
     if (!content) return;
     
-    input.value = '';
+    if (!inputContent) input.value = '';
     
     // 获取当前用户信息
     const currentAccountInfo = await getCurrentAccountOnlineInfo();
     
     try {
-        await fetch(`${ONLINE_API_BASE}/api/mixed_group/${currentMixedGroupId}/message`, {
+        await fetch(`${ONLINE_API_BASE}/api/mixed_group/${window.currentMixedGroupId}/message`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -24084,10 +24130,10 @@ async function sendMixedGroupUserMessage() {
 
 // 触发角色说话（调用AI）
 async function triggerMixedGroupCharReply() {
-    if (!currentMixedGroupId || !onlineUser) return;
+    if (!window.currentMixedGroupId || !onlineUser) return;
     
     // 获取群聊信息
-    const groupRes = await fetch(`${ONLINE_API_BASE}/api/mixed_group/${currentMixedGroupId}?user_id=${onlineUser.id}`);
+    const groupRes = await fetch(`${ONLINE_API_BASE}/api/mixed_group/${window.currentMixedGroupId}?user_id=${onlineUser.id}`);
     const groupData = await groupRes.json();
     const myMember = groupData.members.find(m => m.user_id == onlineUser.id);
     
@@ -24099,7 +24145,7 @@ async function triggerMixedGroupCharReply() {
     // 广播输入状态
     if (window.onlineSocket) {
         window.onlineSocket.emit('mixed_group_typing_status', {
-            group_id: currentMixedGroupId,
+            group_id: window.currentMixedGroupId,
             sender_name: myMember.char_name,
             is_generating: true
         });
@@ -24107,11 +24153,11 @@ async function triggerMixedGroupCharReply() {
     
     try {
         // 获取所有人设
-        const personasRes = await fetch(`${ONLINE_API_BASE}/api/mixed_group/${currentMixedGroupId}/personas?user_id=${onlineUser.id}`);
+        const personasRes = await fetch(`${ONLINE_API_BASE}/api/mixed_group/${window.currentMixedGroupId}/personas?user_id=${onlineUser.id}`);
         const personasData = await personasRes.json();
         
         // 获取消息历史
-        const messagesRes = await fetch(`${ONLINE_API_BASE}/api/mixed_group/${currentMixedGroupId}/messages?limit=20`);
+        const messagesRes = await fetch(`${ONLINE_API_BASE}/api/mixed_group/${window.currentMixedGroupId}/messages?limit=20`);
         const messagesData = await messagesRes.json();
         
         // 获取我的角色信息
@@ -24174,7 +24220,7 @@ async function triggerMixedGroupCharReply() {
             reply = reply.replace(new RegExp(`^${myMember.char_name}:\\s*`, 'i'), '');
             
             // 发送角色消息
-            await fetch(`${ONLINE_API_BASE}/api/mixed_group/${currentMixedGroupId}/message`, {
+            await fetch(`${ONLINE_API_BASE}/api/mixed_group/${window.currentMixedGroupId}/message`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -24195,7 +24241,7 @@ async function triggerMixedGroupCharReply() {
         // 取消输入状态
         if (window.onlineSocket) {
             window.onlineSocket.emit('mixed_group_typing_status', {
-                group_id: currentMixedGroupId,
+                group_id: window.currentMixedGroupId,
                 sender_name: myMember.char_name,
                 is_generating: false
             });
@@ -24203,13 +24249,24 @@ async function triggerMixedGroupCharReply() {
     }
 }
 
-// 获取API配置
+// 获取API配置（从IndexedDB读取，与设置页面一致）
 async function getApiConfig() {
-    const apiUrl = localStorage.getItem('ai_api_url') || '';
-    const apiKey = localStorage.getItem('ai_api_key') || '';
-    const model = localStorage.getItem('ai_model') || 'gpt-3.5-turbo';
-    
-    return { apiUrl, apiKey, model };
+    try {
+        const urlItem = await db.dexiData.get('aiApiUrl');
+        const keyItem = await db.dexiData.get('aiApiKey');
+        const modelItem = await db.dexiData.get('aiModel');
+        const tempItem = await db.dexiData.get('aiTemperature');
+        
+        return {
+            apiUrl: urlItem?.value || '',
+            apiKey: keyItem?.value || '',
+            model: modelItem?.value || 'gpt-3.5-turbo',
+            temperature: parseFloat(tempItem?.value || '0.7')
+        };
+    } catch (e) {
+        console.error('获取API配置失败:', e);
+        return { apiUrl: '', apiKey: '', model: 'gpt-3.5-turbo', temperature: 0.7 };
+    }
 }
 
 // 监听混合群聊WebSocket事件
@@ -24225,14 +24282,14 @@ function initMixedGroupSocket() {
     // 收到群聊消息
     window.onlineSocket.on('mixed_group_message', (data) => {
         console.log('[MixedGroup] Received message:', data);
-        if (currentMixedGroupId == data.group_id) {
+        if (window.currentMixedGroupId == data.group_id) {
             appendMixedGroupMessage(data);
         }
     });
     
     // 输入状态
     window.onlineSocket.on('mixed_group_typing', (data) => {
-        if (currentMixedGroupId == data.group_id) {
+        if (window.currentMixedGroupId == data.group_id) {
             showMixedGroupTypingStatus(data);
         }
     });
@@ -24289,7 +24346,7 @@ function showMixedGroupTypingStatus(data) {
         
         // 3秒后恢复
         setTimeout(() => {
-            if (currentMixedGroupId) {
+            if (window.currentMixedGroupId) {
                 chatHeader.textContent = document.getElementById('chat-title')?.textContent || '联机群聊';
             }
         }, 3000);
