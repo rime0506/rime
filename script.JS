@@ -24066,22 +24066,26 @@ async function loadMixedGroupMessages(groupId) {
         const myMember = groupData.members.find(m => m.user_id == onlineUser.id);
         
         data.messages.forEach(msg => {
-            const isMe = msg.sender_user_id == onlineUser.id;
-            const isMyChar = msg.sender_type === 'char' && msg.sender_user_id == onlineUser.id;
+            // 只有自己发的用户消息才显示在右边，角色A、用户B、角色B都在左边
+            const isSelf = msg.sender_type === 'user' && msg.sender_user_id == onlineUser.id;
             
             const msgEl = document.createElement('div');
-            msgEl.className = `message-row ${isMe || isMyChar ? 'self' : 'other'}`;
-            msgEl.style.cssText = `display:flex; margin-bottom:12px; ${isMe || isMyChar ? 'flex-direction:row-reverse;' : ''}`;
+            msgEl.className = `message-row ${isSelf ? 'self' : 'other'}`;
+            msgEl.style.cssText = `display:flex; margin-bottom:12px; ${isSelf ? 'flex-direction:row-reverse;' : ''}`;
             
-            const senderLabel = msg.sender_type === 'char' 
-                ? `<span style="font-size:11px; color:#999;">${msg.sender_name}</span>` 
-                : `<span style="font-size:11px; color:#667eea;">${msg.sender_name}</span>`;
+            // 区分角色和用户的名字颜色
+            let senderLabel;
+            if (msg.sender_type === 'char') {
+                senderLabel = `<span style="font-size:11px; color:#e74c3c;">🤖 ${msg.sender_name}</span>`;
+            } else {
+                senderLabel = `<span style="font-size:11px; color:#667eea;">👤 ${msg.sender_name}</span>`;
+            }
             
             msgEl.innerHTML = `
-                <div style="width:36px; height:36px; border-radius:50%; background:${msg.sender_avatar ? `url(${msg.sender_avatar}) center/cover` : '#eee'}; flex-shrink:0; margin:${isMe || isMyChar ? '0 0 0 8px' : '0 8px 0 0'};"></div>
-                <div style="max-width:70%; ${isMe || isMyChar ? 'text-align:right;' : ''}">
+                <div style="width:36px; height:36px; border-radius:50%; background:${msg.sender_avatar ? `url(${msg.sender_avatar}) center/cover` : '#eee'}; flex-shrink:0; margin:${isSelf ? '0 0 0 8px' : '0 8px 0 0'};"></div>
+                <div style="max-width:70%; ${isSelf ? 'text-align:right;' : ''}">
                     ${senderLabel}
-                    <div class="message-content" style="padding:10px 14px; border-radius:18px; background:${isMe || isMyChar ? 'var(--ins-pink-light)' : '#f2f2f7'}; margin-top:4px; word-wrap:break-word;">
+                    <div class="message-content" style="padding:10px 14px; border-radius:18px; background:${isSelf ? 'var(--ins-pink-light)' : '#f2f2f7'}; margin-top:4px; word-wrap:break-word;">
                         ${msg.content}
                     </div>
                 </div>
@@ -24193,25 +24197,54 @@ async function triggerMixedGroupCharReply() {
         
         messages.push({ role: 'user', content: '请以你的角色身份回复' });
         
-        // 调用AI
+        // 调用AI - 直接前端调用，不经过后端
         const apiConfig = await getApiConfig();
+        console.log('[MixedGroup] API配置:', {
+            apiUrl: apiConfig.apiUrl,
+            apiKey: apiConfig.apiKey ? '***已设置***' : '未设置',
+            model: apiConfig.model
+        });
+        
         if (!apiConfig || !apiConfig.apiKey) {
-            alert('请先在设置中配置API');
+            alert('请先在设置中配置API Key');
             return;
         }
         
-        const aiRes = await fetch(`${ONLINE_API_BASE}/api/chat/proxy`, {
+        if (!apiConfig.apiUrl) {
+            alert('请先在设置中配置API地址');
+            return;
+        }
+        
+        // 确保URL格式正确（移除末尾的斜杠）
+        let fullApiUrl = apiConfig.apiUrl.replace(/\/+$/, '') + '/v1/chat/completions';
+        console.log('[MixedGroup] 完整API URL:', fullApiUrl);
+        console.log('[MixedGroup] 消息数量:', messages.length);
+        
+        // 直接前端调用API
+        const aiRes = await fetch(fullApiUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiConfig.apiKey}`
+            },
             body: JSON.stringify({
-                apiUrl: apiConfig.apiUrl + '/v1/chat/completions',
-                apiKey: apiConfig.apiKey,
                 model: apiConfig.model,
-                messages: messages
+                messages: messages,
+                temperature: apiConfig.temperature || 0.7
             })
         });
         
+        console.log('[MixedGroup] AI响应状态:', aiRes.status);
+        
+        if (!aiRes.ok) {
+            const errorText = await aiRes.text();
+            console.error('[MixedGroup] AI请求失败:', errorText);
+            alert('AI请求失败: ' + aiRes.status + '\n' + errorText.substring(0, 200));
+            return;
+        }
+        
         const aiData = await aiRes.json();
+        console.log('[MixedGroup] AI响应:', aiData);
         
         if (aiData.choices && aiData.choices[0]) {
             let reply = aiData.choices[0].message.content;
@@ -24252,9 +24285,10 @@ async function triggerMixedGroupCharReply() {
 // 获取API配置（从IndexedDB读取，与设置页面一致）
 async function getApiConfig() {
     try {
-        const urlItem = await db.dexiData.get('aiApiUrl');
+        // 使用与设置页面一致的key名称
+        const urlItem = await db.dexiData.get('aiBaseUrl');
         const keyItem = await db.dexiData.get('aiApiKey');
-        const modelItem = await db.dexiData.get('aiModel');
+        const modelItem = await db.dexiData.get('aiCurrentModel');
         const tempItem = await db.dexiData.get('aiTemperature');
         
         return {
@@ -24312,22 +24346,26 @@ function appendMixedGroupMessage(msg) {
         emptyState.remove();
     }
     
-    const isMe = msg.sender_user_id == onlineUser.id;
-    const isMyChar = msg.sender_type === 'char' && msg.sender_user_id == onlineUser.id;
+    // 只有自己发的用户消息才显示在右边，角色A、用户B、角色B都在左边
+    const isSelf = msg.sender_type === 'user' && msg.sender_user_id == onlineUser.id;
     
     const msgEl = document.createElement('div');
-    msgEl.className = `message-row ${isMe || isMyChar ? 'self' : 'other'}`;
-    msgEl.style.cssText = `display:flex; margin-bottom:12px; ${isMe || isMyChar ? 'flex-direction:row-reverse;' : ''}`;
+    msgEl.className = `message-row ${isSelf ? 'self' : 'other'}`;
+    msgEl.style.cssText = `display:flex; margin-bottom:12px; ${isSelf ? 'flex-direction:row-reverse;' : ''}`;
     
-    const senderLabel = msg.sender_type === 'char' 
-        ? `<span style="font-size:11px; color:#999;">${msg.sender_name}</span>` 
-        : `<span style="font-size:11px; color:#667eea;">${msg.sender_name}</span>`;
+    // 区分角色和用户的名字颜色
+    let senderLabel;
+    if (msg.sender_type === 'char') {
+        senderLabel = `<span style="font-size:11px; color:#e74c3c;">🤖 ${msg.sender_name}</span>`;
+    } else {
+        senderLabel = `<span style="font-size:11px; color:#667eea;">👤 ${msg.sender_name}</span>`;
+    }
     
     msgEl.innerHTML = `
-        <div style="width:36px; height:36px; border-radius:50%; background:${msg.sender_avatar ? `url(${msg.sender_avatar}) center/cover` : '#eee'}; flex-shrink:0; margin:${isMe || isMyChar ? '0 0 0 8px' : '0 8px 0 0'};"></div>
-        <div style="max-width:70%; ${isMe || isMyChar ? 'text-align:right;' : ''}">
+        <div style="width:36px; height:36px; border-radius:50%; background:${msg.sender_avatar ? `url(${msg.sender_avatar}) center/cover` : '#eee'}; flex-shrink:0; margin:${isSelf ? '0 0 0 8px' : '0 8px 0 0'};"></div>
+        <div style="max-width:70%; ${isSelf ? 'text-align:right;' : ''}">
             ${senderLabel}
-            <div class="message-content" style="padding:10px 14px; border-radius:18px; background:${isMe || isMyChar ? 'var(--ins-pink-light)' : '#f2f2f7'}; margin-top:4px; word-wrap:break-word;">
+            <div class="message-content" style="padding:10px 14px; border-radius:18px; background:${isSelf ? 'var(--ins-pink-light)' : '#f2f2f7'}; margin-top:4px; word-wrap:break-word;">
                 ${msg.content}
             </div>
         </div>
