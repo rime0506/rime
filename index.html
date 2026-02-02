@@ -830,6 +830,12 @@
                     </div>
                     <div>添加真人好友</div>
                 </div>
+                <div class="wechat-menu-item" onclick="showCreateMixedGroupModal()">
+                    <div class="wechat-menu-icon">
+                        <svg class="svg-icon" style="width:20px; height:20px; stroke:#fff;" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>
+                    </div>
+                    <div>联机群聊</div>
+                </div>
             </div>
         </div>
         </div>
@@ -1066,6 +1072,90 @@
             <div style="padding:16px; display:flex; gap:12px;">
                 <button class="modal-btn btn-cancel" style="flex:1;" onclick="closeModal('create-group-modal')">取消</button>
                 <button class="modal-btn" style="flex:1; background:var(--ins-pink); color:#fff;" onclick="confirmCreateGroup()">创建</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 创建联机群聊弹窗 -->
+    <div class="modal-overlay" id="create-mixed-group-modal">
+        <div class="modal-box" style="height:85%; max-width:420px;">
+            <div class="modal-title" style="display:flex; align-items:center; gap:8px;">
+                <svg class="svg-icon" style="width:22px; height:22px; stroke:var(--ins-pink);" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>
+                创建联机群聊
+            </div>
+            
+            <!-- 步骤指示器 -->
+            <div style="display:flex; justify-content:center; gap:8px; padding:12px 0; margin-bottom:8px;">
+                <div id="mixed-step-1" class="step-indicator active" style="width:10px; height:10px; border-radius:50%; background:var(--ins-pink); transition:all 0.3s;"></div>
+                <div id="mixed-step-2" class="step-indicator" style="width:10px; height:10px; border-radius:50%; background:#ddd; transition:all 0.3s;"></div>
+            </div>
+            
+            <!-- 步骤1: 选择真人好友 -->
+            <div id="mixed-group-step1" style="flex:1; overflow-y:auto; display:flex; flex-direction:column;">
+                <div style="padding:0 16px 16px;">
+                    <input type="text" id="mixed-group-name-input" placeholder="群聊名称（可选）" style="width:100%; padding:12px 16px; border:1px solid #e0e0e0; border-radius:8px; font-size:15px; box-sizing:border-box; margin-bottom:12px;">
+                </div>
+                <div style="padding:0 16px 8px; font-size:13px; color:#888;">选择要邀请的真人好友：</div>
+                <div style="flex:1; overflow-y:auto; padding:0 16px;" id="mixed-group-friends-list">
+                    <!-- 动态生成真人好友列表 -->
+                </div>
+            </div>
+            
+            <!-- 步骤2: 选择自己要绑定的角色 -->
+            <div id="mixed-group-step2" style="flex:1; overflow-y:auto; display:none; flex-direction:column;">
+                <div style="padding:0 16px 8px; font-size:13px; color:#888;">选择你要带入群聊的角色：</div>
+                <div style="padding:0 16px 8px; font-size:12px; color:#ff6b9d; background:#fff5f7; margin:0 16px 12px; padding:12px; border-radius:8px;">
+                    💡 你的角色将在群聊中代表你说话，其他成员看到的是你角色的回复
+                </div>
+                <div style="flex:1; overflow-y:auto; padding:0 16px;" id="mixed-group-char-list">
+                    <!-- 动态生成角色列表 -->
+                </div>
+            </div>
+            
+            <div style="padding:16px; display:flex; gap:12px;">
+                <button class="modal-btn btn-cancel" style="flex:1;" onclick="closeMixedGroupModal()">取消</button>
+                <button id="mixed-group-next-btn" class="modal-btn" style="flex:1; background:var(--ins-pink); color:#fff;" onclick="mixedGroupNextStep()">下一步</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 选择绑定角色弹窗（被邀请时） -->
+    <div class="modal-overlay" id="bind-char-modal">
+        <div class="modal-box" style="height:70%; max-width:400px;">
+            <div class="modal-title">选择你的角色</div>
+            <div style="padding:0 16px 12px; font-size:13px; color:#666; text-align:center;">
+                你被邀请加入联机群聊<br>
+                <span style="color:var(--ins-pink); font-weight:600;" id="bind-char-group-name"></span>
+            </div>
+            <div style="padding:0 16px 8px; font-size:12px; color:#ff6b9d; background:#fff5f7; margin:0 16px 12px; padding:12px; border-radius:8px;">
+                💡 选择一个角色后将无法更改，这个角色会在群聊中代表你说话
+            </div>
+            <div style="flex:1; overflow-y:auto; padding:0 16px;" id="bind-char-list">
+                <!-- 动态生成角色列表 -->
+            </div>
+            <div style="padding:16px; display:flex; gap:12px;">
+                <button class="modal-btn btn-cancel" style="flex:1;" onclick="closeModal('bind-char-modal')">稍后</button>
+                <button class="modal-btn" style="flex:1; background:var(--ins-pink); color:#fff;" onclick="confirmBindChar()">确定绑定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 联机群聊邀请通知弹窗 -->
+    <div class="modal-overlay" id="mixed-group-invite-modal">
+        <div class="modal-box" style="max-width:360px;">
+            <div style="text-align:center; padding:20px;">
+                <div style="width:64px; height:64px; border-radius:50%; background:linear-gradient(135deg, #FFB6C1 0%, #FFC0CB 100%); margin:0 auto 16px; display:flex; align-items:center; justify-content:center;">
+                    <svg class="svg-icon" style="width:32px; height:32px; stroke:#fff;" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>
+                </div>
+                <div style="font-size:18px; font-weight:600; color:#333; margin-bottom:8px;">联机群聊邀请</div>
+                <div style="font-size:14px; color:#666; margin-bottom:20px;">
+                    <span id="invite-creator-name" style="color:var(--ins-pink); font-weight:600;">xxx</span> 邀请你加入<br>
+                    「<span id="invite-group-name" style="font-weight:600;">xxx</span>」
+                </div>
+                <div style="display:flex; gap:12px;">
+                    <button onclick="rejectMixedGroupInvite()" style="flex:1; padding:12px; border:1px solid #ddd; border-radius:8px; background:#fff; font-size:15px; cursor:pointer;">忽略</button>
+                    <button onclick="acceptMixedGroupInvite()" style="flex:1; padding:12px; border:none; border-radius:8px; background:var(--ins-pink); color:#fff; font-size:15px; cursor:pointer;">加入并选择角色</button>
+                </div>
             </div>
         </div>
     </div>

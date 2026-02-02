@@ -6262,11 +6262,31 @@ ${loreContext}
                 console.log('获取真人好友列表失败:', e);
             }
             
-            // 合并好友、群聊、真人好友列表
+            // 获取混合群聊列表
+            let mixedGroups = [];
+            try {
+                const currentAccountInfo = await getCurrentAccountOnlineInfo();
+                if (onlineUser && currentAccountInfo && onlineUser.wechat_id === currentAccountInfo.account) {
+                    const res = await fetch(`${ONLINE_API_BASE}/api/mixed_group/list?user_id=${onlineUser.id}`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        mixedGroups = (data.groups || []).map(g => ({
+                            ...g,
+                            _isMixedGroup: true,
+                            _mixedGroupId: g.id
+                        }));
+                    }
+                }
+            } catch (e) {
+                console.log('获取混合群聊列表失败:', e);
+            }
+            
+            // 合并好友、群聊、真人好友、混合群聊列表
             let allItems = [
-                ...friends.map(f => ({...f, _isGroup: false, _isRealFriend: false})), 
-                ...groupItems,
-                ...realFriends
+                ...friends.map(f => ({...f, _isGroup: false, _isRealFriend: false, _isMixedGroup: false})), 
+                ...groupItems.map(g => ({...g, _isMixedGroup: false})),
+                ...realFriends.map(r => ({...r, _isMixedGroup: false})),
+                ...mixedGroups
             ];
             
             // 排序逻辑：置顶 > 最后消息时间 > 更新时间
@@ -6277,7 +6297,9 @@ ${loreContext}
                 
                 // 2. 时间判断
                 const getLastTime = (item) => {
-                    if (item._isRealFriend) {
+                    if (item._isMixedGroup) {
+                        return item.last_time ? item.last_time * 1000 : (item.created_at ? item.created_at * 1000 : 0);
+                    } else if (item._isRealFriend) {
                         return item.last_time ? item.last_time * 1000 : 0;
                     } else if (item._isGroup) {
                         const history = item.chat_history || [];
@@ -6411,6 +6433,50 @@ ${loreContext}
                                     <div style="font-size:16px; font-weight:500; color:#333;">${f.nickname || '用户'}</div>
                                     <span style="background:#667eea; color:#fff; font-size:9px; padding:1px 4px; border-radius:2px; margin-left:6px;">真人</span>
                                     ${unreadBadge}
+                                </div>
+                                <div style="font-size:12px; color:#999;">${lastTimeStr}</div>
+                            </div>
+                            <div style="font-size:14px; color:#999; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${lastMsg}</div>
+                        </div>
+                    `;
+                    
+                    itemContainer.appendChild(contentDiv);
+                    listDiv.appendChild(itemContainer);
+                    return;
+                }
+                
+                // 混合群聊项渲染
+                if (f._isMixedGroup) {
+                    const itemContainer = document.createElement('div');
+                    itemContainer.className = 'wechat-list-item-container';
+                    
+                    const contentDiv = document.createElement('div');
+                    contentDiv.className = 'wechat-list-item-content';
+                    contentDiv.style.cssText = 'display:flex; padding:12px 16px; border-bottom:0.5px solid #f0f0f0; align-items:center; gap:12px; background-color:#fff;';
+                    
+                    contentDiv.onclick = () => openMixedGroupChat(f._mixedGroupId);
+                    
+                    const avatarStyle = f.avatar ? `background-image:url(${f.avatar})` : 'background:linear-gradient(135deg, #f093fb 0%, #f5576c 100%)';
+                    
+                    let lastMsg = f.last_message || '开始联机聊天吧';
+                    let lastTimeStr = '';
+                    if (f.last_time) {
+                        const d = new Date(f.last_time * 1000);
+                        const now = new Date();
+                        if (d.toDateString() === now.toDateString()) {
+                            lastTimeStr = `${d.getHours()}:${d.getMinutes().toString().padStart(2,'0')}`;
+                        } else {
+                            lastTimeStr = `${d.getMonth()+1}/${d.getDate()}`;
+                        }
+                    }
+                    
+                    contentDiv.innerHTML = `
+                        <div style="width:48px; height:48px; border-radius:10px; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:18px;">${f.avatar ? '' : '🌐'}</div>
+                        <div style="flex:1; min-width:0;">
+                            <div style="display:flex; justify-content:space-between; margin-bottom:4px; align-items:center;">
+                                <div style="display:flex; align-items:center;">
+                                    <div style="font-size:16px; font-weight:500; color:#333;">${f.name || '联机群聊'}</div>
+                                    <span style="background:linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color:#fff; font-size:9px; padding:1px 4px; border-radius:2px; margin-left:6px;">联机</span>
                                 </div>
                                 <div style="font-size:12px; color:#999;">${lastTimeStr}</div>
                             </div>
@@ -23492,3 +23558,747 @@ async function sendRealFriendMessage(content) {
         console.error('发送消息失败:', e);
     }
 }
+
+// ========== 混合群聊功能 ==========
+
+// 当前混合群聊状态
+let currentMixedGroupId = null;
+let mixedGroupStep = 1;
+let selectedMixedFriends = [];
+let selectedMixedChar = null;
+let pendingMixedGroupInvite = null;
+
+// 显示创建混合群聊弹窗
+async function showCreateMixedGroupModal() {
+    toggleWechatMenu(); // 关闭菜单
+    
+    // 检查是否登录联机账号
+    if (!onlineUser) {
+        alert('请先在设置中登录联机账号才能创建联机群聊');
+        return;
+    }
+    
+    // 获取当前账号信息
+    const currentAccountInfo = await getCurrentAccountOnlineInfo();
+    if (!currentAccountInfo || !currentAccountInfo.account) {
+        alert('当前角色档案未设置虚拟账号');
+        return;
+    }
+    
+    if (onlineUser.wechat_id !== currentAccountInfo.account) {
+        alert('当前角色档案与联机账号不匹配，请切换到对应的角色档案');
+        return;
+    }
+    
+    // 重置状态
+    mixedGroupStep = 1;
+    selectedMixedFriends = [];
+    selectedMixedChar = null;
+    
+    document.getElementById('create-mixed-group-modal').style.display = 'flex';
+    document.getElementById('mixed-group-name-input').value = '';
+    document.getElementById('mixed-group-step1').style.display = 'flex';
+    document.getElementById('mixed-group-step2').style.display = 'none';
+    document.getElementById('mixed-step-1').style.background = 'var(--ins-pink)';
+    document.getElementById('mixed-step-2').style.background = '#ddd';
+    document.getElementById('mixed-group-next-btn').textContent = '下一步';
+    
+    // 加载真人好友列表
+    await loadMixedGroupFriends();
+}
+
+// 加载真人好友列表
+async function loadMixedGroupFriends() {
+    const listEl = document.getElementById('mixed-group-friends-list');
+    
+    if (!onlineUser) {
+        listEl.innerHTML = '<div style="text-align:center; color:#999; padding:40px;">请先登录联机账号</div>';
+        return;
+    }
+    
+    try {
+        const res = await fetch(`${ONLINE_API_BASE}/api/online/friends?user_id=${onlineUser.id}`);
+        const data = await res.json();
+        
+        if (!data.friends || data.friends.length === 0) {
+            listEl.innerHTML = `
+                <div style="text-align:center; color:#999; padding:40px;">
+                    暂无真人好友<br>
+                    <span style="font-size:12px;">请先添加真人好友再创建联机群聊</span>
+                </div>
+            `;
+            return;
+        }
+        
+        listEl.innerHTML = data.friends.map(friend => `
+            <div class="friend-select-item" data-id="${friend.id}" onclick="toggleMixedFriend(${friend.id}, this)" 
+                 style="display:flex; align-items:center; padding:12px; margin-bottom:8px; border-radius:10px; background:#f9f9f9; cursor:pointer; transition:all 0.2s;">
+                <div style="width:42px; height:42px; border-radius:50%; background:${friend.avatar ? `url(${friend.avatar}) center/cover` : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'}; margin-right:12px; display:flex; align-items:center; justify-content:center; color:#fff;">${friend.avatar ? '' : '👤'}</div>
+                <div style="flex:1;">
+                    <div style="font-size:15px; font-weight:500;">${friend.nickname || friend.username}</div>
+                    <div style="font-size:12px; color:#667eea;">${friend.wechat_id || ''}</div>
+                </div>
+                <div class="check-mark" style="width:24px; height:24px; border-radius:50%; border:2px solid #ddd; display:flex; align-items:center; justify-content:center; transition:all 0.2s;">
+                    <svg style="width:14px; height:14px; stroke:#fff; stroke-width:3; fill:none; opacity:0;" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                </div>
+            </div>
+        `).join('');
+        
+    } catch (e) {
+        console.error('加载好友列表失败:', e);
+        listEl.innerHTML = '<div style="text-align:center; color:#ff3b30; padding:40px;">加载失败</div>';
+    }
+}
+
+// 切换选中好友
+function toggleMixedFriend(friendId, el) {
+    const index = selectedMixedFriends.indexOf(friendId);
+    const checkMark = el.querySelector('.check-mark');
+    const svg = checkMark.querySelector('svg');
+    
+    if (index > -1) {
+        selectedMixedFriends.splice(index, 1);
+        el.style.background = '#f9f9f9';
+        checkMark.style.background = 'transparent';
+        checkMark.style.borderColor = '#ddd';
+        svg.style.opacity = '0';
+    } else {
+        selectedMixedFriends.push(friendId);
+        el.style.background = '#fff5f7';
+        checkMark.style.background = 'var(--ins-pink)';
+        checkMark.style.borderColor = 'var(--ins-pink)';
+        svg.style.opacity = '1';
+    }
+}
+
+// 下一步/创建
+async function mixedGroupNextStep() {
+    if (mixedGroupStep === 1) {
+        // 验证是否选择了好友
+        if (selectedMixedFriends.length === 0) {
+            alert('请至少选择一个真人好友');
+            return;
+        }
+        
+        // 切换到步骤2
+        mixedGroupStep = 2;
+        document.getElementById('mixed-group-step1').style.display = 'none';
+        document.getElementById('mixed-group-step2').style.display = 'flex';
+        document.getElementById('mixed-step-1').style.background = '#ddd';
+        document.getElementById('mixed-step-2').style.background = 'var(--ins-pink)';
+        document.getElementById('mixed-group-next-btn').textContent = '创建群聊';
+        
+        // 加载角色列表
+        await loadMixedGroupChars();
+        
+    } else {
+        // 验证是否选择了角色
+        if (!selectedMixedChar) {
+            alert('请选择一个角色');
+            return;
+        }
+        
+        // 创建群聊
+        await createMixedGroup();
+    }
+}
+
+// 加载角色列表（排除user类型）
+async function loadMixedGroupChars() {
+    const listEl = document.getElementById('mixed-group-char-list');
+    
+    // 获取所有非user类型的角色
+    const chars = await db.characters.where('type').notEqual('user').toArray();
+    
+    if (chars.length === 0) {
+        listEl.innerHTML = `
+            <div style="text-align:center; color:#999; padding:40px;">
+                暂无可选角色<br>
+                <span style="font-size:12px;">请先创建角色档案</span>
+            </div>
+        `;
+        return;
+    }
+    
+    listEl.innerHTML = chars.map(char => `
+        <div class="char-select-item" data-id="${char.id}" onclick="selectMixedChar(${char.id}, this)" 
+             style="display:flex; align-items:center; padding:12px; margin-bottom:8px; border-radius:10px; background:#f9f9f9; cursor:pointer; transition:all 0.2s;">
+            <div style="width:48px; height:48px; border-radius:50%; background:${char.avatar ? `url(${char.avatar}) center/cover` : '#eee'}; margin-right:12px;"></div>
+            <div style="flex:1;">
+                <div style="font-size:15px; font-weight:500;">${char.name || '未命名'}</div>
+                <div style="font-size:12px; color:#999;">${char.type || 'char'}</div>
+            </div>
+            <div class="check-mark" style="width:24px; height:24px; border-radius:50%; border:2px solid #ddd; display:flex; align-items:center; justify-content:center; transition:all 0.2s;">
+                <svg style="width:14px; height:14px; stroke:#fff; stroke-width:3; fill:none; opacity:0;" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            </div>
+        </div>
+    `).join('');
+}
+
+// 选择角色（单选）
+function selectMixedChar(charId, el) {
+    // 清除之前的选择
+    document.querySelectorAll('#mixed-group-char-list .char-select-item').forEach(item => {
+        item.style.background = '#f9f9f9';
+        const cm = item.querySelector('.check-mark');
+        cm.style.background = 'transparent';
+        cm.style.borderColor = '#ddd';
+        cm.querySelector('svg').style.opacity = '0';
+    });
+    
+    // 选中当前
+    selectedMixedChar = charId;
+    el.style.background = '#fff5f7';
+    const checkMark = el.querySelector('.check-mark');
+    checkMark.style.background = 'var(--ins-pink)';
+    checkMark.style.borderColor = 'var(--ins-pink)';
+    checkMark.querySelector('svg').style.opacity = '1';
+}
+
+// 创建混合群聊
+async function createMixedGroup() {
+    const groupName = document.getElementById('mixed-group-name-input').value.trim();
+    
+    // 获取选中角色的信息
+    const char = await db.characters.get(selectedMixedChar);
+    if (!char) {
+        alert('角色信息获取失败');
+        return;
+    }
+    
+    // 获取用户人设和角色人设
+    const currentAccountInfo = await getCurrentAccountOnlineInfo();
+    const userPersona = currentAccountInfo ? `用户名: ${currentAccountInfo.nickname}` : '';
+    const charPersona = char.persona || char.description || '';
+    
+    try {
+        const res = await fetch(`${ONLINE_API_BASE}/api/mixed_group/create`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                creator_id: onlineUser.id,
+                invited_user_ids: selectedMixedFriends,
+                name: groupName || `联机群聊`,
+                creator_char_id: char.id,
+                creator_char_name: char.name,
+                creator_char_avatar: char.avatar,
+                creator_user_persona: userPersona,
+                creator_char_persona: charPersona
+            })
+        });
+        
+        const data = await res.json();
+        
+        if (!res.ok) {
+            alert(data.error || '创建失败');
+            return;
+        }
+        
+        alert('联机群聊创建成功！等待好友加入并选择角色');
+        closeMixedGroupModal();
+        
+        // 刷新聊天列表
+        const container = document.getElementById('wechat-content');
+        if (container) renderWechatList(container);
+        
+    } catch (e) {
+        console.error('创建群聊失败:', e);
+        alert('网络错误: ' + e.message);
+    }
+}
+
+// 关闭混合群聊弹窗
+function closeMixedGroupModal() {
+    document.getElementById('create-mixed-group-modal').style.display = 'none';
+    mixedGroupStep = 1;
+    selectedMixedFriends = [];
+    selectedMixedChar = null;
+}
+
+// 处理群聊邀请
+function handleMixedGroupInvite(data) {
+    pendingMixedGroupInvite = data;
+    
+    document.getElementById('invite-creator-name').textContent = data.creator_name || '某人';
+    document.getElementById('invite-group-name').textContent = data.group_name || '联机群聊';
+    document.getElementById('mixed-group-invite-modal').style.display = 'flex';
+}
+
+// 接受邀请
+async function acceptMixedGroupInvite() {
+    document.getElementById('mixed-group-invite-modal').style.display = 'none';
+    
+    if (!pendingMixedGroupInvite) return;
+    
+    // 显示选择角色弹窗
+    document.getElementById('bind-char-group-name').textContent = pendingMixedGroupInvite.group_name || '联机群聊';
+    document.getElementById('bind-char-modal').style.display = 'flex';
+    
+    // 加载角色列表
+    await loadBindCharList();
+}
+
+// 拒绝邀请
+function rejectMixedGroupInvite() {
+    document.getElementById('mixed-group-invite-modal').style.display = 'none';
+    pendingMixedGroupInvite = null;
+}
+
+// 加载绑定角色列表
+async function loadBindCharList() {
+    const listEl = document.getElementById('bind-char-list');
+    
+    const chars = await db.characters.where('type').notEqual('user').toArray();
+    
+    if (chars.length === 0) {
+        listEl.innerHTML = '<div style="text-align:center; color:#999; padding:40px;">暂无可选角色</div>';
+        return;
+    }
+    
+    listEl.innerHTML = chars.map(char => `
+        <div class="char-select-item" data-id="${char.id}" onclick="selectBindChar(${char.id}, this)" 
+             style="display:flex; align-items:center; padding:12px; margin-bottom:8px; border-radius:10px; background:#f9f9f9; cursor:pointer; transition:all 0.2s;">
+            <div style="width:48px; height:48px; border-radius:50%; background:${char.avatar ? `url(${char.avatar}) center/cover` : '#eee'}; margin-right:12px;"></div>
+            <div style="flex:1;">
+                <div style="font-size:15px; font-weight:500;">${char.name || '未命名'}</div>
+            </div>
+            <div class="check-mark" style="width:24px; height:24px; border-radius:50%; border:2px solid #ddd; display:flex; align-items:center; justify-content:center;">
+                <svg style="width:14px; height:14px; stroke:#fff; stroke-width:3; fill:none; opacity:0;" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            </div>
+        </div>
+    `).join('');
+}
+
+// 选择绑定角色
+let selectedBindChar = null;
+function selectBindChar(charId, el) {
+    document.querySelectorAll('#bind-char-list .char-select-item').forEach(item => {
+        item.style.background = '#f9f9f9';
+        const cm = item.querySelector('.check-mark');
+        cm.style.background = 'transparent';
+        cm.style.borderColor = '#ddd';
+        cm.querySelector('svg').style.opacity = '0';
+    });
+    
+    selectedBindChar = charId;
+    el.style.background = '#fff5f7';
+    const checkMark = el.querySelector('.check-mark');
+    checkMark.style.background = 'var(--ins-pink)';
+    checkMark.style.borderColor = 'var(--ins-pink)';
+    checkMark.querySelector('svg').style.opacity = '1';
+}
+
+// 确认绑定角色
+async function confirmBindChar() {
+    if (!selectedBindChar || !pendingMixedGroupInvite) {
+        alert('请选择一个角色');
+        return;
+    }
+    
+    const char = await db.characters.get(selectedBindChar);
+    if (!char) {
+        alert('角色信息获取失败');
+        return;
+    }
+    
+    // 获取用户人设
+    const currentAccountInfo = await getCurrentAccountOnlineInfo();
+    const userPersona = currentAccountInfo ? `用户名: ${currentAccountInfo.nickname}` : '';
+    const charPersona = char.persona || char.description || '';
+    
+    try {
+        const res = await fetch(`${ONLINE_API_BASE}/api/mixed_group/${pendingMixedGroupInvite.group_id}/bind_char`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                user_id: onlineUser.id,
+                char_id: char.id,
+                char_name: char.name,
+                char_avatar: char.avatar,
+                user_persona: userPersona,
+                char_persona: charPersona
+            })
+        });
+        
+        const data = await res.json();
+        
+        if (!res.ok) {
+            alert(data.error || '绑定失败');
+            return;
+        }
+        
+        alert('成功加入群聊！');
+        document.getElementById('bind-char-modal').style.display = 'none';
+        pendingMixedGroupInvite = null;
+        selectedBindChar = null;
+        
+        // 刷新聊天列表
+        const container = document.getElementById('wechat-content');
+        if (container) renderWechatList(container);
+        
+    } catch (e) {
+        console.error('绑定角色失败:', e);
+        alert('网络错误: ' + e.message);
+    }
+}
+
+// 打开混合群聊
+async function openMixedGroupChat(groupId) {
+    currentMixedGroupId = groupId;
+    
+    try {
+        // 获取群聊详情
+        const res = await fetch(`${ONLINE_API_BASE}/api/mixed_group/${groupId}?user_id=${onlineUser.id}`);
+        const data = await res.json();
+        
+        if (!res.ok) {
+            alert(data.error || '获取群聊信息失败');
+            return;
+        }
+        
+        const group = data.group;
+        const members = data.members;
+        
+        // 检查是否已绑定角色
+        const myMember = members.find(m => m.user_id == onlineUser.id);
+        if (!myMember || !myMember.char_id) {
+            // 需要先绑定角色
+            pendingMixedGroupInvite = { group_id: groupId, group_name: group.name };
+            document.getElementById('bind-char-group-name').textContent = group.name || '联机群聊';
+            document.getElementById('bind-char-modal').style.display = 'flex';
+            await loadBindCharList();
+            return;
+        }
+        
+        // 显示聊天窗口
+        const chatWindow = document.getElementById('chat-window');
+        chatWindow.style.display = 'flex';
+        
+        // 设置标题
+        document.getElementById('chat-title').textContent = group.name || '联机群聊';
+        
+        // 隐藏AI相关按钮
+        const aiButtons = document.querySelectorAll('.chat-icon-btn');
+        aiButtons.forEach(btn => btn.style.display = 'none');
+        
+        // 清空并加载消息
+        await loadMixedGroupMessages(groupId);
+        
+        // 加入WebSocket房间
+        if (window.onlineSocket) {
+            window.onlineSocket.emit('join_mixed_group', { group_id: groupId, user_id: onlineUser.id });
+        }
+        
+    } catch (e) {
+        console.error('打开群聊失败:', e);
+        alert('网络错误: ' + e.message);
+    }
+}
+
+// 加载混合群聊消息
+async function loadMixedGroupMessages(groupId) {
+    const chatBody = document.getElementById('chat-body');
+    chatBody.innerHTML = '';
+    
+    try {
+        const res = await fetch(`${ONLINE_API_BASE}/api/mixed_group/${groupId}/messages?limit=100`);
+        const data = await res.json();
+        
+        if (!data.messages || data.messages.length === 0) {
+            chatBody.innerHTML = `
+                <div style="text-align:center; color:#999; padding:40px; font-size:14px;">
+                    开始联机聊天吧！<br>
+                    <span style="font-size:12px;">点击魔法棒可以让你的角色说话</span>
+                </div>
+            `;
+            return;
+        }
+        
+        // 获取群聊成员信息
+        const groupRes = await fetch(`${ONLINE_API_BASE}/api/mixed_group/${groupId}?user_id=${onlineUser.id}`);
+        const groupData = await groupRes.json();
+        const myMember = groupData.members.find(m => m.user_id == onlineUser.id);
+        
+        data.messages.forEach(msg => {
+            const isMe = msg.sender_user_id == onlineUser.id;
+            const isMyChar = msg.sender_type === 'char' && msg.sender_user_id == onlineUser.id;
+            
+            const msgEl = document.createElement('div');
+            msgEl.className = `message-row ${isMe || isMyChar ? 'self' : 'other'}`;
+            msgEl.style.cssText = `display:flex; margin-bottom:12px; ${isMe || isMyChar ? 'flex-direction:row-reverse;' : ''}`;
+            
+            const senderLabel = msg.sender_type === 'char' 
+                ? `<span style="font-size:11px; color:#999;">${msg.sender_name}</span>` 
+                : `<span style="font-size:11px; color:#667eea;">${msg.sender_name}</span>`;
+            
+            msgEl.innerHTML = `
+                <div style="width:36px; height:36px; border-radius:50%; background:${msg.sender_avatar ? `url(${msg.sender_avatar}) center/cover` : '#eee'}; flex-shrink:0; margin:${isMe || isMyChar ? '0 0 0 8px' : '0 8px 0 0'};"></div>
+                <div style="max-width:70%; ${isMe || isMyChar ? 'text-align:right;' : ''}">
+                    ${senderLabel}
+                    <div class="message-content" style="padding:10px 14px; border-radius:18px; background:${isMe || isMyChar ? 'var(--ins-pink-light)' : '#f2f2f7'}; margin-top:4px; word-wrap:break-word;">
+                        ${msg.content}
+                    </div>
+                </div>
+            `;
+            
+            chatBody.appendChild(msgEl);
+        });
+        
+        chatBody.scrollTop = chatBody.scrollHeight;
+        
+    } catch (e) {
+        console.error('加载消息失败:', e);
+    }
+}
+
+// 发送混合群聊消息（用户消息）
+async function sendMixedGroupUserMessage() {
+    if (!currentMixedGroupId || !onlineUser) return;
+    
+    const input = document.getElementById('chat-input-box');
+    const content = input.value.trim();
+    if (!content) return;
+    
+    input.value = '';
+    
+    // 获取当前用户信息
+    const currentAccountInfo = await getCurrentAccountOnlineInfo();
+    
+    try {
+        await fetch(`${ONLINE_API_BASE}/api/mixed_group/${currentMixedGroupId}/message`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                sender_type: 'user',
+                sender_user_id: onlineUser.id,
+                sender_name: currentAccountInfo?.nickname || onlineUser.nickname,
+                sender_avatar: currentAccountInfo?.avatar || onlineUser.avatar,
+                content: content
+            })
+        });
+        
+    } catch (e) {
+        console.error('发送消息失败:', e);
+    }
+}
+
+// 触发角色说话（调用AI）
+async function triggerMixedGroupCharReply() {
+    if (!currentMixedGroupId || !onlineUser) return;
+    
+    // 获取群聊信息
+    const groupRes = await fetch(`${ONLINE_API_BASE}/api/mixed_group/${currentMixedGroupId}?user_id=${onlineUser.id}`);
+    const groupData = await groupRes.json();
+    const myMember = groupData.members.find(m => m.user_id == onlineUser.id);
+    
+    if (!myMember || !myMember.char_id) {
+        alert('你还没有绑定角色');
+        return;
+    }
+    
+    // 广播输入状态
+    if (window.onlineSocket) {
+        window.onlineSocket.emit('mixed_group_typing_status', {
+            group_id: currentMixedGroupId,
+            sender_name: myMember.char_name,
+            is_generating: true
+        });
+    }
+    
+    try {
+        // 获取所有人设
+        const personasRes = await fetch(`${ONLINE_API_BASE}/api/mixed_group/${currentMixedGroupId}/personas?user_id=${onlineUser.id}`);
+        const personasData = await personasRes.json();
+        
+        // 获取消息历史
+        const messagesRes = await fetch(`${ONLINE_API_BASE}/api/mixed_group/${currentMixedGroupId}/messages?limit=20`);
+        const messagesData = await messagesRes.json();
+        
+        // 获取我的角色信息
+        const myChar = await db.characters.get(parseInt(myMember.char_id));
+        
+        // 构建AI提示
+        let systemPrompt = `你现在扮演"${myMember.char_name}"这个角色在一个多人群聊中回复。\n\n`;
+        systemPrompt += `## 你的角色设定:\n${myChar?.persona || myChar?.description || '一个友好的角色'}\n\n`;
+        
+        // 添加其他人的人设信息（不显示具体内容给用户，但AI可以读取）
+        systemPrompt += `## 群聊背景:\n`;
+        personasData.personas.forEach(p => {
+            if (p.user_id != onlineUser.id) {
+                systemPrompt += `- ${p.char_name}: 另一位群成员的角色\n`;
+            }
+        });
+        
+        systemPrompt += `\n## 回复要求:\n`;
+        systemPrompt += `- 保持角色性格一致\n`;
+        systemPrompt += `- 回复自然、简洁\n`;
+        systemPrompt += `- 只输出对话内容，不要输出动作描述\n`;
+        
+        // 构建消息历史
+        const messages = [{ role: 'system', content: systemPrompt }];
+        
+        messagesData.messages.forEach(msg => {
+            const role = msg.sender_user_id == onlineUser.id ? 'assistant' : 'user';
+            messages.push({
+                role: role,
+                content: `${msg.sender_name}: ${msg.content}`
+            });
+        });
+        
+        messages.push({ role: 'user', content: '请以你的角色身份回复' });
+        
+        // 调用AI
+        const apiConfig = await getApiConfig();
+        if (!apiConfig || !apiConfig.apiKey) {
+            alert('请先在设置中配置API');
+            return;
+        }
+        
+        const aiRes = await fetch(`${ONLINE_API_BASE}/api/chat/proxy`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                apiUrl: apiConfig.apiUrl + '/v1/chat/completions',
+                apiKey: apiConfig.apiKey,
+                model: apiConfig.model,
+                messages: messages
+            })
+        });
+        
+        const aiData = await aiRes.json();
+        
+        if (aiData.choices && aiData.choices[0]) {
+            let reply = aiData.choices[0].message.content;
+            
+            // 清理回复内容
+            reply = reply.replace(new RegExp(`^${myMember.char_name}:\\s*`, 'i'), '');
+            
+            // 发送角色消息
+            await fetch(`${ONLINE_API_BASE}/api/mixed_group/${currentMixedGroupId}/message`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    sender_type: 'char',
+                    sender_user_id: onlineUser.id,
+                    sender_char_id: myMember.char_id,
+                    sender_name: myMember.char_name,
+                    sender_avatar: myMember.char_avatar,
+                    content: reply
+                })
+            });
+        }
+        
+    } catch (e) {
+        console.error('AI生成失败:', e);
+        alert('生成回复失败: ' + e.message);
+    } finally {
+        // 取消输入状态
+        if (window.onlineSocket) {
+            window.onlineSocket.emit('mixed_group_typing_status', {
+                group_id: currentMixedGroupId,
+                sender_name: myMember.char_name,
+                is_generating: false
+            });
+        }
+    }
+}
+
+// 获取API配置
+async function getApiConfig() {
+    const apiUrl = localStorage.getItem('ai_api_url') || '';
+    const apiKey = localStorage.getItem('ai_api_key') || '';
+    const model = localStorage.getItem('ai_model') || 'gpt-3.5-turbo';
+    
+    return { apiUrl, apiKey, model };
+}
+
+// 监听混合群聊WebSocket事件
+function initMixedGroupSocket() {
+    if (!window.onlineSocket) return;
+    
+    // 收到群聊邀请
+    window.onlineSocket.on('mixed_group_invite', (data) => {
+        console.log('[MixedGroup] Received invite:', data);
+        handleMixedGroupInvite(data);
+    });
+    
+    // 收到群聊消息
+    window.onlineSocket.on('mixed_group_message', (data) => {
+        console.log('[MixedGroup] Received message:', data);
+        if (currentMixedGroupId == data.group_id) {
+            appendMixedGroupMessage(data);
+        }
+    });
+    
+    // 输入状态
+    window.onlineSocket.on('mixed_group_typing', (data) => {
+        if (currentMixedGroupId == data.group_id) {
+            showMixedGroupTypingStatus(data);
+        }
+    });
+    
+    // 成员绑定角色
+    window.onlineSocket.on('mixed_group_member_bound', (data) => {
+        console.log('[MixedGroup] Member bound char:', data);
+        // 可以刷新群聊列表或显示通知
+    });
+}
+
+// 追加消息到聊天界面
+function appendMixedGroupMessage(msg) {
+    const chatBody = document.getElementById('chat-body');
+    if (!chatBody) return;
+    
+    // 移除空状态提示
+    const emptyState = chatBody.querySelector('div[style*="text-align:center"]');
+    if (emptyState && emptyState.textContent.includes('开始联机聊天')) {
+        emptyState.remove();
+    }
+    
+    const isMe = msg.sender_user_id == onlineUser.id;
+    const isMyChar = msg.sender_type === 'char' && msg.sender_user_id == onlineUser.id;
+    
+    const msgEl = document.createElement('div');
+    msgEl.className = `message-row ${isMe || isMyChar ? 'self' : 'other'}`;
+    msgEl.style.cssText = `display:flex; margin-bottom:12px; ${isMe || isMyChar ? 'flex-direction:row-reverse;' : ''}`;
+    
+    const senderLabel = msg.sender_type === 'char' 
+        ? `<span style="font-size:11px; color:#999;">${msg.sender_name}</span>` 
+        : `<span style="font-size:11px; color:#667eea;">${msg.sender_name}</span>`;
+    
+    msgEl.innerHTML = `
+        <div style="width:36px; height:36px; border-radius:50%; background:${msg.sender_avatar ? `url(${msg.sender_avatar}) center/cover` : '#eee'}; flex-shrink:0; margin:${isMe || isMyChar ? '0 0 0 8px' : '0 8px 0 0'};"></div>
+        <div style="max-width:70%; ${isMe || isMyChar ? 'text-align:right;' : ''}">
+            ${senderLabel}
+            <div class="message-content" style="padding:10px 14px; border-radius:18px; background:${isMe || isMyChar ? 'var(--ins-pink-light)' : '#f2f2f7'}; margin-top:4px; word-wrap:break-word;">
+                ${msg.content}
+            </div>
+        </div>
+    `;
+    
+    chatBody.appendChild(msgEl);
+    chatBody.scrollTop = chatBody.scrollHeight;
+}
+
+// 显示输入状态
+function showMixedGroupTypingStatus(data) {
+    // 可以在聊天界面顶部显示 "xxx 正在输入..." 或 "xxx 正在生成回复..."
+    const chatHeader = document.querySelector('.chat-header .chat-title');
+    if (chatHeader && data.is_generating) {
+        chatHeader.innerHTML = `<span style="font-size:12px; color:#999;">${data.sender_name} 正在生成回复...</span>`;
+        
+        // 3秒后恢复
+        setTimeout(() => {
+            if (currentMixedGroupId) {
+                chatHeader.textContent = document.getElementById('chat-title')?.textContent || '联机群聊';
+            }
+        }, 3000);
+    }
+}
+
+// 在connectOnlineSocket后初始化混合群聊WebSocket
+const originalConnectOnlineSocket = connectOnlineSocket;
+connectOnlineSocket = function() {
+    originalConnectOnlineSocket();
+    setTimeout(initMixedGroupSocket, 500);
+};

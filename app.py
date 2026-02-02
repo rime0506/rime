@@ -216,6 +216,52 @@ def init_db():
                   is_read INTEGER DEFAULT 0,
                   created_at REAL)''')
     
+    # ========== 混合群聊功能表 ==========
+    
+    # 混合群聊表
+    c.execute('''CREATE TABLE IF NOT EXISTS mixed_group_chats
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  name TEXT,
+                  avatar TEXT,
+                  creator_id INTEGER NOT NULL,
+                  created_at REAL,
+                  updated_at REAL)''')
+    
+    # 混合群聊成员表（真人用户 + 绑定角色）
+    c.execute('''CREATE TABLE IF NOT EXISTS mixed_group_members
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  group_id INTEGER NOT NULL,
+                  user_id INTEGER NOT NULL,
+                  char_id TEXT,
+                  char_name TEXT,
+                  char_avatar TEXT,
+                  role TEXT DEFAULT 'member',
+                  joined_at REAL,
+                  UNIQUE(group_id, user_id))''')
+    
+    # 混合群聊消息表
+    c.execute('''CREATE TABLE IF NOT EXISTS mixed_group_messages
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  group_id INTEGER NOT NULL,
+                  sender_type TEXT NOT NULL,
+                  sender_user_id INTEGER,
+                  sender_char_id TEXT,
+                  sender_name TEXT,
+                  sender_avatar TEXT,
+                  content TEXT NOT NULL,
+                  msg_type TEXT DEFAULT 'text',
+                  created_at REAL)''')
+    
+    # 混合群聊人设同步表（加密存储，不显示给对方）
+    c.execute('''CREATE TABLE IF NOT EXISTS mixed_group_personas
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  group_id INTEGER NOT NULL,
+                  user_id INTEGER NOT NULL,
+                  user_persona TEXT,
+                  char_persona TEXT,
+                  updated_at REAL,
+                  UNIQUE(group_id, user_id))''')
+    
     conn.commit()
     conn.close()
 
@@ -957,6 +1003,365 @@ def get_conversations():
 
 # ========== 联机社交功能 API 结束 ==========
 
+# ========== 混合群聊功能 API ==========
+
+# 创建混合群聊
+@app.route('/api/mixed_group/create', methods=['POST'])
+def create_mixed_group():
+    """创建混合群聊（邀请真人好友）"""
+    data = request.json
+    creator_id = data.get('creator_id')  # 创建者的联机用户ID
+    invited_user_ids = data.get('invited_user_ids', [])  # 被邀请的用户ID列表
+    group_name = data.get('name', '')
+    creator_char_id = data.get('creator_char_id')  # 创建者绑定的角色ID
+    creator_char_name = data.get('creator_char_name', '')
+    creator_char_avatar = data.get('creator_char_avatar', '')
+    creator_user_persona = data.get('creator_user_persona', '')  # 创建者用户人设
+    creator_char_persona = data.get('creator_char_persona', '')  # 创建者角色人设
+    
+    if not creator_id or not invited_user_ids:
+        return jsonify({'error': '缺少必要参数'}), 400
+    
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    try:
+        now = time.time()
+        
+        # 创建群聊
+        c.execute('''INSERT INTO mixed_group_chats (name, creator_id, created_at, updated_at)
+                     VALUES (?, ?, ?, ?)''',
+                  (group_name, creator_id, now, now))
+        group_id = c.lastrowid
+        
+        # 添加创建者为成员（owner）
+        c.execute('''INSERT INTO mixed_group_members (group_id, user_id, char_id, char_name, char_avatar, role, joined_at)
+                     VALUES (?, ?, ?, ?, ?, 'owner', ?)''',
+                  (group_id, creator_id, creator_char_id, creator_char_name, creator_char_avatar, now))
+        
+        # 存储创建者的人设
+        if creator_user_persona or creator_char_persona:
+            c.execute('''INSERT INTO mixed_group_personas (group_id, user_id, user_persona, char_persona, updated_at)
+                         VALUES (?, ?, ?, ?, ?)''',
+                      (group_id, creator_id, creator_user_persona, creator_char_persona, now))
+        
+        # 添加被邀请的用户（等待他们绑定角色）
+        for user_id in invited_user_ids:
+            c.execute('''INSERT OR IGNORE INTO mixed_group_members (group_id, user_id, role, joined_at)
+                         VALUES (?, ?, 'member', ?)''',
+                      (group_id, user_id, now))
+        
+        conn.commit()
+        
+        # 通过WebSocket通知被邀请的用户
+        for user_id in invited_user_ids:
+            socketio.emit('mixed_group_invite', {
+                'group_id': group_id,
+                'group_name': group_name,
+                'creator_id': creator_id
+            }, room=f'user_{user_id}')
+        
+        print(f"[MixedGroup] 创建群聊 #{group_id}, 创建者: {creator_id}, 邀请: {invited_user_ids}")
+        return jsonify({
+            'message': '群聊创建成功',
+            'group_id': group_id
+        }), 201
+        
+    except Exception as e:
+        conn.rollback()
+        print(f"[MixedGroup] 创建失败: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+# 用户绑定角色到混合群聊
+@app.route('/api/mixed_group/<int:group_id>/bind_char', methods=['POST'])
+def bind_char_to_mixed_group(group_id):
+    """用户绑定角色到混合群聊"""
+    data = request.json
+    user_id = data.get('user_id')
+    char_id = data.get('char_id')
+    char_name = data.get('char_name', '')
+    char_avatar = data.get('char_avatar', '')
+    user_persona = data.get('user_persona', '')
+    char_persona = data.get('char_persona', '')
+    
+    if not user_id or not char_id:
+        return jsonify({'error': '缺少参数'}), 400
+    
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    try:
+        now = time.time()
+        
+        # 更新成员的角色绑定
+        c.execute('''UPDATE mixed_group_members 
+                     SET char_id = ?, char_name = ?, char_avatar = ?
+                     WHERE group_id = ? AND user_id = ?''',
+                  (char_id, char_name, char_avatar, group_id, user_id))
+        
+        # 存储人设
+        c.execute('''INSERT OR REPLACE INTO mixed_group_personas (group_id, user_id, user_persona, char_persona, updated_at)
+                     VALUES (?, ?, ?, ?, ?)''',
+                  (group_id, user_id, user_persona, char_persona, now))
+        
+        conn.commit()
+        
+        # 通知群内所有成员
+        members = c.execute('SELECT user_id FROM mixed_group_members WHERE group_id = ?', (group_id,)).fetchall()
+        for member in members:
+            socketio.emit('mixed_group_member_bound', {
+                'group_id': group_id,
+                'user_id': user_id,
+                'char_name': char_name,
+                'char_avatar': char_avatar
+            }, room=f'user_{member["user_id"]}')
+        
+        return jsonify({'message': '角色绑定成功'}), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+# 获取混合群聊列表
+@app.route('/api/mixed_group/list', methods=['GET'])
+def get_mixed_groups():
+    """获取用户的混合群聊列表"""
+    user_id = request.args.get('user_id')
+    
+    if not user_id:
+        return jsonify({'error': '缺少user_id'}), 400
+    
+    conn = get_db_connection()
+    
+    rows = conn.execute('''
+        SELECT g.*, m.role, m.char_name as my_char_name,
+               (SELECT content FROM mixed_group_messages WHERE group_id = g.id ORDER BY created_at DESC LIMIT 1) as last_message,
+               (SELECT created_at FROM mixed_group_messages WHERE group_id = g.id ORDER BY created_at DESC LIMIT 1) as last_time
+        FROM mixed_group_chats g
+        JOIN mixed_group_members m ON g.id = m.group_id
+        WHERE m.user_id = ?
+        ORDER BY g.updated_at DESC
+    ''', (user_id,)).fetchall()
+    conn.close()
+    
+    groups = []
+    for row in rows:
+        groups.append({
+            'id': row['id'],
+            'name': row['name'],
+            'avatar': row['avatar'],
+            'role': row['role'],
+            'my_char_name': row['my_char_name'],
+            'last_message': row['last_message'],
+            'last_time': row['last_time'],
+            'created_at': row['created_at']
+        })
+    
+    return jsonify({'groups': groups}), 200
+
+# 获取混合群聊详情
+@app.route('/api/mixed_group/<int:group_id>', methods=['GET'])
+def get_mixed_group_detail(group_id):
+    """获取混合群聊详情"""
+    user_id = request.args.get('user_id')
+    
+    conn = get_db_connection()
+    
+    # 群聊基本信息
+    group = conn.execute('SELECT * FROM mixed_group_chats WHERE id = ?', (group_id,)).fetchone()
+    if not group:
+        conn.close()
+        return jsonify({'error': '群聊不存在'}), 404
+    
+    # 成员列表
+    members = conn.execute('''
+        SELECT m.*, u.nickname as user_nickname, u.avatar as user_avatar
+        FROM mixed_group_members m
+        JOIN online_users u ON m.user_id = u.id
+        WHERE m.group_id = ?
+    ''', (group_id,)).fetchall()
+    
+    conn.close()
+    
+    member_list = []
+    for m in members:
+        member_list.append({
+            'user_id': m['user_id'],
+            'user_nickname': m['user_nickname'],
+            'user_avatar': m['user_avatar'],
+            'char_id': m['char_id'],
+            'char_name': m['char_name'],
+            'char_avatar': m['char_avatar'],
+            'role': m['role'],
+            'has_bound_char': m['char_id'] is not None
+        })
+    
+    return jsonify({
+        'group': {
+            'id': group['id'],
+            'name': group['name'],
+            'avatar': group['avatar'],
+            'creator_id': group['creator_id'],
+            'created_at': group['created_at']
+        },
+        'members': member_list
+    }), 200
+
+# 发送混合群聊消息
+@app.route('/api/mixed_group/<int:group_id>/message', methods=['POST'])
+def send_mixed_group_message(group_id):
+    """发送混合群聊消息"""
+    data = request.json
+    sender_type = data.get('sender_type')  # 'user' 或 'char'
+    sender_user_id = data.get('sender_user_id')
+    sender_char_id = data.get('sender_char_id')
+    sender_name = data.get('sender_name', '')
+    sender_avatar = data.get('sender_avatar', '')
+    content = data.get('content', '').strip()
+    msg_type = data.get('msg_type', 'text')
+    
+    if not content:
+        return jsonify({'error': '消息内容不能为空'}), 400
+    
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    try:
+        now = time.time()
+        
+        # 保存消息
+        c.execute('''INSERT INTO mixed_group_messages 
+                     (group_id, sender_type, sender_user_id, sender_char_id, sender_name, sender_avatar, content, msg_type, created_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (group_id, sender_type, sender_user_id, sender_char_id, sender_name, sender_avatar, content, msg_type, now))
+        msg_id = c.lastrowid
+        
+        # 更新群聊最后更新时间
+        c.execute('UPDATE mixed_group_chats SET updated_at = ? WHERE id = ?', (now, group_id))
+        
+        conn.commit()
+        
+        # 获取群内所有成员
+        members = c.execute('SELECT user_id FROM mixed_group_members WHERE group_id = ?', (group_id,)).fetchall()
+        
+        # 通过WebSocket推送消息给所有成员
+        message_data = {
+            'id': msg_id,
+            'group_id': group_id,
+            'sender_type': sender_type,
+            'sender_user_id': sender_user_id,
+            'sender_char_id': sender_char_id,
+            'sender_name': sender_name,
+            'sender_avatar': sender_avatar,
+            'content': content,
+            'msg_type': msg_type,
+            'created_at': now
+        }
+        
+        for member in members:
+            socketio.emit('mixed_group_message', message_data, room=f'user_{member["user_id"]}')
+        
+        return jsonify({'message': '发送成功', 'msg_id': msg_id, 'created_at': now}), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+# 获取混合群聊消息历史
+@app.route('/api/mixed_group/<int:group_id>/messages', methods=['GET'])
+def get_mixed_group_messages(group_id):
+    """获取混合群聊消息历史"""
+    limit = request.args.get('limit', 50, type=int)
+    before_id = request.args.get('before_id', type=int)
+    
+    conn = get_db_connection()
+    
+    query = 'SELECT * FROM mixed_group_messages WHERE group_id = ?'
+    params = [group_id]
+    
+    if before_id:
+        query += ' AND id < ?'
+        params.append(before_id)
+    
+    query += ' ORDER BY created_at DESC LIMIT ?'
+    params.append(limit)
+    
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+    
+    messages = []
+    for row in rows:
+        messages.append({
+            'id': row['id'],
+            'sender_type': row['sender_type'],
+            'sender_user_id': row['sender_user_id'],
+            'sender_char_id': row['sender_char_id'],
+            'sender_name': row['sender_name'],
+            'sender_avatar': row['sender_avatar'],
+            'content': row['content'],
+            'msg_type': row['msg_type'],
+            'created_at': row['created_at']
+        })
+    
+    messages.reverse()
+    return jsonify({'messages': messages}), 200
+
+# 获取群聊人设（用于AI生成）
+@app.route('/api/mixed_group/<int:group_id>/personas', methods=['GET'])
+def get_mixed_group_personas(group_id):
+    """获取群聊所有人设（用于AI调用）"""
+    user_id = request.args.get('user_id')
+    
+    conn = get_db_connection()
+    
+    rows = conn.execute('''
+        SELECT p.*, m.char_name
+        FROM mixed_group_personas p
+        JOIN mixed_group_members m ON p.group_id = m.group_id AND p.user_id = m.user_id
+        WHERE p.group_id = ?
+    ''', (group_id,)).fetchall()
+    conn.close()
+    
+    personas = []
+    for row in rows:
+        personas.append({
+            'user_id': row['user_id'],
+            'char_name': row['char_name'],
+            'user_persona': row['user_persona'],
+            'char_persona': row['char_persona']
+        })
+    
+    return jsonify({'personas': personas}), 200
+
+# 广播输入状态
+@app.route('/api/mixed_group/<int:group_id>/typing', methods=['POST'])
+def broadcast_typing_status(group_id):
+    """广播输入状态"""
+    data = request.json
+    sender_name = data.get('sender_name', '')
+    is_typing = data.get('is_typing', False)
+    is_generating = data.get('is_generating', False)  # AI正在生成
+    
+    conn = get_db_connection()
+    members = conn.execute('SELECT user_id FROM mixed_group_members WHERE group_id = ?', (group_id,)).fetchall()
+    conn.close()
+    
+    for member in members:
+        socketio.emit('mixed_group_typing', {
+            'group_id': group_id,
+            'sender_name': sender_name,
+            'is_typing': is_typing,
+            'is_generating': is_generating
+        }, room=f'user_{member["user_id"]}')
+    
+    return jsonify({'message': 'OK'}), 200
+
+# ========== 混合群聊功能 API 结束 ==========
+
 # 新增：AI 聊天代理接口 (解决前端跨域和Mixed Content问题)
 @app.route('/api/chat/proxy', methods=['POST'])
 def chat_proxy():
@@ -1411,6 +1816,50 @@ def handle_user_online(data):
         conn.commit()
         conn.close()
         emit('user_status_changed', {'user_id': user_id, 'status': 'online'}, broadcast=True)
+
+# ========== 混合群聊 WebSocket 事件 ==========
+
+# 加入混合群聊房间
+@socketio.on('join_mixed_group')
+def handle_join_mixed_group(data):
+    group_id = data.get('group_id')
+    user_id = data.get('user_id')
+    if group_id and user_id:
+        from flask_socketio import join_room
+        join_room(f'mixed_group_{group_id}')
+        print(f"[MixedGroup] User {user_id} joined mixed_group_{group_id}")
+
+# 离开混合群聊房间
+@socketio.on('leave_mixed_group')
+def handle_leave_mixed_group(data):
+    group_id = data.get('group_id')
+    user_id = data.get('user_id')
+    if group_id and user_id:
+        from flask_socketio import leave_room
+        leave_room(f'mixed_group_{group_id}')
+        print(f"[MixedGroup] User {user_id} left mixed_group_{group_id}")
+
+# 混合群聊输入状态
+@socketio.on('mixed_group_typing_status')
+def handle_mixed_group_typing(data):
+    group_id = data.get('group_id')
+    sender_name = data.get('sender_name', '')
+    is_typing = data.get('is_typing', False)
+    is_generating = data.get('is_generating', False)
+    
+    if group_id:
+        # 获取群内所有成员
+        conn = get_db_connection()
+        members = conn.execute('SELECT user_id FROM mixed_group_members WHERE group_id = ?', (group_id,)).fetchall()
+        conn.close()
+        
+        for member in members:
+            emit('mixed_group_typing', {
+                'group_id': group_id,
+                'sender_name': sender_name,
+                'is_typing': is_typing,
+                'is_generating': is_generating
+            }, room=f'user_{member["user_id"]}')
 
 if __name__ == '__main__':
     # 获取环境变量 PORT，Zeabur 会自动注入此变量，本地默认使用 5000
