@@ -8525,10 +8525,15 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 16px 20px;
+    height: 88px;
+    padding-top: 44px;
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-bottom: 10px;
+    box-sizing: border-box;
     background: rgba(255,255,255,0.9);
     backdrop-filter: blur(10px);
-    border-bottom: 1px solid rgba(0,0,0,0.05);
+    border-bottom: 0.5px solid rgba(0,0,0,0.05);
     position: sticky;
     top: 0;
     z-index: 10;
@@ -8702,11 +8707,18 @@
     position: sticky;
     top: 0;
     z-index: 10;
-    background-color: #ffffff;
-    padding: 12px 15px;
-    border-bottom: 1px solid #f9f9f9;
+    background-color: rgba(255,255,255,0.95);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    height: 88px;
+    padding-top: 44px;
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-bottom: 10px;
+    border-bottom: 0.5px solid rgba(0,0,0,0.08);
     display: flex;
     align-items: center;
+    box-sizing: border-box;
 }
 .xy-header-home {
     justify-content: center;
@@ -8716,7 +8728,6 @@
 }
 .xy-header-chat {
     justify-content: space-between;
-    padding: 10px 15px;
     flex-shrink: 0;
     position: relative;
 }
@@ -8724,14 +8735,16 @@
     justify-content: space-between;
 }
 .xy-back-btn {
-    font-size: 18px;
+    font-size: 20px;
     color: #e89ab0;
     cursor: pointer;
+    padding: 5px;
 }
 .xy-page-title {
-    font-size: 16px;
-    color: #666666;
-    font-weight: 500;
+    font-size: 18px;
+    color: #333333;
+    font-weight: 600;
+    letter-spacing: 0.5px;
 }
 .xy-search-box {
     flex: 1;
