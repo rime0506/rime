@@ -103,6 +103,100 @@ db.version(72).stores({
     friend_requests: '++id, fromCharId, toAccountId, status, time',
     group_chats: '++id, name, ownerAccountId, created_at' // 群聊表：id自增，名称，创建者账号ID，创建时间
 });
+// 版本73：添加电话记录和短信记录表（从localStorage迁移到IndexedDB）
+db.version(73).stores({
+    dexiData: 'key, value',
+    lorebooks: '++id, name',
+    characters: '++id, name, type',
+    sticker_categories: '++id, name',
+    moments: '++id, userId, time, ownerUserId',
+    friend_requests: '++id, fromCharId, toAccountId, status, time',
+    group_chats: '++id, name, ownerAccountId, created_at',
+    phone_recents: '++id, accountId, charId, time, type', // 电话记录：accountId账号隔离，charId角色ID，time时间，type类型(missed/incoming/outgoing)
+    sms_messages: '++id, accountId, charId, time, read'   // 短信记录：accountId账号隔离，charId角色ID，time时间，read是否已读
+});
+// 版本74：添加聊天总结表（用于AI自动总结功能）
+db.version(74).stores({
+    dexiData: 'key, value',
+    lorebooks: '++id, name',
+    characters: '++id, name, type',
+    sticker_categories: '++id, name',
+    moments: '++id, userId, time, ownerUserId',
+    friend_requests: '++id, fromCharId, toAccountId, status, time',
+    group_chats: '++id, name, ownerAccountId, created_at',
+    phone_recents: '++id, accountId, charId, time, type',
+    sms_messages: '++id, accountId, charId, time, read',
+    chat_summaries: '++id, accountId, chatType, chatId, time' // 聊天总结表：accountId账号隔离，chatType(private/group)，chatId角色/群聊ID，time总结时间
+});
+
+// 📦 数据迁移：将 localStorage 中的电话和短信记录迁移到 IndexedDB
+async function migratePhoneAndSmsToIndexedDB() {
+    const migrationKey = 'phone_sms_migrated_to_indexeddb';
+    if (localStorage.getItem(migrationKey) === 'true') {
+        return; // 已经迁移过
+    }
+    
+    console.log('[Migration] 开始迁移电话和短信记录到 IndexedDB...');
+    
+    // 获取默认账号ID
+    const currentAccountId = localStorage.getItem('current_my_char_id') || '1';
+    
+    // 迁移电话记录
+    try {
+        const phoneRecents = JSON.parse(localStorage.getItem('phone_recents') || '[]');
+        if (phoneRecents.length > 0) {
+            console.log(`[Migration] 迁移 ${phoneRecents.length} 条电话记录...`);
+            for (const record of phoneRecents) {
+                await db.phone_recents.add({
+                    accountId: currentAccountId,
+                    charId: null, // 旧数据没有 charId
+                    name: record.name,
+                    number: record.number,
+                    time: record.time || Date.now(),
+                    type: record.type || 'missed',
+                    isBlocked: record.isBlocked || false
+                });
+            }
+            // 清理旧数据
+            localStorage.removeItem('phone_recents');
+            console.log('[Migration] ✅ 电话记录迁移完成');
+        }
+    } catch (e) {
+        console.error('[Migration] ❌ 电话记录迁移失败:', e);
+    }
+    
+    // 迁移短信记录
+    try {
+        const smsMessages = JSON.parse(localStorage.getItem('sms_messages') || '[]');
+        if (smsMessages.length > 0) {
+            console.log(`[Migration] 迁移 ${smsMessages.length} 条短信记录...`);
+            for (const msg of smsMessages) {
+                await db.sms_messages.add({
+                    accountId: currentAccountId,
+                    charId: null, // 旧数据没有 charId
+                    sender: msg.sender,
+                    number: msg.number,
+                    content: msg.content || msg.message,
+                    time: msg.time || msg.timestamp || Date.now(),
+                    read: msg.read !== false,
+                    type: msg.type || 'received',
+                    isBlocked: msg.isBlocked || false,
+                    receiverName: msg.receiverName,
+                    receiverId: msg.receiverId
+                });
+            }
+            // 清理旧数据
+            localStorage.removeItem('sms_messages');
+            console.log('[Migration] ✅ 短信记录迁移完成');
+        }
+    } catch (e) {
+        console.error('[Migration] ❌ 短信记录迁移失败:', e);
+    }
+    
+    // 标记迁移完成
+    localStorage.setItem(migrationKey, 'true');
+    console.log('[Migration] 🎉 电话和短信数据迁移完成');
+}
 
         let currentSelectIcon = '';
         let currentCharacterType = 'char'; // 默认为 char
@@ -157,6 +251,7 @@ db.version(72).stores({
             await restoreDesktopOrder(); // 优先恢复桌面图标顺序
             await restoreSetting(); // 异步恢复DEXie数据
             await migrateAccountData(); // 迁移账号隔离数据
+            await migratePhoneAndSmsToIndexedDB(); // 迁移电话和短信记录到IndexedDB
             await loadWardrobeCharacter(); // 加载衣柜人物形象
             initDesktopDrag(); // 初始化桌面拖拽
             syncPreview();
@@ -209,20 +304,15 @@ db.version(72).stores({
             
             // 启动主动聊天检测 (每分钟一次)
             startAutoChatLoop();
+            
+            // ✅ 自动初始化联机系统（不需要手动打开设置）
+            initOnlineSystem();
         }
 
-        // --- 通知系统逻辑 ---
-        // 自动检测环境：本地用localhost，部署用Zeabur域名
-        const BACKEND_URL = location.hostname === 'localhost' 
-            ? 'http://localhost:5000'
-            : 'https://rime-fsv3.onrender.com'; // ✅ Render 部署地址
-        const API_BASE = BACKEND_URL + '/api';
-        const SOCKET_URL = BACKEND_URL; // WebSocket自动使用同一个地址
-        
-        console.log('[Config] BACKEND_URL:', BACKEND_URL);
-        console.log('[Config] Current hostname:', location.hostname);
-        
-        let socket = null; // WebSocket连接 
+        // --- 纯前端模式：所有数据存储在本地 ---
+        // 已移除后端依赖，通知、角色、聊天记录全部使用 IndexedDB 存储
+        console.log('[Config] 纯前端模式：无需后端服务');
+        console.log('[Config] 所有数据存储在本地 IndexedDB');
 
         // 启动轮询
         function startNotificationLoop(seconds) {
@@ -416,6 +506,42 @@ db.version(72).stores({
             }, 3000);
         }
 
+        // API 错误提示弹窗
+        let apiErrorTimer = null;
+        function showApiErrorToast(errorMessage) {
+            // 创建或获取弹窗元素
+            let toast = document.getElementById('api-error-toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'api-error-toast';
+                toast.className = 'api-error-toast';
+                document.body.appendChild(toast);
+            }
+            
+            // 清除之前的定时器
+            if (apiErrorTimer) clearTimeout(apiErrorTimer);
+            
+            // 构建错误提示内容
+            toast.innerHTML = `
+                <div class="error-icon">⚠️</div>
+                <div class="error-title">请求失败</div>
+                <div class="error-msg">${errorMessage}</div>
+            `;
+            toast.classList.add('show');
+            
+            // 4秒后自动隐藏
+            apiErrorTimer = setTimeout(() => {
+                toast.classList.remove('show');
+            }, 4000);
+            
+            // 点击关闭
+            toast.style.pointerEvents = 'auto';
+            toast.onclick = () => {
+                toast.classList.remove('show');
+                if (apiErrorTimer) clearTimeout(apiErrorTimer);
+            };
+        }
+
         // 全局日志系统
         const systemLogs = [];
         const MAX_LOGS = 100;
@@ -553,7 +679,7 @@ db.version(72).stores({
                 <strong style="color:#007aff;">环境信息:</strong><br>
                 <span style="margin-top:5px; display:block;">协议: ${location.protocol}</span>
                 <span style="display:block;">域名: ${location.hostname}</span>
-                <span style="display:block;">后端: ${BACKEND_URL}</span>
+                <span style="display:block;">模式: 纯前端（无需后端）</span>
             </div>`;
             
             // 6. 开启主动聊天的角色
@@ -622,31 +748,146 @@ db.version(72).stores({
 
         // ===== 数据导入导出功能 =====
         
-        // 导出所有数据
-        async function exportAllData() {
+        // 显示导出选项弹窗
+        function showExportOptions() {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0,0,0,0.5);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 100000;
+            `;
+            
+            const dialog = document.createElement('div');
+            dialog.style.cssText = `
+                background: white;
+                border-radius: 12px;
+                padding: 24px;
+                max-width: 400px;
+                width: 90%;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            `;
+            
+            dialog.innerHTML = `
+                <h3 style="margin: 0 0 16px 0; font-size: 18px;">导出数据选项</h3>
+                <p style="margin: 0 0 20px 0; font-size: 14px; color: #666;">
+                    选择要导出的数据类型：
+                </p>
+                <div style="margin-bottom: 20px;">
+                    <label style="display: flex; align-items: center; margin-bottom: 12px; cursor: pointer;">
+                        <input type="checkbox" id="export-local-data" checked style="margin-right: 8px; width: 18px; height: 18px;">
+                        <div>
+                            <div style="font-weight: 500;">本地数据</div>
+                            <div style="font-size: 12px; color: #999;">
+                                包括：角色、聊天记录、世界书、表情包、朋友圈、群聊、电话/短信记录等
+                            </div>
+                        </div>
+                    </label>
+                    <label style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="export-online-data" checked style="margin-right: 8px; width: 18px; height: 18px;">
+                        <div>
+                            <div style="font-weight: 500;">联机账号数据</div>
+                            <div style="font-size: 12px; color: #999;">
+                                包括：联机服务器地址、登录Token、用户信息
+                            </div>
+                        </div>
+                    </label>
+                </div>
+                <div style="display: flex; gap: 12px; justify-content: flex-end;">
+                    <button id="export-cancel-btn" style="padding: 8px 16px; border: 1px solid #ddd; background: white; border-radius: 6px; cursor: pointer;">
+                        取消
+                    </button>
+                    <button id="export-confirm-btn" style="padding: 8px 16px; border: none; background: #07c160; color: white; border-radius: 6px; cursor: pointer;">
+                        确定导出
+                    </button>
+                </div>
+            `;
+            
+            overlay.appendChild(dialog);
+            document.body.appendChild(overlay);
+            
+            // 绑定事件
+            document.getElementById('export-cancel-btn').onclick = () => {
+                document.body.removeChild(overlay);
+            };
+            
+            document.getElementById('export-confirm-btn').onclick = async () => {
+                const includeLocal = document.getElementById('export-local-data').checked;
+                const includeOnline = document.getElementById('export-online-data').checked;
+                
+                if (!includeLocal && !includeOnline) {
+                    alert('请至少选择一种数据类型');
+                    return;
+                }
+                
+                document.body.removeChild(overlay);
+                await exportAllDataWithOptions(includeLocal, includeOnline);
+            };
+            
+            // 点击背景关闭
+            overlay.onclick = (e) => {
+                if (e.target === overlay) {
+                    document.body.removeChild(overlay);
+                }
+            };
+        }
+        
+        // 导出所有数据（带选项）
+        async function exportAllDataWithOptions(includeLocal = true, includeOnline = true) {
             try {
                 const exportData = {
-                    version: '1.0',
+                    version: '2.0', // 版本升级到2.0
                     exportTime: new Date().toISOString(),
+                    dataTypes: {
+                        local: includeLocal,
+                        online: includeOnline
+                    },
                     data: {}
                 };
                 
-                // 导出所有数据库表
-                exportData.data.dexiData = await db.dexiData.toArray();
-                exportData.data.lorebooks = await db.lorebooks.toArray();
-                exportData.data.characters = await db.characters.toArray();
-                exportData.data.sticker_categories = await db.sticker_categories.toArray();
-                exportData.data.moments = await db.moments.toArray();
-                exportData.data.friend_requests = await db.friend_requests.toArray();
+                if (includeLocal) {
+                    // 导出所有数据库表
+                    exportData.data.dexiData = await db.dexiData.toArray();
+                    exportData.data.lorebooks = await db.lorebooks.toArray();
+                    exportData.data.characters = await db.characters.toArray();
+                    exportData.data.sticker_categories = await db.sticker_categories.toArray();
+                    exportData.data.moments = await db.moments.toArray();
+                    exportData.data.friend_requests = await db.friend_requests.toArray();
+                    
+                    // 新增：导出群聊数据
+                    exportData.data.group_chats = await db.group_chats.toArray();
+                    
+                    // 新增：导出电话和短信记录
+                    exportData.data.phone_recents = await db.phone_recents.toArray();
+                    exportData.data.sms_messages = await db.sms_messages.toArray();
+                    
+                    // 新增：导出聊天总结
+                    exportData.data.chat_summaries = await db.chat_summaries.toArray();
+                    
+                    // 导出本地 localStorage 数据
+                    exportData.localStorage = {
+                        user_id: localStorage.getItem('user_id'),
+                        current_my_char_id: localStorage.getItem('current_my_char_id'),
+                        notification_enabled: localStorage.getItem('notification_enabled'),
+                        debug_mode: localStorage.getItem('debug_mode'),
+                        keepalive_enabled: localStorage.getItem('keepalive_enabled')
+                    };
+                }
                 
-                // 导出 localStorage 数据
-                exportData.localStorage = {
-                    user_id: localStorage.getItem('user_id'),
-                    current_my_char_id: localStorage.getItem('current_my_char_id'),
-                    notification_enabled: localStorage.getItem('notification_enabled'),
-                    debug_mode: localStorage.getItem('debug_mode'),
-                    keepalive_enabled: localStorage.getItem('keepalive_enabled')
-                };
+                if (includeOnline) {
+                    // 导出联机相关数据
+                    exportData.onlineData = {
+                        server_url: localStorage.getItem('online_server_url'),
+                        token: localStorage.getItem('online_token'),
+                        user_data: localStorage.getItem('online_user_data')
+                    };
+                }
                 
                 // 转换为JSON字符串
                 const jsonString = JSON.stringify(exportData, null, 2);
@@ -656,29 +897,54 @@ db.version(72).stores({
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `wechat_data_backup_${new Date().getTime()}.json`;
+                
+                // 根据导出的数据类型设置文件名
+                let filename = 'wechat_backup_';
+                if (includeLocal && includeOnline) {
+                    filename += 'full_';
+                } else if (includeLocal) {
+                    filename += 'local_';
+                } else if (includeOnline) {
+                    filename += 'online_';
+                }
+                filename += new Date().getTime() + '.json';
+                
+                a.download = filename;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
                 
-                alert('数据导出成功！');
+                // 显示导出的数据统计
+                let stats = [];
+                if (includeLocal) {
+                    const charCount = exportData.data.characters?.length || 0;
+                    const groupCount = exportData.data.group_chats?.length || 0;
+                    const momentCount = exportData.data.moments?.length || 0;
+                    stats.push(`角色: ${charCount}个`);
+                    stats.push(`群聊: ${groupCount}个`);
+                    stats.push(`朋友圈: ${momentCount}条`);
+                }
+                if (includeOnline) {
+                    stats.push('联机账号信息已包含');
+                }
+                
+                alert('数据导出成功！\n\n' + stats.join('\n'));
             } catch (error) {
                 console.error('导出数据失败:', error);
                 alert('导出数据失败: ' + error.message);
             }
         }
         
+        // 兼容旧版本：直接调用时显示选项
+        async function exportAllData() {
+            showExportOptions();
+        }
+        
         // 导入所有数据
         async function importAllData(input) {
             const file = input.files[0];
             if (!file) return;
-            
-            // 确认对话框
-            if (!confirm('导入数据将覆盖现有数据，是否继续？\n\n建议先导出当前数据作为备份。')) {
-                input.value = ''; // 清空文件选择
-                return;
-            }
             
             try {
                 const text = await file.text();
@@ -689,46 +955,127 @@ db.version(72).stores({
                     throw new Error('数据格式不正确');
                 }
                 
+                // 检测数据类型
+                const hasLocalData = importData.dataTypes?.local !== false;
+                const hasOnlineData = importData.onlineData || (importData.dataTypes?.online === true);
+                
+                // 显示导入内容预览
+                let previewMsg = '即将导入以下数据：\n\n';
+                if (hasLocalData) {
+                    const charCount = importData.data.characters?.length || 0;
+                    const groupCount = importData.data.group_chats?.length || 0;
+                    const momentCount = importData.data.moments?.length || 0;
+                    previewMsg += `📱 本地数据：\n`;
+                    previewMsg += `  - 角色: ${charCount}个\n`;
+                    previewMsg += `  - 群聊: ${groupCount}个\n`;
+                    previewMsg += `  - 朋友圈: ${momentCount}条\n`;
+                    previewMsg += `  - 以及世界书、表情包、电话/短信记录等\n\n`;
+                }
+                if (hasOnlineData) {
+                    const userData = importData.onlineData?.user_data;
+                    if (userData) {
+                        try {
+                            const userObj = JSON.parse(userData);
+                            previewMsg += `🌐 联机账号：${userObj.username || '未知'}\n\n`;
+                        } catch {
+                            previewMsg += `🌐 联机账号数据\n\n`;
+                        }
+                    } else {
+                        previewMsg += `🌐 联机账号数据\n\n`;
+                    }
+                }
+                
+                previewMsg += '⚠️ 导入将覆盖现有数据！\n建议先导出当前数据作为备份。\n\n是否继续？';
+                
+                // 确认对话框
+                if (!confirm(previewMsg)) {
+                    input.value = ''; // 清空文件选择
+                    return;
+                }
+                
                 // 清空现有数据
-                await db.dexiData.clear();
-                await db.lorebooks.clear();
-                await db.characters.clear();
-                await db.sticker_categories.clear();
-                await db.moments.clear();
-                await db.friend_requests.clear();
+                if (hasLocalData) {
+                    await db.dexiData.clear();
+                    await db.lorebooks.clear();
+                    await db.characters.clear();
+                    await db.sticker_categories.clear();
+                    await db.moments.clear();
+                    await db.friend_requests.clear();
+                    
+                    // 清空新增的表
+                    if (db.group_chats) await db.group_chats.clear();
+                    if (db.phone_recents) await db.phone_recents.clear();
+                    if (db.sms_messages) await db.sms_messages.clear();
+                    if (db.chat_summaries) await db.chat_summaries.clear();
+                }
                 
                 // 导入数据库表数据
-                if (importData.data.dexiData) {
-                    await db.dexiData.bulkAdd(importData.data.dexiData);
-                }
-                if (importData.data.lorebooks) {
-                    await db.lorebooks.bulkAdd(importData.data.lorebooks);
-                }
-                if (importData.data.characters) {
-                    await db.characters.bulkAdd(importData.data.characters);
-                }
-                if (importData.data.sticker_categories) {
-                    await db.sticker_categories.bulkAdd(importData.data.sticker_categories);
-                }
-                if (importData.data.moments) {
-                    await db.moments.bulkAdd(importData.data.moments);
-                }
-                if (importData.data.friend_requests) {
-                    await db.friend_requests.bulkAdd(importData.data.friend_requests);
+                if (hasLocalData && importData.data) {
+                    if (importData.data.dexiData) {
+                        await db.dexiData.bulkAdd(importData.data.dexiData);
+                    }
+                    if (importData.data.lorebooks) {
+                        await db.lorebooks.bulkAdd(importData.data.lorebooks);
+                    }
+                    if (importData.data.characters) {
+                        await db.characters.bulkAdd(importData.data.characters);
+                    }
+                    if (importData.data.sticker_categories) {
+                        await db.sticker_categories.bulkAdd(importData.data.sticker_categories);
+                    }
+                    if (importData.data.moments) {
+                        await db.moments.bulkAdd(importData.data.moments);
+                    }
+                    if (importData.data.friend_requests) {
+                        await db.friend_requests.bulkAdd(importData.data.friend_requests);
+                    }
+                    
+                    // 导入新增的表
+                    if (importData.data.group_chats && db.group_chats) {
+                        await db.group_chats.bulkAdd(importData.data.group_chats);
+                    }
+                    if (importData.data.phone_recents && db.phone_recents) {
+                        await db.phone_recents.bulkAdd(importData.data.phone_recents);
+                    }
+                    if (importData.data.sms_messages && db.sms_messages) {
+                        await db.sms_messages.bulkAdd(importData.data.sms_messages);
+                    }
+                    if (importData.data.chat_summaries && db.chat_summaries) {
+                        await db.chat_summaries.bulkAdd(importData.data.chat_summaries);
+                    }
+                    
+                    // 导入 localStorage 数据
+                    if (importData.localStorage) {
+                        Object.keys(importData.localStorage).forEach(key => {
+                            const value = importData.localStorage[key];
+                            if (value !== null && value !== undefined) {
+                                localStorage.setItem(key, value);
+                            }
+                        });
+                    }
                 }
                 
-                // 导入 localStorage 数据
-                if (importData.localStorage) {
-                    Object.keys(importData.localStorage).forEach(key => {
-                        const value = importData.localStorage[key];
-                        if (value !== null) {
-                            localStorage.setItem(key, value);
-                        }
-                    });
+                // 导入联机数据
+                if (hasOnlineData && importData.onlineData) {
+                    if (importData.onlineData.server_url) {
+                        localStorage.setItem('online_server_url', importData.onlineData.server_url);
+                    }
+                    if (importData.onlineData.token) {
+                        localStorage.setItem('online_token', importData.onlineData.token);
+                    }
+                    if (importData.onlineData.user_data) {
+                        localStorage.setItem('online_user_data', importData.onlineData.user_data);
+                    }
                 }
                 
                 input.value = ''; // 清空文件选择
-                alert('数据导入成功！页面即将刷新...');
+                
+                let successMsg = '数据导入成功！\n\n';
+                if (hasLocalData) successMsg += '✅ 本地数据已导入\n';
+                if (hasOnlineData) successMsg += '✅ 联机账号已导入\n';
+                successMsg += '\n页面即将刷新...';
+                
+                alert(successMsg);
                 
                 // 刷新页面以应用导入的数据
                 setTimeout(() => {
@@ -744,7 +1091,7 @@ db.version(72).stores({
         
         // 清空所有数据
         async function clearAllDataConfirm() {
-            const confirm1 = confirm('⚠️ 警告：此操作将删除所有数据！\n\n包括：\n- 所有角色和聊天记录\n- 所有世界书\n- 所有表情包\n- 所有朋友圈\n- API设置\n\n此操作不可恢复，确定要继续吗？');
+            const confirm1 = confirm('⚠️ 警告：此操作将删除所有数据！\n\n包括：\n- 所有角色和聊天记录\n- 所有世界书\n- 所有表情包\n- 所有朋友圈\n- 所有群聊\n- 电话和短信记录\n- 联机账号信息\n- API设置\n\n此操作不可恢复，确定要继续吗？');
             if (!confirm1) return;
             
             const confirm2 = prompt('请输入"确认删除"以继续：');
@@ -761,6 +1108,12 @@ db.version(72).stores({
                 await db.sticker_categories.clear();
                 await db.moments.clear();
                 await db.friend_requests.clear();
+                
+                // 清空新增的表
+                if (db.group_chats) await db.group_chats.clear();
+                if (db.phone_recents) await db.phone_recents.clear();
+                if (db.sms_messages) await db.sms_messages.clear();
+                if (db.chat_summaries) await db.chat_summaries.clear();
                 
                 // 清空 localStorage
                 localStorage.clear();
@@ -789,18 +1142,46 @@ db.version(72).stores({
             document.getElementById('notification-center').style.display = 'none';
         }
 
-        // 获取通知
+        // 获取通知（纯前端：从本地 IndexedDB 读取）
         async function fetchNotifications() {
             const enabled = localStorage.getItem('notification_enabled') === 'true';
             if (!enabled) return;
 
             try {
-                const res = await fetch(`${API_BASE}/notifications?user_id=${currentUserId}`);
-                if (!res.ok) return;
-                const list = await res.json();
+                // 从本地存储读取通知
+                const notificationsJson = localStorage.getItem(`notifications_${currentUserId}`);
+                const list = notificationsJson ? JSON.parse(notificationsJson) : [];
                 renderNotifications(list);
             } catch (err) {
                 console.error('获取通知失败:', err);
+            }
+        }
+        
+        // 添加本地通知（纯前端版本）
+        function addLocalNotification(title, content, type = 'single') {
+            try {
+                const notificationsJson = localStorage.getItem(`notifications_${currentUserId}`);
+                const list = notificationsJson ? JSON.parse(notificationsJson) : [];
+                
+                const newNotif = {
+                    id: Date.now(),
+                    title: title,
+                    content: content,
+                    type: type,
+                    timestamp: Date.now() / 1000,
+                    is_read: false
+                };
+                
+                list.unshift(newNotif);
+                
+                // 最多保留100条通知
+                if (list.length > 100) list.pop();
+                
+                localStorage.setItem(`notifications_${currentUserId}`, JSON.stringify(list));
+                return newNotif;
+            } catch (err) {
+                console.error('添加通知失败:', err);
+                return null;
             }
         }
 
@@ -929,16 +1310,20 @@ db.version(72).stores({
             console.log(`[Notification] ========================================`);
         }
 
-        // 标记已读
+        // 标记已读（纯前端：更新本地存储）
         async function markRead(id, isRead) {
             if (isRead) return; // 已经是已读
 
             try {
-                await fetch(`${API_BASE}/notifications/${id}/read`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ user_id: currentUserId })
-                });
+                const notificationsJson = localStorage.getItem(`notifications_${currentUserId}`);
+                const list = notificationsJson ? JSON.parse(notificationsJson) : [];
+                
+                const notif = list.find(n => n.id === id);
+                if (notif) {
+                    notif.is_read = true;
+                    localStorage.setItem(`notifications_${currentUserId}`, JSON.stringify(list));
+                }
+                
                 // 重新获取刷新列表
                 fetchNotifications();
             } catch (err) {
@@ -959,6 +1344,95 @@ db.version(72).stores({
                 arrow.classList.add('active');
                 // arrow.innerText = '↑'; // SVG旋转
             }
+        }
+
+        // 全局字体设置相关函数
+        let customFontStyleElement = null;
+        
+        // 预览自定义字体
+        function previewCustomFont() {
+            const fontUrl = document.getElementById('custom-font-input').value.trim();
+            const fontName = document.getElementById('custom-font-name-input').value.trim();
+            
+            if (!fontUrl || !fontName) {
+                alert('请填写字体链接和字体名称');
+                return;
+            }
+            
+            // 动态加载字体样式
+            loadCustomFont(fontUrl, fontName, true);
+        }
+        
+        // 加载并应用自定义字体
+        function loadCustomFont(fontUrl, fontName, previewOnly = false) {
+            // 移除旧的字体样式
+            const oldLink = document.getElementById('custom-font-link');
+            if (oldLink) oldLink.remove();
+            
+            // 创建新的 link 标签加载字体
+            const link = document.createElement('link');
+            link.id = 'custom-font-link';
+            link.rel = 'stylesheet';
+            link.href = fontUrl;
+            document.head.appendChild(link);
+            
+            // 等待字体加载完成后应用
+            link.onload = function() {
+                if (previewOnly) {
+                    // 仅预览：只应用到预览区域
+                    const previewText = document.getElementById('font-preview-text');
+                    previewText.style.fontFamily = `"${fontName}", sans-serif`;
+                    previewText.innerText = `这是字体预览效果 ABC 123\n${fontName}`;
+                } else {
+                    // 全局应用
+                    applyFontGlobal(fontName);
+                }
+            };
+            
+            link.onerror = function() {
+                alert('字体加载失败，请检查链接是否正确');
+            };
+        }
+        
+        // 应用字体到全局
+        function applyFontGlobal(fontName) {
+            // 移除旧的全局字体样式
+            if (customFontStyleElement) {
+                customFontStyleElement.remove();
+            }
+            
+            // 创建新的样式元素
+            customFontStyleElement = document.createElement('style');
+            customFontStyleElement.id = 'custom-font-global';
+            customFontStyleElement.textContent = `
+                * {
+                    font-family: "${fontName}", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+                }
+            `;
+            document.head.appendChild(customFontStyleElement);
+        }
+        
+        // 清除自定义字体，恢复默认
+        function clearCustomFont() {
+            // 清除输入框
+            document.getElementById('custom-font-input').value = '';
+            document.getElementById('custom-font-name-input').value = '';
+            
+            // 移除字体链接和全局样式
+            const fontLink = document.getElementById('custom-font-link');
+            if (fontLink) fontLink.remove();
+            
+            if (customFontStyleElement) {
+                customFontStyleElement.remove();
+                customFontStyleElement = null;
+            }
+            
+            // 重置预览区域
+            const previewText = document.getElementById('font-preview-text');
+            previewText.style.fontFamily = '';
+            previewText.innerText = '这是字体预览效果 ABC 123';
+            
+            alert('已恢复默认字体');
         }
 
         // 同步预览区和输入框
@@ -990,6 +1464,13 @@ db.version(72).stores({
             const bubbleColor = getComputedStyle(document.documentElement).getPropertyValue('--bubble-bg').trim() || '#FFF7FA';
             document.getElementById('capsule-color-input').value = capsuleColor;
             document.getElementById('bubble-color-input').value = bubbleColor;
+            // 字体预览同步
+            const fontName = document.getElementById('custom-font-name-input').value.trim();
+            const previewText = document.getElementById('font-preview-text');
+            if (fontName && previewText) {
+                previewText.style.fontFamily = `"${fontName}", sans-serif`;
+                previewText.innerText = `这是字体预览效果 ABC 123\n${fontName}`;
+            }
         }
 
         // 页面切换
@@ -1138,6 +1619,9 @@ db.version(72).stores({
                 if (modelItem) {
                     select.value = modelItem.value;
                 }
+                
+                // 加载预设列表
+                await loadApiPresetList();
             } catch (e) {
                 console.error("加载 API 配置失败", e);
             }
@@ -1154,6 +1638,167 @@ db.version(72).stores({
             await db.dexiData.put({ key: 'aiApiKey', value: key });
             await db.dexiData.put({ key: 'aiCurrentModel', value: model });
             await db.dexiData.put({ key: 'aiTemperature', value: temp });
+        }
+        
+        // ========== API 预设管理 ==========
+        
+        // 加载预设列表到下拉框
+        async function loadApiPresetList() {
+            const select = document.getElementById('api-preset-select');
+            if (!select) return;
+            
+            try {
+                const presetsData = await db.dexiData.get('apiPresets');
+                const presets = presetsData?.value ? JSON.parse(presetsData.value) : [];
+                const currentPresetData = await db.dexiData.get('currentApiPreset');
+                const currentPresetName = currentPresetData?.value || '';
+                
+                select.innerHTML = '<option value="">-- 选择预设 --</option>';
+                presets.forEach(preset => {
+                    const opt = document.createElement('option');
+                    opt.value = preset.name;
+                    opt.textContent = preset.name;
+                    if (preset.name === currentPresetName) {
+                        opt.selected = true;
+                    }
+                    select.appendChild(opt);
+                });
+            } catch (e) {
+                console.error('加载API预设列表失败:', e);
+            }
+        }
+        
+        // 保存当前配置为预设
+        async function saveApiPreset() {
+            const name = prompt('请输入预设名称：');
+            if (!name || !name.trim()) return;
+            
+            const presetName = name.trim();
+            const url = document.getElementById('ai-url-input').value.trim();
+            const key = document.getElementById('ai-key-input').value.trim();
+            const model = document.getElementById('ai-model-select').value;
+            const temp = document.getElementById('ai-temp-slider').value;
+            const modelListData = await db.dexiData.get('aiModelList');
+            const modelList = modelListData?.value || '[]';
+            
+            const newPreset = {
+                name: presetName,
+                url: url,
+                key: key,
+                model: model,
+                temperature: temp,
+                modelList: modelList
+            };
+            
+            try {
+                const presetsData = await db.dexiData.get('apiPresets');
+                let presets = presetsData?.value ? JSON.parse(presetsData.value) : [];
+                
+                // 检查是否已存在同名预设
+                const existingIndex = presets.findIndex(p => p.name === presetName);
+                if (existingIndex >= 0) {
+                    if (!confirm(`预设"${presetName}"已存在，是否覆盖？`)) return;
+                    presets[existingIndex] = newPreset;
+                } else {
+                    presets.push(newPreset);
+                }
+                
+                await db.dexiData.put({ key: 'apiPresets', value: JSON.stringify(presets) });
+                await db.dexiData.put({ key: 'currentApiPreset', value: presetName });
+                
+                await loadApiPresetList();
+                alert(`预设"${presetName}"已保存！`);
+            } catch (e) {
+                console.error('保存API预设失败:', e);
+                alert('保存预设失败：' + e.message);
+            }
+        }
+        
+        // 加载选中的预设
+        async function loadApiPreset(presetName) {
+            if (!presetName) return;
+            
+            try {
+                const presetsData = await db.dexiData.get('apiPresets');
+                const presets = presetsData?.value ? JSON.parse(presetsData.value) : [];
+                const preset = presets.find(p => p.name === presetName);
+                
+                if (!preset) {
+                    alert('预设不存在');
+                    return;
+                }
+                
+                // 应用预设到输入框
+                document.getElementById('ai-url-input').value = preset.url || '';
+                document.getElementById('ai-key-input').value = preset.key || '';
+                document.getElementById('ai-temp-slider').value = preset.temperature || '0.7';
+                updateTempDisplay(preset.temperature || '0.7');
+                
+                // 恢复模型列表和选择
+                const select = document.getElementById('ai-model-select');
+                if (preset.modelList) {
+                    try {
+                        const models = JSON.parse(preset.modelList);
+                        select.innerHTML = '<option value="" disabled>请选择模型</option>';
+                        models.forEach(m => {
+                            const opt = document.createElement('option');
+                            opt.value = m.id;
+                            opt.text = m.id;
+                            select.appendChild(opt);
+                        });
+                    } catch (e) {
+                        select.innerHTML = '<option value="" disabled>请拉取</option>';
+                    }
+                }
+                if (preset.model) {
+                    select.value = preset.model;
+                }
+                
+                // 保存到数据库
+                await db.dexiData.put({ key: 'aiBaseUrl', value: preset.url || '' });
+                await db.dexiData.put({ key: 'aiApiKey', value: preset.key || '' });
+                await db.dexiData.put({ key: 'aiCurrentModel', value: preset.model || '' });
+                await db.dexiData.put({ key: 'aiTemperature', value: preset.temperature || '0.7' });
+                await db.dexiData.put({ key: 'aiModelList', value: preset.modelList || '[]' });
+                await db.dexiData.put({ key: 'currentApiPreset', value: presetName });
+                
+            } catch (e) {
+                console.error('加载API预设失败:', e);
+                alert('加载预设失败：' + e.message);
+            }
+        }
+        
+        // 删除当前选中的预设
+        async function deleteApiPreset() {
+            const select = document.getElementById('api-preset-select');
+            const presetName = select.value;
+            
+            if (!presetName) {
+                alert('请先选择要删除的预设');
+                return;
+            }
+            
+            if (!confirm(`确定要删除预设"${presetName}"吗？`)) return;
+            
+            try {
+                const presetsData = await db.dexiData.get('apiPresets');
+                let presets = presetsData?.value ? JSON.parse(presetsData.value) : [];
+                
+                presets = presets.filter(p => p.name !== presetName);
+                await db.dexiData.put({ key: 'apiPresets', value: JSON.stringify(presets) });
+                
+                // 如果删除的是当前预设，清空当前预设标记
+                const currentPresetData = await db.dexiData.get('currentApiPreset');
+                if (currentPresetData?.value === presetName) {
+                    await db.dexiData.put({ key: 'currentApiPreset', value: '' });
+                }
+                
+                await loadApiPresetList();
+                alert(`预设"${presetName}"已删除`);
+            } catch (e) {
+                console.error('删除API预设失败:', e);
+                alert('删除预设失败：' + e.message);
+            }
         }
 
         // NovelAI 设置相关函数
@@ -1475,6 +2120,12 @@ db.version(72).stores({
             saveData.capsuleColor = capsuleColor;
             saveData.bubbleColor = bubbleColor;
 
+            // 保存自定义字体
+            const customFontUrl = document.getElementById('custom-font-input').value.trim();
+            const customFontName = document.getElementById('custom-font-name-input').value.trim();
+            saveData.customFontUrl = customFontUrl;
+            saveData.customFontName = customFontName;
+
             // 循环保存
             for (const [key, value] of Object.entries(saveData)) {
                 await db.dexiData.put({ key, value });
@@ -1492,6 +2143,11 @@ db.version(72).stores({
             // 应用椭圆形颜色
             document.documentElement.style.setProperty('--capsule-bg', capsuleColor);
             document.documentElement.style.setProperty('--bubble-bg', bubbleColor);
+
+            // 应用自定义字体到全局
+            if (customFontUrl && customFontName) {
+                loadCustomFont(customFontUrl, customFontName, false);
+            }
 
             // 保存提示
             const tip = document.getElementById('save-tip');
@@ -2397,6 +3053,18 @@ function getFormattedVirtualTime(offset) {
 
 // --- App Store 逻辑 ---
 // 应用安装状态管理
+// icity Dexie 数据库初始化（无限容量）
+const icityDb = new Dexie('IcityDB');
+icityDb.version(1).stores({
+    diaries: '++id, content, time, roleName, wechatId, avatarUrl, isUserPublished, createdAt',
+    annotations: '++id, diaryId, text, comment, createdAt'
+});
+// 版本2：添加 accountId 字段用于账号数据隔离
+icityDb.version(2).stores({
+    diaries: '++id, content, time, roleName, wechatId, avatarUrl, isUserPublished, createdAt, accountId',
+    annotations: '++id, diaryId, text, comment, createdAt, accountId'
+});
+
 const installedAppsDb = new Dexie('InstalledAppsDB');
 installedAppsDb.version(1).stores({
     apps: 'appId, installed, installDate'
@@ -2475,6 +3143,21 @@ async function uninstallApp(appId, desktopIconId) {
 // 初始化已安装应用的桌面图标显示
 async function initInstalledApps() {
     try {
+        // 🔥 默认预装应用：网易云音乐（桌面默认显示，确保数据库中也标记为已安装）
+        const defaultApps = [
+            { appId: 'netease-music', desktopIconId: 'icon-photo', showFunction: 'showMusicAppPage' }
+        ];
+        for (const defApp of defaultApps) {
+            const existing = await installedAppsDb.apps.get(defApp.appId);
+            if (!existing) {
+                await installedAppsDb.apps.put({
+                    appId: defApp.appId,
+                    installed: true,
+                    installDate: new Date()
+                });
+            }
+        }
+        
         // 从 IndexedDB 加载
         const installedApps = await installedAppsDb.apps.toArray();
         installedApps.forEach(app => {
@@ -3874,20 +4557,22 @@ async function deleteSelectedMessageChats() {
         return;
     }
     
-    const smsMessages = JSON.parse(localStorage.getItem('sms_messages') || '[]');
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
     
-    // 删除选中聊天的所有消息（排除欢迎小助手）
-    const filteredMessages = smsMessages.filter(msg => {
+    // 从 Dexie 删除选中聊天的所有消息
+    const allMessages = await db.sms_messages.where('accountId').equals(accountId).toArray();
+    const idsToDelete = allMessages.filter(msg => {
         let chatId;
         if (msg.type === 'sent') {
             chatId = msg.number || msg.receiverId || msg.sender;
         } else {
             chatId = msg.number || msg.sender;
         }
-        return !chatsToDelete.includes(chatId);
-    });
+        return chatsToDelete.includes(chatId);
+    }).map(msg => msg.id);
     
-    localStorage.setItem('sms_messages', JSON.stringify(filteredMessages));
+    await db.sms_messages.bulkDelete(idsToDelete);
     
     // 如果当前打开的聊天被删除了，先返回列表页
     if (currentMessageChatId && selectedMessageChats.has(currentMessageChatId)) {
@@ -3917,31 +4602,21 @@ async function renderMessageList() {
     const listContainer = document.getElementById('message-chat-list-container');
     if (!listContainer) return;
     
-    // 🎯 从 localStorage 读取短信记录（按账号过滤）
+    // 🎯 从 Dexie 读取短信记录（按账号过滤）
     const accountId = getCurrentAccountId();
-    let smsMessages = JSON.parse(localStorage.getItem('sms_messages') || '[]');
+    let smsMessages = [];
     
-    // 如果启用了账号隔离，只显示当前账号的消息
     if (accountId) {
-        const myChar = await db.characters.get(parseInt(accountId));
-        if (myChar) {
-            const myName = myChar.nick || myChar.name;
-            smsMessages = smsMessages.filter(msg => {
-                // 对于发送的消息，检查sender是否是当前账号
-                // 对于接收的消息，都显示（因为都是发给当前账号的）
-                if (msg.type === 'sent') {
-                    return msg.sender === myName;
-                } else {
-                    return true;
-                }
-            });
-        }
+        smsMessages = await db.sms_messages.where('accountId').equals(accountId).toArray();
     }
     
     // 按聊天ID分组（修复：发送的消息使用接收者ID，接收的消息使用发送者ID）
     const groupedChats = {};
     
-    smsMessages.forEach(msg => {
+    // 预加载角色头像缓存
+    const charAvatarCache = {};
+    
+    for (const msg of smsMessages) {
         // 🎯 修复：对于发送的消息，使用number（接收者ID）分组
         // 对于接收的消息，使用number或sender（发送者ID）分组
         let chatId;
@@ -3956,7 +4631,18 @@ async function renderMessageList() {
         if (!groupedChats[chatId]) {
             // 🎯 修复：显示接收者的名字（对于发送的消息，使用存储的接收者信息）
             let displayName = msg.sender;
-            let displayAvatar = msg.senderAvatar || 'https://img.icons8.com/color/96/user.png';
+            let displayAvatar = '';
+            
+            // 如果有 charId，从数据库获取角色头像
+            if (msg.charId && !charAvatarCache[msg.charId]) {
+                const char = await db.characters.get(msg.charId);
+                if (char) {
+                    charAvatarCache[msg.charId] = char.avatar;
+                }
+            }
+            if (msg.charId && charAvatarCache[msg.charId]) {
+                displayAvatar = charAvatarCache[msg.charId];
+            }
             
             // 如果是发送的消息，使用存储的接收者信息
             if (msg.type === 'sent' && msg.receiverName) {
@@ -3965,8 +4651,12 @@ async function renderMessageList() {
                 const receivedMsg = smsMessages.find(m => 
                     (m.number || m.sender) === chatId && m.type !== 'sent'
                 );
-                if (receivedMsg) {
-                    displayAvatar = receivedMsg.senderAvatar || displayAvatar;
+                if (receivedMsg && receivedMsg.charId) {
+                    if (!charAvatarCache[receivedMsg.charId]) {
+                        const char = await db.characters.get(receivedMsg.charId);
+                        if (char) charAvatarCache[receivedMsg.charId] = char.avatar;
+                    }
+                    displayAvatar = charAvatarCache[receivedMsg.charId] || displayAvatar;
                 }
             }
             
@@ -3980,7 +4670,7 @@ async function renderMessageList() {
             };
         }
         groupedChats[chatId].messages.push(msg);
-    });
+    }
     
     // 转换成数组并按最新消息时间排序
     const chats = Object.values(groupedChats).map(chat => {
@@ -4013,7 +4703,6 @@ async function renderMessageList() {
     chats.forEach(chat => {
         const unreadClass = chat.unread ? 'message-unread' : '';
         const unreadDot = chat.unread ? `<div class="message-unread-dot"></div>` : '';
-        const blockedBadge = chat.isBlocked ? `<span style="font-size:10px;background:#ff3b30;color:#fff;padding:2px 6px;border-radius:3px;margin-left:4px;">拉黑</span>` : '';
         const isSelected = selectedMessageChats.has(chat.id);
         const selectedClass = isSelected ? 'message-chat-selected' : '';
         
@@ -4034,15 +4723,20 @@ async function renderMessageList() {
                </div>`
             : '';
         
+        const defaultAvatarClass = chat.avatar ? '' : 'default-avatar';
+        const avatarImg = chat.avatar 
+            ? `<img src="${chat.avatar}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none';this.parentElement.classList.add('default-avatar');">`
+            : '';
+        
         const html = `
             <div class="message-chat-item ${unreadClass} ${selectedClass}" onclick="${onClickAction}">
                 ${checkbox}
-                <div class="message-avatar">
-                    <img src="${chat.avatar}" style="width:100%;height:100%;object-fit:cover;" onerror="this.src='https://img.icons8.com/color/96/user.png'">
+                <div class="message-avatar ${defaultAvatarClass}">
+                    ${avatarImg}
                 </div>
                 <div class="message-chat-info">
                     <div class="message-chat-top">
-                        <span class="message-chat-name">${chat.name}${blockedBadge}</span>
+                        <span class="message-chat-name">${chat.name}</span>
                         <div class="message-chat-time">
                             <span>${chat.time}</span>
                         </div>
@@ -4062,10 +4756,12 @@ async function renderMessageList() {
 }
 
 // 格式化消息时间
-function formatMessageTime(timestamp) {
-    const now = Date.now();
-    const diff = now - timestamp;
-    const date = new Date(timestamp);
+function formatMessageTime(timestamp, timeOffset = 0) {
+    // 使用虚拟时间进行计算
+    const virtualNow = Date.now() + timeOffset;
+    const virtualTimestamp = timestamp + timeOffset;
+    const diff = virtualNow - virtualTimestamp;
+    const date = new Date(virtualTimestamp);
     
     // 1分钟内
     if (diff < 60000) {
@@ -4076,7 +4772,7 @@ function formatMessageTime(timestamp) {
         return Math.floor(diff / 60000) + '分钟前';
     }
     // 今天
-    const today = new Date();
+    const today = new Date(virtualNow);
     if (date.getDate() === today.getDate() && 
         date.getMonth() === today.getMonth() && 
         date.getFullYear() === today.getFullYear()) {
@@ -4104,11 +4800,16 @@ let currentMessageChatId = null;
 let currentMessageChatName = null;
 
 // 打开聊天详情
-function openMessageChat(id) {
+async function openMessageChat(id) {
     console.log('openMessageChat called with id:', id);
     
-    // 🎯 从 localStorage 读取短信记录
-    const smsMessages = JSON.parse(localStorage.getItem('sms_messages') || '[]');
+    const accountId = getCurrentAccountId();
+    
+    // 🎯 从 Dexie 读取短信记录
+    let smsMessages = [];
+    if (accountId) {
+        smsMessages = await db.sms_messages.where('accountId').equals(accountId).toArray();
+    }
     
     // 查找该联系人的所有消息（修复：支持发送和接收的消息）
     const chatMessages = smsMessages.filter(msg => {
@@ -4153,29 +4854,43 @@ function openMessageChat(id) {
         
         console.log('[openMessageChat] 第一条消息内容:', firstMsg);
         
-        // 确定显示的名字和头像
+        // 确定显示的名字和头像（从角色数据库获取）
         let displayName = firstMsg.sender;
-        let displayAvatar = firstMsg.senderAvatar || 'https://img.icons8.com/color/96/user.png';
+        let displayAvatar = '';
+        
+        // 如果有 charId，从数据库获取角色头像
+        if (firstMsg.charId) {
+            const char = await db.characters.get(firstMsg.charId);
+            if (char) {
+                displayAvatar = char.avatar || displayAvatar;
+            }
+        }
         
         // 如果第一条消息是发送的消息，使用存储的接收者信息
         if (firstMsg.type === 'sent' && firstMsg.receiverName) {
             displayName = firstMsg.receiverName;
             // 尝试从接收消息中获取头像
             const receivedMsgForAvatar = chatMessages.find(msg => msg.type !== 'sent');
-            if (receivedMsgForAvatar) {
-                displayAvatar = receivedMsgForAvatar.senderAvatar || displayAvatar;
+            if (receivedMsgForAvatar && receivedMsgForAvatar.charId) {
+                const char = await db.characters.get(receivedMsgForAvatar.charId);
+                if (char) {
+                    displayAvatar = char.avatar || displayAvatar;
+                }
             }
         }
         
         console.log('[openMessageChat] 显示名称:', displayName);
         console.log('[openMessageChat] 显示头像:', displayAvatar);
         
+        // 🔥 修复：按时间戳排序，确保最早的消息在最上面
+        chatMessages.sort((a, b) => (a.time || a.timestamp || 0) - (b.time || b.timestamp || 0));
+        
         chat = {
             id: id,
             name: displayName,
             avatar: displayAvatar,
             chatTimeLabel: formatMessageTime(firstMsg.time || firstMsg.timestamp || Date.now()),
-            messages: chatMessages.reverse().map(msg => {
+            messages: chatMessages.map(msg => {
                 const msgText = msg.content || msg.message || '';
                 console.log('[openMessageChat] 映射消息:', { type: msg.type, text: msgText });
                 return {
@@ -4192,18 +4907,10 @@ function openMessageChat(id) {
         currentMessageChatName = displayName;
         
         // 标记为已读（修复：支持发送和接收的消息）
-        smsMessages.forEach(msg => {
-            let matches = false;
-            if (msg.type === 'sent') {
-                matches = (msg.number || msg.receiverId) === id;
-            } else {
-                matches = (msg.number || msg.sender) === id;
-            }
-            if (matches) {
-                msg.read = true;
-            }
-        });
-        localStorage.setItem('sms_messages', JSON.stringify(smsMessages));
+        const idsToUpdate = chatMessages.map(msg => msg.id);
+        for (const msgId of idsToUpdate) {
+            await db.sms_messages.update(msgId, { read: true });
+        }
     }
     
     // 隐藏列表页
@@ -4230,10 +4937,19 @@ function openMessageChat(id) {
     document.getElementById('message-detail-name').innerText = chat.name;
     const avatarEl = document.getElementById('message-detail-avatar');
     if (avatarEl) {
-        avatarEl.src = chat.avatar;
-        avatarEl.onerror = function() {
-            this.src = 'https://img.icons8.com/color/96/user.png';
-        };
+        const avatarContainer = avatarEl.parentElement;
+        if (chat.avatar) {
+            avatarEl.src = chat.avatar;
+            avatarEl.style.display = '';
+            avatarContainer.classList.remove('default-avatar');
+            avatarEl.onerror = function() {
+                this.style.display = 'none';
+                avatarContainer.classList.add('default-avatar');
+            };
+        } else {
+            avatarEl.style.display = 'none';
+            avatarContainer.classList.add('default-avatar');
+        }
     }
     
     // 渲染消息
@@ -4371,9 +5087,10 @@ async function sendMessageDetail() {
         return;
     }
     
-    // 🎯 扣费
-    if (!deductPhoneBalance(SMS_COST)) {
-        alert('扣费失败，请重试');
+    // 🎯 扣费 - 支持选择支付方式
+    const paymentResult = await showPaymentMethodSelection(SMS_COST, '短信费用');
+    if (!paymentResult.success) {
+        alert('支付失败，请重试');
         return;
     }
     
@@ -4381,17 +5098,16 @@ async function sendMessageDetail() {
     input.value = '';
     handleMessageInputChange(input);
     
-    // 保存发送的消息到 localStorage
-    const smsMessages = JSON.parse(localStorage.getItem('sms_messages') || '[]');
+    // 保存发送的消息到 Dexie
     const myPhoneNumber = myChar.identity?.phone || generateVirtualPhoneNumber(myChar.id);
     
     // 🎯 关键修复：使用当前聊天的ID（接收者的ID）作为聊天标识
     // 这样消息会归入正确的聊天，而不是创建新的聊天
     // 同时存储接收者信息，确保分组和显示正确
-    const newMessage = {
-        id: Date.now() + Math.random().toString(36).substr(2, 9),
+    await db.sms_messages.add({
+        accountId: accountId,
+        charId: null, // 发送的消息不需要 charId
         sender: myChar.nick || myChar.name,
-        senderAvatar: myChar.avatar,
         number: currentMessageChatId, // 使用接收者的ID作为number，确保分组正确
         content: text,
         time: Date.now(),
@@ -4399,10 +5115,7 @@ async function sendMessageDetail() {
         type: 'sent', // 标记为发送的消息
         receiverName: currentMessageChatName, // 存储接收者名字，用于显示
         receiverId: currentMessageChatId // 存储接收者ID
-    };
-    
-    smsMessages.unshift(newMessage);
-    localStorage.setItem('sms_messages', JSON.stringify(smsMessages));
+    });
     
     // 重新渲染消息列表
     renderMessageList();
@@ -4518,8 +5231,8 @@ async function acceptMessageReply() {
         const fullWechatHistory = getChatHistory(targetChar, accountId);
         console.log('[acceptMessageReply] 📚 微信聊天历史条数:', fullWechatHistory.length);
         
-        // 3. 获取短信聊天历史
-        const smsMessages = JSON.parse(localStorage.getItem('sms_messages') || '[]');
+        // 3. 获取短信聊天历史（从 Dexie）
+        let smsMessages = await db.sms_messages.where('accountId').equals(accountId).toArray();
         const chatMessages = smsMessages.filter(msg => (msg.number || msg.sender) === currentMessageChatId);
         console.log('[acceptMessageReply] 📱 短信聊天历史条数:', chatMessages.length);
         
@@ -4555,13 +5268,22 @@ ${loreContext}
 回复简短自然，像真实短信一样。
 请注意：不要重复输出名字前缀，直接输出回复内容。
 
+【特别提示】
+由于对方可能暂时没有回复你之前的消息，你需要主动发送新的短信内容。这可能是：
+- 补充说明之前的话题
+- 主动分享新的信息或想法
+- 询问对方的情况或状态
+- 根据你的性格和当前情境，自然地推进对话
+请确保每次生成的内容都是**全新的**，不要重复你之前已经发送过的消息。
+
 【重要回复规则 - 必须严格遵守】
-1. **必须**模拟短信连发消息的习惯：请生成 1 到 3 条短消息，不能只发一条！
+1. **必须**模拟短信连发消息的习惯：请生成 ${targetChar.reply_min_count || 1} 到 ${targetChar.reply_max_count || 3} 条短消息${(targetChar.reply_min_count || 1) === 1 ? '' : '，不能只发一条'}！
 2. **必须**使用分隔符 "|||" 来隔开每一条消息。
 3. **严禁使用逗号**（包括中文逗号和英文逗号）。如果想表达停顿，请直接拆分成下一条消息，或者用空格代替。
-4. 每条消息要简短，5-15个字最佳，像真实短信聊天一样分多条发送。
+4. 像真实短信聊天一样分多条发送。
 5. 严禁只发送标点符号。每一条消息都必须有实际文字内容。
 6. 语气要自然、口语化，符合人设。
+7. ⚠️ **严禁重复之前已经发送过的内容**！这是一个新的回复请求，你需要根据当前的对话情境，生成**全新的、不同的**回复内容。请查看对话历史，确保你的回复是对话的自然延续，而不是重复之前说过的话。
 
 请以JSON格式返回：
 {
@@ -4639,18 +5361,17 @@ ${loreContext}
                 await new Promise(r => setTimeout(r, 500));
             }
             
-            const newMessage = {
-                id: Date.now() + Math.random().toString(36).substr(2, 9) + '_' + i,
+            // 保存到 Dexie 数据库
+            await db.sms_messages.add({
+                accountId: accountId,
+                charId: targetChar.id,
                 sender: targetChar.nick || targetChar.name,
-                senderAvatar: targetChar.avatar,
                 number: phoneNumber,
                 content: segment,
                 time: Date.now() + i * 100, // 稍微错开时间
                 read: true,
                 type: 'received'
-            };
-            
-            smsMessages.unshift(newMessage);
+            });
             
             // 在详情页显示新消息
             const msgContainer = document.getElementById('message-container');
@@ -4659,9 +5380,6 @@ ${loreContext}
                 msgContainer.innerHTML += newMsgHtml;
             }
         }
-        
-        // 保存所有消息
-        localStorage.setItem('sms_messages', JSON.stringify(smsMessages));
         
         // 重新渲染消息列表
         renderMessageList();
@@ -4678,7 +5396,17 @@ ${loreContext}
         
     } catch (error) {
         console.error('[acceptMessageReply] ❌ 接受回复失败:', error);
-        alert('接受回复失败，请稍后重试');
+        
+        // 🚨 显示详细错误信息（使用Toast弹窗）
+        let errorMsg = error.message || error.toString() || '未知错误';
+        
+        // 如果是网络错误或API密钥错误，添加友好提示
+        if (errorMsg.includes('API') || errorMsg.includes('fetch') || errorMsg.includes('Failed')) {
+            errorMsg += '\n\n💡 可能的原因：API密钥未配置/已失效、网络连接问题、或API服务不可用';
+        }
+        
+        // 使用Toast弹窗显示错误
+        showApiErrorToast(errorMsg);
     }
 }
 
@@ -5022,7 +5750,7 @@ async function showWechatRegisterPage() {
                     </div>
                 </div>
                 <div class="wechat-cell-group">
-                    <div class="wechat-cell">
+                    <div class="wechat-cell" onclick="showFavoritesPage()">
                         <div class="wechat-cell-icon icon-collect">
                             <svg class="svg-icon" style="stroke:currentColor;" viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
                         </div>
@@ -5046,7 +5774,24 @@ async function showWechatRegisterPage() {
                         <div class="wechat-cell-arrow">›</div>
                     </div>
                 </div>
+                <div class="wechat-cell-group" id="online-feature-section">
+                    <div style="padding:12px 16px; font-size:13px; color:#888; display:flex; align-items:center; gap:6px;">
+                        <svg class="svg-icon" viewBox="0 0 24 24" style="width:16px; height:16px; stroke:currentColor;"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                        联机功能
+                    </div>
+                    <div class="wechat-cell" onclick="showOnlineStatusPage()">
+                        <div class="wechat-cell-icon" style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                            <svg class="svg-icon" style="stroke:#fff;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                        </div>
+                        <div class="wechat-cell-text">联机状态</div>
+                        <div id="online-char-count-badge" style="font-size:12px; color:#999; margin-right:4px;">未连接</div>
+                        <div class="wechat-cell-arrow">›</div>
+                    </div>
+                </div>
             `;
+            
+            // 更新联机状态显示
+            updateOnlineFeatureSection();
             
             container.innerHTML = `<div class="wechat-me-container">${profileHtml}${cellsHtml}</div>`;
             
@@ -5137,7 +5882,7 @@ async function showWechatRegisterPage() {
             const currentName = myChar.name || '';
             
             modal.innerHTML = `
-                <div style="background: #fff; padding: 12px 16px; display: flex; align-items: center; border-bottom: 1px solid #e8e8e8;">
+                <div style="background: #fff; height: 88px; padding-top: 44px; padding-left: 16px; padding-right: 16px; display: flex; align-items: center; border-bottom: 1px solid #e8e8e8; box-sizing: border-box;">
                     <svg onclick="closeProfileSettings()" viewBox="0 0 24 24" style="width: 24px; height: 24px; cursor: pointer; stroke: #333; fill: none; stroke-width: 2;">
                         <polyline points="15 18 9 12 15 6"></polyline>
                     </svg>
@@ -5229,6 +5974,14 @@ async function showWechatRegisterPage() {
             if (meTab && meTab.classList.contains('active')) {
                 const container = document.getElementById('wechat-content');
                 await renderMePage(container);
+            }
+            
+            // ✅ 如果当前有打开的聊天窗口，刷新聊天界面以更新头像
+            if (currentChatCharId) {
+                const chatChar = await db.characters.get(currentChatCharId);
+                if (chatChar) {
+                    await renderChatBody(chatChar);
+                }
             }
             
             showToast('保存成功');
@@ -5690,15 +6443,196 @@ ${loreContext}
             const chatBody = document.getElementById('chat-body');
             const chatFooter = document.getElementById('chat-footer');
             
-            chatTitle.innerHTML = `${friend.remark || friend.name} <span style="font-size:12px; color:#FF6B9D; font-weight:400;">(${roleChar.name}查岗中)</span>`;
+            // 检查是否开启修罗场模式
+            const isShuraMode = !!roleChar.allow_shura_mode;
+            
+            if (isShuraMode) {
+                chatTitle.innerHTML = `${friend.remark || friend.name} <span style="font-size:12px; color:#FF0000; font-weight:600;">⚠️修罗场模式(${roleChar.name}查岗中)</span>`;
+            } else {
+                chatTitle.innerHTML = `${friend.remark || friend.name} <span style="font-size:12px; color:#FF6B9D; font-weight:400;">(${roleChar.name}查岗中)</span>`;
+            }
             chatWindow.style.display = 'flex';
             
-            // 隐藏输入框（查岗模式只能看，不能发）
-            chatFooter.style.display = 'none';
+            // 修罗场模式：显示输入框和操作按钮；否则隐藏
+            if (isShuraMode) {
+                chatFooter.style.display = 'flex';
+                // 添加修罗场操作栏
+                addShuraOperationBar(chatBody, roleChar, friend, friendIndex);
+            } else {
+                chatFooter.style.display = 'none';
+            }
             
             // 渲染AI生成的聊天记录
             renderRoleAccountChatBody(chatBody, roleChar, friend);
         }
+        
+        // 添加修罗场操作栏
+        function addShuraOperationBar(container, roleChar, friend, friendIndex) {
+            // 移除旧的操作栏（如果存在）
+            const oldBar = container.parentElement.querySelector('.shura-operation-bar');
+            if (oldBar) oldBar.remove();
+            
+            // 创建操作栏
+            const operationBar = document.createElement('div');
+            operationBar.className = 'shura-operation-bar';
+            operationBar.style.cssText = 'position:absolute; top:45px; left:0; right:0; background:#FFF0F0; border-bottom:2px solid #FF6B9D; padding:8px 16px; display:flex; gap:8px; align-items:center; z-index:10; box-shadow:0 2px 8px rgba(255,107,157,0.1);';
+            
+            operationBar.innerHTML = `
+                <div style="flex:1; font-size:12px; color:#FF0000; font-weight:600;">⚠️ 修罗场模式：可以操作用户账号</div>
+                <button onclick="deleteShuraFriend(${friendIndex})" style="padding:6px 12px; background:#FF3B30; color:#fff; border:none; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600;">删除好友</button>
+                <button onclick="blacklistShuraFriend(${friendIndex})" style="padding:6px 12px; background:#333; color:#fff; border:none; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600;">拉黑</button>
+            `;
+            
+            // 插入到聊天窗口的header之后
+            const chatWindow = container.parentElement;
+            const header = chatWindow.querySelector('.wechat-header');
+            if (header && header.nextSibling) {
+                chatWindow.insertBefore(operationBar, header.nextSibling);
+            }
+            
+            // 调整聊天内容区域的位置（给操作栏留出空间）
+            container.style.paddingTop = '60px';
+        }
+        
+        // 删除好友（修罗场模式）
+        async function deleteShuraFriend(friendIndex) {
+            const roleChar = await db.characters.get(parseInt(currentViewingRoleAccountId));
+            if (!roleChar || !roleChar.generated_wechat_data) return;
+            
+            const friend = roleChar.generated_wechat_data.friends[friendIndex];
+            if (!friend) return;
+            
+            if (!confirm(`确定要以用户的名义删除好友"${friend.remark || friend.name}"吗？\n\n这个操作会被记录到角色的查岗记录中。`)) {
+                return;
+            }
+            
+            // 记录操作
+            const operationLog = {
+                type: 'delete_friend',
+                friendName: friend.remark || friend.name,
+                friendId: friend.id,
+                timestamp: new Date().toLocaleString(),
+                operator: roleChar.name
+            };
+            
+            // 保存操作记录到角色数据中
+            if (!roleChar.shura_operations) {
+                roleChar.shura_operations = [];
+            }
+            roleChar.shura_operations.push(operationLog);
+            
+            // 从好友列表中删除
+            roleChar.generated_wechat_data.friends.splice(friendIndex, 1);
+            
+            await db.characters.put(roleChar);
+            
+            showToast(`已删除好友"${friend.remark || friend.name}"`);
+            
+            // 返回到微信列表
+            closeChatWindow();
+            await switchWechatTab(0);
+        }
+        
+        // 拉黑好友（修罗场模式）
+        async function blacklistShuraFriend(friendIndex) {
+            const roleChar = await db.characters.get(parseInt(currentViewingRoleAccountId));
+            if (!roleChar || !roleChar.generated_wechat_data) return;
+            
+            const friend = roleChar.generated_wechat_data.friends[friendIndex];
+            if (!friend) return;
+            
+            if (!confirm(`确定要以用户的名义拉黑"${friend.remark || friend.name}"吗？\n\n这个操作会被记录到角色的查岗记录中。`)) {
+                return;
+            }
+            
+            // 记录操作
+            const operationLog = {
+                type: 'blacklist_friend',
+                friendName: friend.remark || friend.name,
+                friendId: friend.id,
+                timestamp: new Date().toLocaleString(),
+                operator: roleChar.name
+            };
+            
+            // 保存操作记录到角色数据中
+            if (!roleChar.shura_operations) {
+                roleChar.shura_operations = [];
+            }
+            roleChar.shura_operations.push(operationLog);
+            
+            // 标记为已拉黑
+            friend.blacklisted = true;
+            friend.blacklistedAt = new Date().toLocaleString();
+            
+            await db.characters.put(roleChar);
+            
+            showToast(`已拉黑"${friend.remark || friend.name}"`);
+            
+            // 刷新聊天窗口
+            openRoleAccountChat(friendIndex);
+        }
+        
+        // 发送修罗场消息（角色以用户身份发送）
+        async function sendShuraMessage() {
+            const roleChar = await db.characters.get(parseInt(currentViewingRoleAccountId));
+            if (!roleChar || !roleChar.generated_wechat_data) return;
+            
+            const friendIndex = window.currentRoleViewFriendIndex;
+            if (friendIndex === undefined) return;
+            
+            const friend = roleChar.generated_wechat_data.friends[friendIndex];
+            if (!friend) return;
+            
+            const input = document.getElementById('chat-input-box');
+            const message = input.value.trim();
+            if (!message) return;
+            
+            // 添加消息到聊天记录（以用户身份）
+            if (!friend.chatHistory) {
+                friend.chatHistory = [];
+            }
+            
+            const newMessage = {
+                sender: 'user', // 用户发送的
+                message: message,
+                timestamp: new Date().toLocaleString()
+            };
+            
+            friend.chatHistory.push(newMessage);
+            
+            // 记录操作
+            const operationLog = {
+                type: 'send_message',
+                friendName: friend.remark || friend.name,
+                friendId: friend.id,
+                message: message,
+                timestamp: new Date().toLocaleString(),
+                operator: roleChar.name
+            };
+            
+            if (!roleChar.shura_operations) {
+                roleChar.shura_operations = [];
+            }
+            roleChar.shura_operations.push(operationLog);
+            
+            // 更新最后一条消息
+            friend.lastMessage = message;
+            friend.lastMessageTime = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+            
+            await db.characters.put(roleChar);
+            
+            // 清空输入框
+            input.value = '';
+            
+            // 刷新聊天窗口
+            const chatBody = document.getElementById('chat-body');
+            renderRoleAccountChatBody(chatBody, roleChar, friend);
+        }
+        
+        // 将修罗场函数暴露到全局作用域
+        window.deleteShuraFriend = deleteShuraFriend;
+        window.blacklistShuraFriend = blacklistShuraFriend;
+        window.sendShuraMessage = sendShuraMessage;
         
         // 渲染角色账号的聊天记录（AI生成的）- 使用和正常聊天一样的样式
         function renderRoleAccountChatBody(container, roleChar, friend) {
@@ -6108,15 +7042,21 @@ ${loreContext}
 
         // 获取角色的聊天记录（按账号隔离）
         function getChatHistory(char, accountId) {
-            if (!accountId) return char.chat_history || [];
-            if (!char.chat_history_by_user) {
-                // 如果新结构不存在，尝试从旧结构迁移
-                if (char.chat_history && char.chat_history.length > 0) {
-                    if (!char.chat_history_by_user) char.chat_history_by_user = {};
-                    char.chat_history_by_user[accountId] = [...char.chat_history];
+            let history;
+            if (!accountId) {
+                history = char.chat_history || [];
+            } else {
+                if (!char.chat_history_by_user) {
+                    // 如果新结构不存在，尝试从旧结构迁移
+                    if (char.chat_history && char.chat_history.length > 0) {
+                        if (!char.chat_history_by_user) char.chat_history_by_user = {};
+                        char.chat_history_by_user[accountId] = [...char.chat_history];
+                    }
                 }
+                history = char.chat_history_by_user?.[accountId] || [];
             }
-            return char.chat_history_by_user?.[accountId] || [];
+            // 按时间戳排序，确保消息顺序正确
+            return [...history].sort((a, b) => (a.time || 0) - (b.time || 0));
         }
 
         // 设置角色的聊天记录（按账号隔离）
@@ -6190,6 +7130,15 @@ ${loreContext}
             
             closeModal('switch-account-modal');
             
+            // ✅ 检查切换到的账号是否已注册微信号
+            const targetUser = await db.characters.get(parseInt(id));
+            if (targetUser && (!targetUser.identity || !targetUser.identity.wechat_registered)) {
+                // 该账号未注册微信号，显示注册页面
+                console.log('[切换账号] 目标账号未注册微信号，显示注册页面');
+                await showWechatRegisterPageForUser(id);
+                return;
+            }
+            
             // 刷新所有相关页面
             const content = document.getElementById('wechat-content');
             if (content) {
@@ -6206,6 +7155,24 @@ ${loreContext}
             // 刷新钱包余额显示
             updateWalletBalanceDisplay();
             updateBalancePageDisplay();
+        }
+        
+        // 为指定用户显示微信注册页面
+        async function showWechatRegisterPageForUser(userId) {
+            const registerPage = document.getElementById('wechat-register-page');
+            const userSelect = document.getElementById('register-user-select');
+            
+            // 清空下拉框并设置为指定用户
+            const user = await db.characters.get(parseInt(userId));
+            if (!user) {
+                showToast('用户不存在');
+                return;
+            }
+            
+            userSelect.innerHTML = `<option value="${user.id}" selected>${user.name}</option>`;
+            
+            // 显示注册页面
+            registerPage.style.display = 'flex';
         }
 
         // 渲染微信聊天列表
@@ -6240,54 +7207,8 @@ ${loreContext}
                 _groupId: g.id
             }));
             
-            // 获取真人好友列表（联机功能）- 只显示当前账号的好友
-            let realFriends = [];
-            try {
-                // 获取当前账号信息
-                const currentAccountInfo = await getCurrentAccountOnlineInfo();
-                
-                // 只有当前账号已开通联机，且正在登录的联机账号是当前账号时，才显示真人好友
-                if (onlineUser && currentAccountInfo && onlineUser.wechat_id === currentAccountInfo.account) {
-                    const res = await fetch(`${ONLINE_API_BASE}/api/online/conversations?user_id=${onlineUser.id}`);
-                    if (res.ok) {
-                        const data = await res.json();
-                        realFriends = (data.conversations || []).map(c => ({
-                            ...c,
-                            _isRealFriend: true,
-                            _realFriendId: c.friend_id
-                        }));
-                    }
-                }
-            } catch (e) {
-                console.log('获取真人好友列表失败:', e);
-            }
-            
-            // 获取混合群聊列表
-            let mixedGroups = [];
-            try {
-                const currentAccountInfo = await getCurrentAccountOnlineInfo();
-                if (onlineUser && currentAccountInfo && onlineUser.wechat_id === currentAccountInfo.account) {
-                    const res = await fetch(`${ONLINE_API_BASE}/api/mixed_group/list?user_id=${onlineUser.id}`);
-                    if (res.ok) {
-                        const data = await res.json();
-                        mixedGroups = (data.groups || []).map(g => ({
-                            ...g,
-                            _isMixedGroup: true,
-                            _mixedGroupId: g.id
-                        }));
-                    }
-                }
-            } catch (e) {
-                console.log('获取混合群聊列表失败:', e);
-            }
-            
-            // 合并好友、群聊、真人好友、混合群聊列表
-            let allItems = [
-                ...friends.map(f => ({...f, _isGroup: false, _isRealFriend: false, _isMixedGroup: false})), 
-                ...groupItems.map(g => ({...g, _isMixedGroup: false})),
-                ...realFriends.map(r => ({...r, _isMixedGroup: false})),
-                ...mixedGroups
-            ];
+            // 合并好友和群聊列表
+            let allItems = [...friends.map(f => ({...f, _isGroup: false})), ...groupItems];
             
             // 排序逻辑：置顶 > 最后消息时间 > 更新时间
             allItems.sort((a, b) => {
@@ -6297,11 +7218,7 @@ ${loreContext}
                 
                 // 2. 时间判断
                 const getLastTime = (item) => {
-                    if (item._isMixedGroup) {
-                        return item.last_time ? item.last_time * 1000 : (item.created_at ? item.created_at * 1000 : 0);
-                    } else if (item._isRealFriend) {
-                        return item.last_time ? item.last_time * 1000 : 0;
-                    } else if (item._isGroup) {
+                    if (item._isGroup) {
                         const history = item.chat_history || [];
                         if (history.length > 0) {
                             return history[history.length - 1].time;
@@ -6366,7 +7283,18 @@ ${loreContext}
                         const last = history[history.length - 1];
                         lastMsg = last.content;
                         if (lastMsg.startsWith('[img:')) lastMsg = '[图片]';
+                        if (lastMsg.startsWith('[voice:')) lastMsg = '[语音]';
+                        if (lastMsg.startsWith('[imgcard:')) lastMsg = '[卡片]';
+                        // 🔧 处理外卖卡片消息
+                        if (lastMsg.startsWith('[emei_order]')) lastMsg = '[外卖订单]';
+                        if (lastMsg.startsWith('[emei_share]')) lastMsg = '[外卖分享]';
+                        if (lastMsg.startsWith('[payment_request]')) lastMsg = '[代付请求]';
                         if (last.role === 'system') lastMsg = '[系统消息]';
+                        // ✅ 处理特殊消息类型
+                        if (last.type === 'transfer') lastMsg = '[转账]';
+                        if (last.type === 'familyCard') lastMsg = '[亲属卡]';
+                        if (last.type === 'audio') lastMsg = '[语音]';
+                        if (last.type === 'location') lastMsg = '[位置]';
                         
                         const d = new Date(last.time);
                         const now = new Date();
@@ -6377,13 +7305,19 @@ ${loreContext}
                         }
                     }
                     
+                    // 判断是否是联机群聊
+                    const isOnlineGroup = f.isOnlineGroup;
+                    const groupTag = isOnlineGroup 
+                        ? '<span style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:#fff; font-size:9px; padding:1px 4px; border-radius:2px; margin-left:6px;">联机群</span>'
+                        : '<span style="background:#07c160; color:#fff; font-size:9px; padding:1px 4px; border-radius:2px; margin-left:6px;">群</span>';
+                    
                     contentDiv.innerHTML = `
                         <div style="width:48px; height:48px; border-radius:6px; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0;"></div>
                         <div style="flex:1; min-width:0;">
                             <div style="display:flex; justify-content:space-between; margin-bottom:4px; align-items:center;">
                                 <div style="display:flex; align-items:center;">
                                     <div style="font-size:16px; font-weight:500; color:#333;">${f.name}</div>
-                                    <span style="background:#07c160; color:#fff; font-size:9px; padding:1px 4px; border-radius:2px; margin-left:6px;">群</span>
+                                    ${groupTag}
                                 </div>
                                 <div style="font-size:12px; color:#999;">${lastTimeStr}</div>
                             </div>
@@ -6398,98 +7332,7 @@ ${loreContext}
                     return;
                 }
                 
-                // 真人好友项渲染
-                if (f._isRealFriend) {
-                    const itemContainer = document.createElement('div');
-                    itemContainer.className = 'wechat-list-item-container';
-                    
-                    const contentDiv = document.createElement('div');
-                    contentDiv.className = 'wechat-list-item-content';
-                    contentDiv.style.cssText = 'display:flex; padding:12px 16px; border-bottom:0.5px solid #f0f0f0; align-items:center; gap:12px; background-color:#fff;';
-                    
-                    contentDiv.onclick = () => openRealFriendChat(f._realFriendId, f.nickname, f.avatar);
-                    
-                    const avatarStyle = f.avatar ? `background-image:url(${f.avatar})` : 'background:linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
-                    
-                    let lastMsg = f.last_message || '';
-                    let lastTimeStr = '';
-                    if (f.last_time) {
-                        const d = new Date(f.last_time * 1000);
-                        const now = new Date();
-                        if (d.toDateString() === now.toDateString()) {
-                            lastTimeStr = `${d.getHours()}:${d.getMinutes().toString().padStart(2,'0')}`;
-                        } else {
-                            lastTimeStr = `${d.getMonth()+1}/${d.getDate()}`;
-                        }
-                    }
-                    
-                    const unreadBadge = f.unread_count > 0 ? `<span style="background:#ff3b30; color:#fff; font-size:10px; padding:2px 6px; border-radius:10px; margin-left:6px;">${f.unread_count}</span>` : '';
-                    
-                    contentDiv.innerHTML = `
-                        <div style="width:48px; height:48px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:20px;">${f.avatar ? '' : '👤'}</div>
-                        <div style="flex:1; min-width:0;">
-                            <div style="display:flex; justify-content:space-between; margin-bottom:4px; align-items:center;">
-                                <div style="display:flex; align-items:center;">
-                                    <div style="font-size:16px; font-weight:500; color:#333;">${f.nickname || '用户'}</div>
-                                    <span style="background:#667eea; color:#fff; font-size:9px; padding:1px 4px; border-radius:2px; margin-left:6px;">真人</span>
-                                    ${unreadBadge}
-                                </div>
-                                <div style="font-size:12px; color:#999;">${lastTimeStr}</div>
-                            </div>
-                            <div style="font-size:14px; color:#999; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${lastMsg}</div>
-                        </div>
-                    `;
-                    
-                    itemContainer.appendChild(contentDiv);
-                    listDiv.appendChild(itemContainer);
-                    return;
-                }
-                
-                // 混合群聊项渲染
-                if (f._isMixedGroup) {
-                    const itemContainer = document.createElement('div');
-                    itemContainer.className = 'wechat-list-item-container';
-                    
-                    const contentDiv = document.createElement('div');
-                    contentDiv.className = 'wechat-list-item-content';
-                    contentDiv.style.cssText = 'display:flex; padding:12px 16px; border-bottom:0.5px solid #f0f0f0; align-items:center; gap:12px; background-color:#fff;';
-                    
-                    contentDiv.onclick = () => openMixedGroupChat(f._mixedGroupId);
-                    
-                    const avatarStyle = f.avatar ? `background-image:url(${f.avatar})` : 'background:linear-gradient(135deg, #f093fb 0%, #f5576c 100%)';
-                    
-                    let lastMsg = f.last_message || '开始联机聊天吧';
-                    let lastTimeStr = '';
-                    if (f.last_time) {
-                        const d = new Date(f.last_time * 1000);
-                        const now = new Date();
-                        if (d.toDateString() === now.toDateString()) {
-                            lastTimeStr = `${d.getHours()}:${d.getMinutes().toString().padStart(2,'0')}`;
-                        } else {
-                            lastTimeStr = `${d.getMonth()+1}/${d.getDate()}`;
-                        }
-                    }
-                    
-                    contentDiv.innerHTML = `
-                        <div style="width:48px; height:48px; border-radius:10px; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:18px;">${f.avatar ? '' : '🌐'}</div>
-                        <div style="flex:1; min-width:0;">
-                            <div style="display:flex; justify-content:space-between; margin-bottom:4px; align-items:center;">
-                                <div style="display:flex; align-items:center;">
-                                    <div style="font-size:16px; font-weight:500; color:#333;">${f.name || '联机群聊'}</div>
-                                    <span style="background:linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color:#fff; font-size:9px; padding:1px 4px; border-radius:2px; margin-left:6px;">联机</span>
-                                </div>
-                                <div style="font-size:12px; color:#999;">${lastTimeStr}</div>
-                            </div>
-                            <div style="font-size:14px; color:#999; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${lastMsg}</div>
-                        </div>
-                    `;
-                    
-                    itemContainer.appendChild(contentDiv);
-                    listDiv.appendChild(itemContainer);
-                    return;
-                }
-                
-                // AI好友项渲染（原有代码）
+                // 好友项渲染（原有代码）
                 // 容器
                 const itemContainer = document.createElement('div');
                 itemContainer.className = 'wechat-list-item-container';
@@ -6540,6 +7383,15 @@ ${loreContext}
                     if (lastMsg.startsWith('[img:')) lastMsg = '[图片]';
                     if (lastMsg.startsWith('[voice:')) lastMsg = '[语音]';
                     if (lastMsg.startsWith('[imgcard:')) lastMsg = '[卡片]';
+                    // 🔧 处理外卖卡片消息
+                    if (lastMsg.startsWith('[emei_order]')) lastMsg = '[外卖订单]';
+                    if (lastMsg.startsWith('[emei_share]')) lastMsg = '[外卖分享]';
+                    if (lastMsg.startsWith('[payment_request]')) lastMsg = '[代付请求]';
+                    // ✅ 处理转账和亲属卡消息
+                    if (last.type === 'transfer') lastMsg = '[转账]';
+                    if (last.type === 'familyCard') lastMsg = '[亲属卡]';
+                    if (last.type === 'audio') lastMsg = '[语音]';
+                    if (last.type === 'location') lastMsg = '[位置]';
                     
                     const d = new Date(last.time);
                     const now = new Date();
@@ -6674,9 +7526,28 @@ ${loreContext}
                 const char = await db.characters.get(id);
                 if (char) {
                     const accountId = getCurrentAccountId();
-                    await setFriendStatus(char, accountId, 'stranger');
+                    await setFriendStatus(char, accountId, 'deleted');
                     char.is_pinned = false;
+                    
+                    // 初始化等待好友申请的设置
+                    if (!char.wait_friend_settings) {
+                        char.wait_friend_settings = {};
+                    }
+                    if (!char.wait_friend_settings[accountId]) {
+                        char.wait_friend_settings[accountId] = {
+                            enabled: false,
+                            interval: 60,
+                            lastCheckTime: Date.now(),
+                            nextCheckTime: null
+                        };
+                    }
                     await db.characters.put(char);
+                    
+                    // 刷新聊天窗口显示等待界面
+                    if (currentChatCharId === id) {
+                        await renderChatBody(char, true);
+                    }
+                    
                     renderWechatList(document.getElementById('wechat-content'));
                 }
             }
@@ -6698,10 +7569,11 @@ ${loreContext}
             listDiv.style.width = '100%';
             listDiv.style.background = '#fff';
             
-            // 添加"新的好友"入口
+            // 添加"新的好友"入口（同时检查 toCharId 和 toAccountId）
             const allRequests = await db.friend_requests.toArray();
             const pendingRequests = allRequests.filter(req => 
-                req.toCharId === parseInt(accountId) && req.status === 'pending'
+                req.status === 'pending' && 
+                (req.toCharId === parseInt(accountId) || req.toAccountId === accountId)
             );
             const newFriendItem = document.createElement('div');
             newFriendItem.style.display = 'flex';
@@ -6791,6 +7663,10 @@ ${loreContext}
             }
         }
 
+        // 当前心声相关变量
+        let currentThoughtsCharId = null;
+        let currentThoughtsMessageIndex = null;
+
         // 显示角色心声
         async function showCharacterThoughts(charId, messageIndex) {
             if (!charId) return;
@@ -6798,54 +7674,182 @@ ${loreContext}
             const char = await db.characters.get(charId);
             if (!char) return;
             
+            currentThoughtsCharId = charId;
+            currentThoughtsMessageIndex = messageIndex;
+            
             const modal = document.getElementById('thoughts-modal');
             const title = document.getElementById('thoughts-modal-title');
-            const content = document.getElementById('thoughts-content');
+            const currentText = document.getElementById('thoughts-current-text');
+            const currentTime = document.getElementById('thoughts-current-time');
+            const historyContent = document.getElementById('thoughts-history-content');
+            const historySection = document.getElementById('thoughts-history');
+            const arrow = document.getElementById('thoughts-arrow');
             
-            title.textContent = `${char.name}的心声`;
-            content.innerHTML = '';
+            title.textContent = `TA的心声`;
             
-            // 获取该消息对应的心声（根据messageIndex匹配）
+            // 重置历史区域状态
+            historySection.style.display = 'none';
+            arrow.classList.remove('expanded');
+            historyContent.innerHTML = '';
+            
+            // 获取心声
+            const currentDeleteBtn = document.getElementById('thoughts-current-delete');
             if (!char.thoughts || char.thoughts.length === 0) {
-                content.innerHTML = '<div style="text-align:center; color:#999; padding:40px 20px;">暂无心声记录</div>';
+                currentText.textContent = '暂无心声';
+                currentTime.textContent = '';
+                document.getElementById('thoughts-history-btn').style.display = 'none';
+                if (currentDeleteBtn) currentDeleteBtn.style.display = 'none';
             } else {
-                // 找到与当前消息相关的心声（messageIndex匹配或最近的心声）
-                let relevantThoughts = char.thoughts.filter(t => t.messageIndex === messageIndex);
+                if (currentDeleteBtn) currentDeleteBtn.style.display = 'block';
+                // 找到最新的心声作为当前心声
+                const latestThought = char.thoughts[char.thoughts.length - 1];
+                currentText.textContent = latestThought.content;
+                const timeStr = new Date(latestThought.time).toLocaleString('zh-CN', {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+                currentTime.textContent = timeStr;
                 
-                // 如果没有精确匹配，显示最近的心声
-                if (relevantThoughts.length === 0) {
-                    relevantThoughts = char.thoughts.slice(-5); // 显示最近5条
-                }
-                
-                if (relevantThoughts.length === 0) {
-                    content.innerHTML = '<div style="text-align:center; color:#999; padding:40px 20px;">暂无相关心声</div>';
-                } else {
-                    relevantThoughts.reverse().forEach(thought => {
+                // 如果有历史心声（超过1条），显示查看历史按钮
+                if (char.thoughts.length > 1) {
+                    document.getElementById('thoughts-history-btn').style.display = 'flex';
+                    
+                    // 渲染历史心声（除了最新的）
+                    const historyThoughts = char.thoughts.slice(0, -1).reverse();
+                    historyThoughts.forEach((thought, idx) => {
                         const item = document.createElement('div');
-                        item.style.cssText = 'padding:12px; margin-bottom:10px; background:#f5f5f5; border-radius:8px; border-left:3px solid var(--ins-pink);';
+                        item.className = 'thoughts-history-item';
+                        item.style.position = 'relative';
                         
                         const text = document.createElement('div');
+                        text.className = 'thoughts-history-text';
                         text.textContent = thought.content;
-                        text.style.cssText = 'font-size:14px; line-height:1.6; color:#333; margin-bottom:6px;';
+                        
+                        const bottomRow = document.createElement('div');
+                        bottomRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
                         
                         const time = document.createElement('div');
-                        const timeStr = new Date(thought.time).toLocaleString('zh-CN', {
+                        time.className = 'thoughts-history-time';
+                        time.textContent = new Date(thought.time).toLocaleString('zh-CN', {
                             month: 'short',
                             day: 'numeric',
                             hour: '2-digit',
                             minute: '2-digit'
                         });
-                        time.textContent = timeStr;
-                        time.style.cssText = 'font-size:12px; color:#999;';
+                        
+                        const deleteBtn = document.createElement('div');
+                        deleteBtn.textContent = '删除';
+                        deleteBtn.style.cssText = 'font-size:12px; color:#ff3b30; cursor:pointer; padding:2px 8px;';
+                        // 原始索引 = char.thoughts.length - 2 - idx
+                        const originalIndex = char.thoughts.length - 2 - idx;
+                        deleteBtn.onclick = () => deleteThought(charId, originalIndex);
+                        
+                        bottomRow.appendChild(time);
+                        bottomRow.appendChild(deleteBtn);
                         
                         item.appendChild(text);
-                        item.appendChild(time);
-                        content.appendChild(item);
+                        item.appendChild(bottomRow);
+                        historyContent.appendChild(item);
                     });
+                } else {
+                    document.getElementById('thoughts-history-btn').style.display = 'none';
                 }
             }
             
             modal.style.display = 'flex';
+        }
+
+        // 切换历史心声显示
+        function toggleThoughtsHistory() {
+            const historySection = document.getElementById('thoughts-history');
+            const arrow = document.getElementById('thoughts-arrow');
+            
+            if (historySection.style.display === 'none') {
+                historySection.style.display = 'block';
+                arrow.classList.add('expanded');
+            } else {
+                historySection.style.display = 'none';
+                arrow.classList.remove('expanded');
+            }
+        }
+
+        // 编辑当前心声
+        async function editCurrentThought() {
+            if (!currentThoughtsCharId) return;
+            
+            const char = await db.characters.get(currentThoughtsCharId);
+            if (!char || !char.thoughts || char.thoughts.length === 0) {
+                showToast('暂无心声可编辑');
+                return;
+            }
+            
+            const latestThought = char.thoughts[char.thoughts.length - 1];
+            const newContent = prompt('编辑心声：', latestThought.content);
+            
+            if (newContent !== null && newContent.trim()) {
+                char.thoughts[char.thoughts.length - 1].content = newContent.trim();
+                await db.characters.put(char);
+                
+                // 更新显示
+                document.getElementById('thoughts-current-text').textContent = newContent.trim();
+                showToast('心声已更新');
+            }
+        }
+
+        // 删除指定索引的心声
+        async function deleteThought(charId, thoughtIndex) {
+            if (!confirm('确定要删除这条心声吗？')) return;
+            
+            const char = await db.characters.get(charId);
+            if (!char || !char.thoughts || thoughtIndex < 0 || thoughtIndex >= char.thoughts.length) return;
+            
+            char.thoughts.splice(thoughtIndex, 1);
+            await db.characters.put(char);
+            
+            showToast('心声已删除');
+            // 刷新心声弹窗
+            showCharacterThoughts(charId);
+        }
+        window.deleteThought = deleteThought;
+        
+        // 删除当前心声（最新一条）
+        async function deleteCurrentThought() {
+            if (!currentThoughtsCharId) return;
+            
+            const char = await db.characters.get(currentThoughtsCharId);
+            if (!char || !char.thoughts || char.thoughts.length === 0) {
+                showToast('暂无心声可删除');
+                return;
+            }
+            
+            if (!confirm('确定要删除当前心声吗？')) return;
+            
+            char.thoughts.pop(); // 删除最新的
+            await db.characters.put(char);
+            
+            showToast('心声已删除');
+            // 刷新心声弹窗
+            showCharacterThoughts(currentThoughtsCharId);
+        }
+        window.deleteCurrentThought = deleteCurrentThought;
+
+        // 重新生成心声
+        async function regenerateThought() {
+            if (!currentThoughtsCharId) return;
+            
+            const char = await db.characters.get(currentThoughtsCharId);
+            if (!char) return;
+            
+            showToast('正在生成新心声...');
+            
+            // 关闭弹窗
+            closeModal('thoughts-modal');
+            
+            // 触发AI重新生成（这里简单处理，实际可以调用AI接口）
+            // 由于心声是在AI回复时自动生成的，这里提示用户发送消息触发
+            showToast('请发送一条消息来触发新的心声生成');
         }
 
         // 搜索好友
@@ -6871,7 +7875,7 @@ ${loreContext}
             if (ids.length === 0) return "";
             
             let allContext = [];
-            const checkText = keywords.toLowerCase();
+            const checkText = keywords ? keywords.toLowerCase() : "";
             
             // 遍历所有世界书
             for (const id of ids) {
@@ -6881,26 +7885,44 @@ ${loreContext}
                 const entries = Object.values(book.content.entries);
                 
                 entries.forEach(entry => {
-                    if (!entry.enabled) return;
-                    // entry.key 可能是数组或字符串
-                    const keys = Array.isArray(entry.key) ? entry.key : [entry.key];
+                    if (!entry.enabled) return; // 只加载启用的条目
                     
-                    const isMatch = keys.some(k => {
-                        if(!k) return false;
-                        return checkText.includes(k.toLowerCase());
-                    });
+                    // 🔥 新逻辑：挂载了就直接加载所有启用的条目
+                    // 如果有关键词，优先匹配关键词的条目
+                    // 如果没有关键词或没有设置key，直接加载
+                    let shouldLoad = false;
                     
-                    if (isMatch) {
+                    const keys = Array.isArray(entry.key) ? entry.key : (entry.key ? [entry.key] : []);
+                    
+                    if (keys.length === 0 || keys.every(k => !k || k.trim() === '')) {
+                        // 没有设置关键词，直接加载
+                        shouldLoad = true;
+                    } else if (checkText) {
+                        // 有关键词，尝试匹配
+                        const isMatch = keys.some(k => {
+                            if(!k) return false;
+                            return checkText.includes(k.toLowerCase());
+                        });
+                        shouldLoad = isMatch;
+                    } else {
+                        // 没有检查文本但有关键词设置，也加载（因为挂载了就应该读取）
+                        shouldLoad = true;
+                    }
+                    
+                    if (shouldLoad) {
                         allContext.push(entry.content);
                     }
                 });
             }
             
             if (allContext.length > 0) {
+                console.log(`[世界书] ✅ 成功加载 ${allContext.length} 个条目`);
                 // 简单截断，防止爆 Token
-                const fullText = allContext.join('\n');
+                const fullText = allContext.join('\n\n');
                 const safeText = fullText.length > 10000 ? fullText.slice(0, 10000) + '...(已截断)' : fullText;
-                return `【相关世界书设定】:\n${safeText}\n`;
+                return `【世界书设定】:\n${safeText}\n`;
+            } else {
+                console.log('[世界书] ℹ️ 没有启用的条目或条目为空');
             }
             return "";
         }
@@ -7313,6 +8335,12 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             const group = await db.group_chats.get(groupId);
             if (!group) return;
             
+            // 如果是联机群聊，调用联机群聊的打开方法
+            if (group.isOnlineGroup && group.onlineGroupId) {
+                openOnlineGroup(group.onlineGroupId);
+                return;
+            }
+            
             // 设置当前聊天为群聊模式
             currentChatCharId = null;
             window.currentGroupChatId = groupId;
@@ -7357,8 +8385,58 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             document.getElementById('group-detail-mute').checked = group.is_muted || false;
             document.getElementById('group-detail-pin').checked = group.is_pinned || false;
             
+            // 设置自动总结设置
+            document.getElementById('group-detail-auto-summary-switch').checked = group.auto_summary_enabled || false;
+            document.getElementById('group-detail-summary-interval').value = group.summary_interval || '';
+            
+            // 更新总结计数
+            const accountId = getCurrentAccountId();
+            if (accountId && group.id) {
+                await updateSummaryCount('group', group.id, accountId);
+            }
+            
             // 渲染群成员列表
             await renderGroupMemberList(group);
+            
+            // 加载世界书列表（多选）
+            const lorebooks = await db.lorebooks.toArray();
+            const lbList = document.getElementById('group-detail-lorebook-list');
+            lbList.innerHTML = '';
+            
+            // 兼容旧数据：如果lorebookId存在但lorebookIds不存在，转换为数组
+            const selectedIds = group.lorebookIds || (group.lorebookId ? [group.lorebookId] : []);
+            
+            if (lorebooks.length === 0) {
+                lbList.innerHTML = '<div style="padding:8px; color:#999; font-size:12px; text-align:center;">暂无世界书</div>';
+            } else {
+                lorebooks.forEach(lb => {
+                    const label = document.createElement('label');
+                    label.style.cssText = 'display:flex; align-items:center; padding:8px; cursor:pointer; border-radius:6px; margin-bottom:4px;';
+                    label.style.background = selectedIds.includes(lb.id) ? '#f0f0f5' : 'transparent';
+                    
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.value = lb.id;
+                    checkbox.checked = selectedIds.includes(lb.id);
+                    checkbox.style.marginRight = '8px';
+                    checkbox.onchange = () => {
+                        label.style.background = checkbox.checked ? '#f0f0f5' : 'transparent';
+                        updateGroupLorebookCount();
+                        saveGroupDetail();
+                    };
+                    
+                    const name = document.createElement('span');
+                    name.textContent = lb.name;
+                    name.style.fontSize = '14px';
+                    name.style.color = '#333';
+                    
+                    label.appendChild(checkbox);
+                    label.appendChild(name);
+                    lbList.appendChild(label);
+                });
+            }
+            
+            updateGroupLorebookCount();
         }
         
         // 渲染群成员列表预览（详情页）
@@ -7776,6 +8854,26 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             document.getElementById('group-detail-page').style.display = 'none';
         }
         
+        // 切换群聊世界书列表
+        function toggleGroupLorebookList() {
+            const list = document.getElementById('group-detail-lorebook-list');
+            const toggle = document.getElementById('group-detail-lorebook-toggle');
+            if (list.style.display === 'none' || !list.style.display) {
+                list.style.display = 'block';
+                toggle.textContent = '∨';
+            } else {
+                list.style.display = 'none';
+                toggle.textContent = '›';
+            }
+        }
+        
+        // 更新群聊世界书计数
+        function updateGroupLorebookCount() {
+            const checkboxes = document.querySelectorAll('#group-detail-lorebook-list input[type="checkbox"]:checked');
+            const count = checkboxes.length;
+            document.getElementById('group-detail-lorebook-count').textContent = `${count}个`;
+        }
+        
         // 保存群聊详情
         async function saveGroupDetail() {
             if (!window.currentGroupChatId) return;
@@ -7787,6 +8885,17 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             group.myNickname = document.getElementById('group-detail-nickname').value.trim();
             group.is_muted = document.getElementById('group-detail-mute').checked;
             group.is_pinned = document.getElementById('group-detail-pin').checked;
+            
+            // 获取选中的世界书ID数组
+            const checkboxes = document.querySelectorAll('#group-detail-lorebook-list input[type="checkbox"]:checked');
+            const lorebookIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+            group.lorebookIds = lorebookIds.length > 0 ? lorebookIds : null;
+            
+            // 自动总结设置
+            group.auto_summary_enabled = document.getElementById('group-detail-auto-summary-switch').checked;
+            const summaryInterval = parseInt(document.getElementById('group-detail-summary-interval').value);
+            group.summary_interval = summaryInterval > 0 ? summaryInterval : 50;
+            
             group.updated_at = Date.now();
             
             await db.group_chats.put(group);
@@ -7955,12 +9064,105 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             window._addingGroupMembers = true;
         }
         
+        // 追加用户群聊消息到UI（优化性能，避免重新渲染整个页面）
+        async function appendUserGroupMessageToUI(msg, group) {
+            const body = document.getElementById('chat-body');
+            const myChar = currentMyCharId ? await db.characters.get(parseInt(currentMyCharId)) : null;
+            const myNickname = group.myNickname || (myChar ? myChar.name : '我');
+            const myAvatar = myChar?.avatar || '';
+            const avatarStyle = myAvatar ? `background-image:url(${myAvatar})` : 'background:#ccc';
+            
+            // 创建消息元素
+            const msgDiv = document.createElement('div');
+            msgDiv.style.marginBottom = '12px';
+            msgDiv.className = 'group-message-row self';
+            msgDiv.style.display = 'flex';
+            msgDiv.style.flexDirection = 'row-reverse';
+            msgDiv.style.alignItems = 'flex-end';
+            msgDiv.style.gap = '8px';
+            
+            // 渲染消息内容（处理各种特殊格式）
+            let renderedContent = msg.content;
+            
+            // 处理图片卡片
+            if (msg.content.startsWith('[imgcard:')) {
+                const cardText = msg.content.substring(9, msg.content.length - 1).trim();
+                renderedContent = `<div class="img-card-bubble" data-text="${escapeHtml(cardText)}" data-expanded="false" onclick="showImageCardContent(this)">
+                    <div class="img-card-placeholder">
+                        <svg class="img-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                            <polyline points="21 15 16 10 5 21"></polyline>
+                        </svg>
+                        <div class="img-card-hint">点击查看文字</div>
+                    </div>
+                </div>`;
+            }
+            // 处理图片
+            else if (msg.content.startsWith('[img:')) {
+                const imgUrl = msg.content.substring(5, msg.content.length - 1).trim();
+                renderedContent = `<img src="${imgUrl}" class="chat-image" style="max-width:200px; max-height:200px; border-radius:8px; cursor:pointer;" onclick="showFullImage(this.src)" ${getImageErrorHandler()} />`;
+            }
+            // 处理语音
+            else if (msg.content.startsWith('[voice:')) {
+                const voiceText = msg.content.substring(7, msg.content.length - 1).trim();
+                const barCount = Math.min(Math.max(Math.ceil(voiceText.length / 3), 3), 10);
+                let bars = '';
+                for (let i = 0; i < barCount; i++) {
+                    const height = 8 + Math.random() * 12;
+                    bars += `<div style="width:3px; height:${height}px; background:#999; border-radius:2px;"></div>`;
+                }
+                renderedContent = `<div class="voice-bubble" data-text="${escapeHtml(voiceText)}" style="background:#ffe4e8; padding:10px 14px; border-radius:18px; cursor:pointer; display:flex; align-items:center; gap:8px; min-width:80px;" onclick="playVoiceBubble(this)">
+                    <svg viewBox="0 0 24 24" style="width:16px; height:16px; fill:#666;"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+                    <div style="display:flex; align-items:center; gap:2px;">${bars}</div>
+                    <span style="font-size:12px; color:#666;">${Math.ceil(voiceText.length / 5)}"</span>
+                </div>`;
+            }
+            // 普通文字
+            else {
+                renderedContent = renderMessageContent(msg.content);
+            }
+            
+            // 判断是否是特殊消息（不需要气泡包裹）
+            const isSpecialMsg = msg.content.startsWith('[imgcard:') || msg.content.startsWith('[img:') || msg.content.startsWith('[voice:');
+            
+            if (isSpecialMsg) {
+                msgDiv.innerHTML = `
+                    <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
+                    <div style="display:flex; flex-direction:column; align-items:flex-end; max-width:70%;">
+                        <div style="font-size:12px; color:#999; margin-bottom:2px;">${myNickname}</div>
+                        <div style="display:flex; align-items:flex-end; gap:6px;">
+                            <div style="font-size:10px; color:#999;">${formatChatTime(msg.time)}</div>
+                            <div class="group-msg-content">${renderedContent}</div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                msgDiv.innerHTML = `
+                    <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
+                    <div style="display:flex; flex-direction:column; align-items:flex-end; max-width:70%;">
+                        <div style="font-size:12px; color:#999; margin-bottom:2px;">${myNickname}</div>
+                        <div style="display:flex; align-items:flex-end; gap:6px;">
+                            <div style="font-size:10px; color:#999;">${formatChatTime(msg.time)}</div>
+                            <div class="group-msg-content" style="background:#ffe4e8; color:#000; padding:6px 10px; border-radius:18px 18px 4px 18px; font-size:15px; line-height:1.5; word-break:break-word;">${renderedContent}</div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            body.appendChild(msgDiv);
+            body.scrollTop = body.scrollHeight;
+        }
+        
         // 渲染群聊消息
         async function renderGroupChatBody(group) {
             const body = document.getElementById('chat-body');
             body.innerHTML = '';
             
-            const history = group.chat_history || [];
+            let history = group.chat_history || [];
+            // 按时间戳排序，确保消息顺序正确
+            history = [...history].sort((a, b) => (a.time || 0) - (b.time || 0));
+            
             const accountId = getCurrentAccountId();
             const myChar = currentMyCharId ? await db.characters.get(parseInt(currentMyCharId)) : null;
             
@@ -7974,14 +9176,116 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 if (char) memberMap[memberId] = char;
             }
             
+            // 辅助函数：渲染群聊消息内容（支持特殊格式）
+            function renderGroupMessageContent(content, isSelf, msgType) {
+                if (!content) return '';
+                
+                // 处理红包消息 - INS风格纯白卡片
+                if (msgType === 'redpacket') {
+                    try {
+                        const data = JSON.parse(content);
+                        const isAllClaimed = (data.claimed?.length || 0) >= data.count;
+                        return `<div onclick="showRedPacketDetail('${data.id}')" style="width:220px; background:#fff; border-radius:12px; overflow:hidden; cursor:pointer; box-shadow:0 1px 3px rgba(0,0,0,0.08); border:1px solid #eee;">
+                            <div style="padding:14px 16px; display:flex; align-items:center; gap:12px;">
+                                <div style="width:40px; height:40px; background:#fff; border-radius:10px; display:flex; align-items:center; justify-content:center; border:1px solid #eee;">
+                                    <svg viewBox="0 0 24 24" style="width:20px; height:20px; stroke:#666; fill:none; stroke-width:1.5;"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><circle cx="12" cy="15" r="2"/></svg>
+                                </div>
+                                <div style="flex:1;">
+                                    <div style="font-size:14px; color:#333; margin-bottom:2px;">${escapeHtml(data.wish || '恭喜发财')}</div>
+                                    <div style="font-size:11px; color:#999;">${data.redpacketType === 'lucky' ? '拼手气红包' : '普通红包'}</div>
+                                </div>
+                            </div>
+                            <div style="padding:8px 16px; display:flex; justify-content:space-between; align-items:center; border-top:1px solid #eee;">
+                                <span style="font-size:11px; color:#999;">红包</span>
+                                <span style="font-size:11px; color:#999;">${isAllClaimed ? '已领完' : `${data.claimed?.length || 0}/${data.count}已领`}</span>
+                            </div>
+                        </div>`;
+                    } catch(e) {
+                        return content;
+                    }
+                }
+                
+                // 处理转账消息 - INS风格纯白卡片
+                if (msgType === 'transfer') {
+                    try {
+                        const data = JSON.parse(content);
+                        const targetHint = data.targetName ? `转给 ${data.targetName}` : '转账';
+                        const msgId = m.id || ('trans_' + m.time);
+                        return `<div onclick="receiveGroupTransfer('${msgId}')" style="width:220px; background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.08); border:1px solid #eee; cursor:pointer;">
+                            <div style="padding:14px 16px; display:flex; align-items:center; gap:12px;">
+                                <div style="width:40px; height:40px; background:#fff; border-radius:10px; display:flex; align-items:center; justify-content:center; border:1px solid #eee;">
+                                    <svg viewBox="0 0 24 24" style="width:20px; height:20px; stroke:#666; fill:none; stroke-width:1.5;"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                                </div>
+                                <div style="flex:1;">
+                                    <div style="font-size:18px; font-weight:600; color:#333; margin-bottom:2px;">¥${data.amount}</div>
+                                    <div style="font-size:12px; color:#999;">${escapeHtml(data.desc || '转账')}</div>
+                                </div>
+                            </div>
+                            <div style="padding:8px 16px; display:flex; justify-content:space-between; align-items:center; border-top:1px solid #eee;">
+                                <span style="font-size:11px; color:#999;">${targetHint}</span>
+                                <span style="font-size:11px; color:#999;">${data.status === 'received' ? '已收款' : '待收款'}</span>
+                            </div>
+                        </div>`;
+                    } catch(e) {
+                        return content;
+                    }
+                }
+                
+                // 处理图片卡片消息 [imgcard:文字内容] - 使用与私聊相同的样式
+                if (content.startsWith('[imgcard:')) {
+                    const cardText = content.substring(9, content.length - 1).trim();
+                    return `<div class="img-card-bubble" data-text="${escapeHtml(cardText)}" data-expanded="false" onclick="showImageCardContent(this)">
+                        <div class="img-card-placeholder">
+                            <svg class="img-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                                <polyline points="21 15 16 10 5 21"></polyline>
+                            </svg>
+                            <div class="img-card-hint">点击查看文字</div>
+                        </div>
+                    </div>`;
+                }
+                
+                // 处理图片消息 [img:url]
+                if (content.startsWith('[img:')) {
+                    const imgUrl = content.substring(5, content.length - 1).trim();
+                    return `<img src="${imgUrl}" class="chat-image" style="max-width:200px; max-height:200px; border-radius:8px; cursor:pointer;" onclick="showFullImage(this.src)" ${getImageErrorHandler()} />`;
+                }
+                
+                // 处理语音消息 [voice:文字内容]
+                if (content.startsWith('[voice:')) {
+                    const voiceText = content.substring(7, content.length - 1).trim();
+                    const bgColor = isSelf ? '#ffe4e8' : '#f2f2f7';
+                    const barCount = Math.min(Math.max(Math.ceil(voiceText.length / 3), 3), 10);
+                    let bars = '';
+                    for (let i = 0; i < barCount; i++) {
+                        const height = 8 + Math.random() * 12;
+                        bars += `<div style="width:3px; height:${height}px; background:#999; border-radius:2px;"></div>`;
+                    }
+                    return `<div class="voice-bubble" data-text="${escapeHtml(voiceText)}" style="background:${bgColor}; padding:10px 14px; border-radius:18px; cursor:pointer; display:flex; align-items:center; gap:8px; min-width:80px;" onclick="playVoiceBubble(this)">
+                        <svg viewBox="0 0 24 24" style="width:16px; height:16px; fill:#666;"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+                        <div style="display:flex; align-items:center; gap:2px;">${bars}</div>
+                        <span style="font-size:12px; color:#666;">${Math.ceil(voiceText.length / 5)}"</span>
+                    </div>`;
+                }
+                
+                // 普通文本消息，使用 renderMessageContent 处理（支持链接和图片URL）
+                return renderMessageContent(content);
+            }
+            
+            let msgIndex = 0;
             for (const msg of history) {
+                const currentIndex = msgIndex;
                 const msgDiv = document.createElement('div');
                 msgDiv.style.marginBottom = '12px';
+                msgDiv.className = 'group-message-row';
+                msgDiv.dataset.msgIndex = currentIndex;
                 
                 if (msg.role === 'system') {
-                    // 系统消息
+                    // 系统消息（不支持长按）
                     msgDiv.style.textAlign = 'center';
                     msgDiv.innerHTML = `<span style="background:#fff; color:#999; font-size:12px; padding:4px 12px; border-radius:4px; border:1px solid #ddd;">${msg.content}</span>`;
+                    msgIndex++;
                 } else if (msg.role === 'user') {
                     // 我发的消息
                     msgDiv.style.display = 'flex';
@@ -7992,16 +9296,38 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                     const myAvatar = myChar?.avatar || '';
                     const avatarStyle = myAvatar ? `background-image:url(${myAvatar})` : 'background:#ccc';
                     
-                    msgDiv.innerHTML = `
-                        <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
-                        <div style="display:flex; flex-direction:column; align-items:flex-end; max-width:70%;">
-                            <div style="font-size:12px; color:#999; margin-bottom:2px;">${myNickname}</div>
-                            <div style="display:flex; align-items:flex-end; gap:6px;">
-                                <div style="font-size:10px; color:#999;">${formatChatTime(msg.time)}</div>
-                                <div style="background:#ffe4e8; color:#000; padding:6px 10px; border-radius:18px 18px 4px 18px; font-size:15px; line-height:1.5; word-break:break-word;">${msg.content}</div>
+                    // 判断是否是特殊消息类型（不需要气泡包裹）
+                    const isSpecialMsg = msg.content.startsWith('[imgcard:') || msg.content.startsWith('[img:') || msg.content.startsWith('[voice:') || msg.type === 'redpacket' || msg.type === 'transfer';
+                    const renderedContent = renderGroupMessageContent(msg.content, true, msg.type);
+                    
+                    msgDiv.classList.add('self');
+                    if (isSpecialMsg) {
+                        msgDiv.innerHTML = `
+                            <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
+                            <div style="display:flex; flex-direction:column; align-items:flex-end; max-width:70%;">
+                                <div style="font-size:12px; color:#999; margin-bottom:2px;">${myNickname}</div>
+                                <div style="display:flex; align-items:flex-end; gap:6px;">
+                                    <div style="font-size:10px; color:#999;">${formatChatTime(msg.time)}</div>
+                                    <div class="group-msg-content" data-index="${currentIndex}">${renderedContent}</div>
+                                </div>
                             </div>
-                        </div>
-                    `;
+                        `;
+                    } else {
+                        // 检查是否有引用
+                        const quoteHtml = msg.quote ? `<div class="quoted-message" style="margin-bottom:6px;"><div class="quoted-message-name">${escapeHtml(msg.quote.name)}</div><div class="quoted-message-text">${escapeHtml(msg.quote.content)}</div></div>` : '';
+                        
+                        msgDiv.innerHTML = `
+                            <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
+                            <div style="display:flex; flex-direction:column; align-items:flex-end; max-width:70%;">
+                                <div style="font-size:12px; color:#999; margin-bottom:2px;">${myNickname}</div>
+                                <div style="display:flex; align-items:flex-end; gap:6px;">
+                                    <div style="font-size:10px; color:#999;">${formatChatTime(msg.time)}</div>
+                                    <div class="group-msg-content" data-index="${currentIndex}" style="background:#ffe4e8; color:#000; padding:6px 10px; border-radius:18px 18px 4px 18px; font-size:15px; line-height:1.5; word-break:break-word;">${quoteHtml}${renderedContent}</div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    msgIndex++;
                 } else {
                     // 群成员发的消息
                     const senderChar = msg.senderId ? memberMap[msg.senderId] : null;
@@ -8015,24 +9341,137 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                     msgDiv.style.alignItems = 'flex-end';
                     msgDiv.style.gap = '8px';
                     
-                    msgDiv.innerHTML = `
-                        <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
-                        <div style="display:flex; flex-direction:column; max-width:70%;">
-                            <div style="font-size:12px; color:#999; margin-bottom:2px;">${senderName}</div>
-                            <div style="display:flex; align-items:flex-end; gap:6px;">
-                                <div style="background:#f2f2f7; color:#000; padding:6px 10px; border-radius:18px 18px 18px 4px; font-size:15px; line-height:1.5; word-break:break-word;">${msg.content}</div>
-                                <div style="font-size:10px; color:#999;">${formatChatTime(msg.time)}</div>
+                    // 判断是否是特殊消息类型
+                    const isSpecialMsg = msg.content.startsWith('[imgcard:') || msg.content.startsWith('[img:') || msg.content.startsWith('[voice:') || msg.type === 'redpacket' || msg.type === 'transfer';
+                    const renderedContent = renderGroupMessageContent(msg.content, false, msg.type);
+                    
+                    // 检查是否有引用
+                    const quoteHtml = msg.quote ? `<div class="quoted-message" style="margin-bottom:6px;"><div class="quoted-message-name">${escapeHtml(msg.quote.name)}</div><div class="quoted-message-text">${escapeHtml(msg.quote.content)}</div></div>` : '';
+                    
+                    if (isSpecialMsg) {
+                        msgDiv.innerHTML = `
+                            <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
+                            <div style="display:flex; flex-direction:column; max-width:70%;">
+                                <div style="font-size:12px; color:#999; margin-bottom:2px;">${senderName}</div>
+                                <div style="display:flex; align-items:flex-end; gap:6px;">
+                                    <div class="group-msg-content" data-index="${currentIndex}">${renderedContent}</div>
+                                    <div style="font-size:10px; color:#999;">${formatChatTime(msg.time)}</div>
+                                </div>
                             </div>
-                        </div>
-                    `;
+                        `;
+                    } else {
+                        msgDiv.innerHTML = `
+                            <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
+                            <div style="display:flex; flex-direction:column; max-width:70%;">
+                                <div style="font-size:12px; color:#999; margin-bottom:2px;">${senderName}</div>
+                                <div style="display:flex; align-items:flex-end; gap:6px;">
+                                    <div class="group-msg-content" data-index="${currentIndex}" style="background:#f2f2f7; color:#000; padding:6px 10px; border-radius:18px 18px 18px 4px; font-size:15px; line-height:1.5; word-break:break-word;">${quoteHtml}${renderedContent}</div>
+                                    <div style="font-size:10px; color:#999;">${formatChatTime(msg.time)}</div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    msgIndex++;
                 }
                 
                 body.appendChild(msgDiv);
+                
+                // 绑定长按事件（非系统消息）
+                if (msg.role !== 'system') {
+                    const contentEl = msgDiv.querySelector('.group-msg-content');
+                    if (contentEl) {
+                        bindGroupMessageEvents(contentEl, currentIndex);
+                    }
+                }
             }
             
             // 滚动到底部
             body.scrollTop = body.scrollHeight;
         }
+        
+        // 群聊消息长按事件绑定
+        function bindGroupMessageEvents(element, index) {
+            const startHandler = (e) => {
+                if (isSelectionMode) return;
+                isLongPress = false;
+                longPressTimer = setTimeout(() => {
+                    isLongPress = true;
+                    showGroupContextMenu(e, index, element);
+                }, 500);
+            };
+
+            const cancelHandler = () => {
+                if (longPressTimer) {
+                    clearTimeout(longPressTimer);
+                    longPressTimer = null;
+                }
+            };
+            
+            const endHandler = (e) => {
+                cancelHandler();
+                if (isLongPress) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            };
+
+            element.addEventListener('touchstart', startHandler, {passive: true});
+            element.addEventListener('touchmove', cancelHandler, {passive: true});
+            element.addEventListener('touchend', endHandler);
+            element.addEventListener('mousedown', startHandler);
+            element.addEventListener('mousemove', cancelHandler);
+            element.addEventListener('mouseup', endHandler);
+            element.addEventListener('contextmenu', (e) => e.preventDefault());
+        }
+        
+        // 群聊消息右键菜单
+        function showGroupContextMenu(event, index, element) {
+            if (navigator.vibrate) navigator.vibrate(50);
+            
+            activeMsgIndex = index;
+            activeGroupMsgIndex = index;
+            element.classList.add('active');
+
+            const menu = document.getElementById('msg-context-menu');
+            const overlay = document.getElementById('menu-overlay');
+            
+            let clientX, clientY;
+            if (event.touches && event.touches.length > 0) {
+                clientX = event.touches[0].clientX;
+                clientY = event.touches[0].clientY;
+            } else {
+                clientX = event.clientX;
+                clientY = event.clientY;
+            }
+
+            const winWidth = window.innerWidth;
+            const winHeight = window.innerHeight;
+            let menuX = clientX;
+            let menuY = clientY - 60;
+
+            menu.style.display = 'flex';
+            
+            if (menuX + menu.offsetWidth > winWidth) {
+                menuX = winWidth - menu.offsetWidth - 10;
+            }
+            if (menuX < 10) {
+                menuX = 10;
+            }
+            if (menuY < 10) {
+                menuY = clientY + 10;
+            }
+            if (menuY + menu.offsetHeight > winHeight) {
+                menuY = winHeight - menu.offsetHeight - 10;
+            }
+
+            menu.style.left = menuX + 'px';
+            menu.style.top = menuY + 'px';
+            
+            overlay.style.display = 'block';
+        }
+        
+        // 群聊消息索引
+        let activeGroupMsgIndex = -1;
         
         // 获取群聊列表
         async function getGroupChats(accountId) {
@@ -8080,10 +9519,12 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             
             const container = document.getElementById('new-friends-content');
             
-            // 获取所有相关的好友申请：发给我的 + 我发送的
+            // 获取所有相关的好友申请：发给我的 + 我发送的 + 联机好友申请
             const allRequests = await db.friend_requests.toArray();
             const myRequests = allRequests.filter(req => 
-                req.toCharId === parseInt(accountId) || req.fromCharId === parseInt(accountId)
+                req.toAccountId === accountId || // 联机好友申请
+                req.toCharId === parseInt(accountId) || 
+                req.fromCharId === parseInt(accountId)
             ).sort((a, b) => b.time - a.time);
             
             if (myRequests.length === 0) {
@@ -8107,8 +9548,102 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             listDiv.style.background = '#fff';
             
             for (const req of myRequests) {
-                const isReceived = req.toCharId === parseInt(accountId);
-                const relatedCharId = isReceived ? req.fromCharId : req.toCharId;
+                // 处理联机群聊邀请
+                if (req.isGroupInvite && req.groupData) {
+                    const groupInvite = req.groupData;
+                    const item = document.createElement('div');
+                    item.style.display = 'flex';
+                    item.style.padding = '12px 16px';
+                    item.style.borderBottom = '0.5px solid #f0f0f0';
+                    item.style.alignItems = 'center';
+                    item.style.gap = '12px';
+                    
+                    let buttons = '';
+                    let statusLabel = '';
+                    
+                    if (req.status === 'pending') {
+                        buttons = `
+                            <button onclick="acceptGroupInvite(${req.id})" style="background:var(--ins-pink); color:#fff; border:none; padding:6px 16px; border-radius:4px; font-size:14px; margin-right:8px;">同意</button>
+                            <button onclick="rejectGroupInvite(${req.id})" style="background:#f0f0f0; color:#666; border:none; padding:6px 16px; border-radius:4px; font-size:14px;">拒绝</button>
+                        `;
+                    } else if (req.status === 'accepted') {
+                        statusLabel = '<div style="color:#999; font-size:12px;">已加入</div>';
+                    } else {
+                        statusLabel = '<div style="color:#999; font-size:12px;">已拒绝</div>';
+                    }
+                    
+                    item.innerHTML = `
+                        <div style="width:48px; height:48px; border-radius:4px; background:linear-gradient(135deg, #f093fb 0%, #f5576c 100%); display:flex; align-items:center; justify-content:center; flex-shrink:0; position:relative;">
+                            <svg style="width:24px; height:24px; stroke:#fff; fill:none;" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                            <div style="position:absolute; bottom:-2px; right:-2px; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius:50%; width:16px; height:16px; display:flex; align-items:center; justify-content:center;">
+                                <svg style="width:10px; height:10px; stroke:#fff; fill:none;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle></svg>
+                            </div>
+                        </div>
+                        <div style="flex:1; min-width:0;">
+                            <div style="font-size:16px; font-weight:500; color:#333; margin-bottom:4px;">
+                                群聊邀请
+                                <span style="font-size:11px; color:#f5576c; margin-left:6px;">联机群聊</span>
+                            </div>
+                            <div style="font-size:12px; color:#666; line-height:1.5;">${groupInvite.inviter_name} 邀请你加入「${groupInvite.group_name}」</div>
+                        </div>
+                        <div style="display:flex; align-items:center; flex-shrink:0;">
+                            ${buttons}${statusLabel}
+                        </div>
+                    `;
+                    listDiv.appendChild(item);
+                    continue;
+                }
+                
+                // 处理联机好友申请
+                if (req.isOnline && req.onlineData) {
+                    const onlineReq = req.onlineData;
+                    const item = document.createElement('div');
+                    item.style.display = 'flex';
+                    item.style.padding = '12px 16px';
+                    item.style.borderBottom = '0.5px solid #f0f0f0';
+                    item.style.alignItems = 'center';
+                    item.style.gap = '12px';
+                    
+                    const avatarStyle = onlineReq.from_avatar ? `background-image:url(${onlineReq.from_avatar})` : 'background-color:#eee';
+                    
+                    let buttons = '';
+                    let statusLabel = '';
+                    
+                    if (req.status === 'pending') {
+                        buttons = `
+                            <button onclick="acceptFriendRequest(${req.id})" style="background:var(--ins-pink); color:#fff; border:none; padding:6px 16px; border-radius:4px; font-size:14px; margin-right:8px;">接受</button>
+                            <button onclick="rejectFriendRequest(${req.id})" style="background:#f0f0f0; color:#666; border:none; padding:6px 16px; border-radius:4px; font-size:14px;">拒绝</button>
+                        `;
+                    } else if (req.status === 'accepted') {
+                        statusLabel = '<div style="color:#999; font-size:12px;">已添加</div>';
+                    } else {
+                        statusLabel = '<div style="color:#999; font-size:12px;">已拒绝</div>';
+                    }
+                    
+                    item.innerHTML = `
+                        <div style="width:48px; height:48px; border-radius:4px; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; position:relative;">
+                            <div style="position:absolute; bottom:-2px; right:-2px; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius:50%; width:16px; height:16px; display:flex; align-items:center; justify-content:center;">
+                                <svg style="width:10px; height:10px; stroke:#fff; fill:none;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle></svg>
+                            </div>
+                        </div>
+                        <div style="flex:1; min-width:0;">
+                            <div style="font-size:16px; font-weight:500; color:#333; margin-bottom:4px;">
+                                ${onlineReq.from_nickname || onlineReq.from_wx_account}
+                                <span style="font-size:11px; color:#667eea; margin-left:6px;">联机</span>
+                            </div>
+                            <div style="font-size:12px; color:#666; line-height:1.5; white-space:pre-line; word-break:break-word;">${onlineReq.message || '请求添加你为好友'}</div>
+                        </div>
+                        <div style="display:flex; align-items:center; flex-shrink:0;">
+                            ${buttons}${statusLabel}
+                        </div>
+                    `;
+                    listDiv.appendChild(item);
+                    continue;
+                }
+                
+                // 处理本地好友申请（兼容 toCharId 和 toAccountId）
+                const isReceived = (req.toCharId === parseInt(accountId)) || (req.toAccountId === accountId);
+                const relatedCharId = isReceived ? req.fromCharId : (req.toCharId || parseInt(req.toAccountId));
                 const relatedChar = await db.characters.get(relatedCharId);
                 if (!relatedChar) continue;
                 
@@ -8169,6 +9704,40 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             const request = await db.friend_requests.get(requestId);
             if (!request) return;
             
+            // 检查是否是联机好友申请
+            if (request.isOnline && request.onlineData) {
+                // 联机好友申请 - 发送到服务器
+                if (!onlineConnected || !onlineUserData) {
+                    alert('请先连接服务器并登录');
+                    return;
+                }
+                
+                const onlineReq = request.onlineData;
+                // 找到要接受申请的角色（被申请方）
+                const myChars = await db.characters.where('type').equals('user').toArray();
+                const myChar = myChars.find(c => c.identity?.account === onlineReq.to_wx_account) ||
+                               myChars.find(c => onlineCharacters.some(oc => oc.wx_account === c.identity?.account));
+                
+                if (!myChar || !myChar.identity?.account) {
+                    alert('请先创建User角色并设置微信号');
+                    return;
+                }
+                
+                onlineSocket.send(JSON.stringify({
+                    type: 'accept_friend_request',
+                    request_id: onlineReq.id,
+                    my_wx_account: myChar.identity.account
+                }));
+                
+                // 更新本地状态
+                request.status = 'accepted';
+                await db.friend_requests.put(request);
+                
+                await renderNewFriendsPage();
+                return;
+            }
+            
+            // 本地好友申请
             const char = await db.characters.get(request.fromCharId);
             if (!char) return;
             
@@ -8212,7 +9781,138 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             const request = await db.friend_requests.get(requestId);
             if (!request) return;
             
+            // 检查是否是联机好友申请
+            if (request.isOnline && request.onlineData) {
+                // 联机好友申请 - 发送到服务器
+                if (onlineConnected && onlineUserData) {
+                    const onlineReq = request.onlineData;
+                    const myChars = await db.characters.where('type').equals('user').toArray();
+                    const myChar = myChars.find(c => c.identity?.account === onlineReq.to_wx_account) ||
+                                   myChars.find(c => onlineCharacters.some(oc => oc.wx_account === c.identity?.account));
+                    
+                    if (myChar?.identity?.account) {
+                        onlineSocket.send(JSON.stringify({
+                            type: 'reject_friend_request',
+                            request_id: onlineReq.id,
+                            my_wx_account: myChar.identity.account
+                        }));
+                    }
+                }
+            }
+            
             // 更新申请状态
+            request.status = 'rejected';
+            await db.friend_requests.put(request);
+            
+            // 刷新页面
+            await renderNewFriendsPage();
+        }
+
+        // 接受群聊邀请 - 弹出选择角色的弹窗
+        async function acceptGroupInvite(requestId) {
+            const request = await db.friend_requests.get(requestId);
+            if (!request || !request.isGroupInvite || !request.groupData) return;
+            
+            if (!onlineConnected || !onlineUserData) {
+                alert('请先连接服务器并登录');
+                return;
+            }
+            
+            const myWx = getMyOnlineWxAccount();
+            if (!myWx) {
+                alert('请先创建User角色并设置微信号');
+                return;
+            }
+            
+            // 显示选择角色的弹窗
+            showJoinGroupWithCharModal(requestId, request.groupData);
+        }
+
+        // 显示加入群聊并选择角色的弹窗
+        async function showJoinGroupWithCharModal(requestId, groupData) {
+            // 获取所有可用的角色（非User类型和非联机好友）
+            const chars = await db.characters.toArray();
+            const availableChars = chars.filter(c => c.type !== 'user' && c.type !== 'online_friend');
+            
+            const modal = document.createElement('div');
+            modal.id = 'join-group-char-modal';
+            modal.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; display:flex; align-items:center; justify-content:center;`;
+            
+            modal.innerHTML = `
+                <div style="background:#fff; border-radius:16px; padding:24px; width:85%; max-width:360px;">
+                    <h3 style="margin:0 0 16px 0; text-align:center; font-size:18px;">加入「${groupData.group_name}」</h3>
+                    
+                    <div style="margin-bottom:16px;">
+                        <div style="font-size:13px; color:#666; margin-bottom:8px;">选择要带入群聊的角色：</div>
+                        <select id="join-group-char-select-modal" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px;">
+                            <option value="">不带角色</option>
+                            ${availableChars.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+                        </select>
+                    </div>
+                    
+                    <div style="font-size:12px; color:#999; margin-bottom:20px; line-height:1.5;">
+                        带入角色后，你可以在群聊中让该角色发言（调用AI）
+                    </div>
+                    
+                    <div style="display:flex; gap:12px;">
+                        <button onclick="this.closest('#join-group-char-modal').remove()" style="flex:1; padding:12px; background:#f0f0f0; color:#666; border:none; border-radius:8px; font-size:15px; cursor:pointer;">取消</button>
+                        <button onclick="doAcceptGroupInvite(${requestId}, '${groupData.group_id}')" style="flex:1; padding:12px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px; font-size:15px; cursor:pointer;">加入群聊</button>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+        }
+
+        // 执行接受群聊邀请
+        async function doAcceptGroupInvite(requestId, groupId) {
+            const charSelect = document.getElementById('join-group-char-select-modal');
+            const charId = charSelect?.value;
+            
+            let myChar = null;
+            if (charId) {
+                const char = await db.characters.get(parseInt(charId));
+                if (char) {
+                    myChar = {
+                        name: char.name,
+                        avatar: char.avatar || '',
+                        desc: char.description?.substring(0, 200) || ''
+                    };
+                }
+            }
+            
+            const myWx = getMyOnlineWxAccount();
+            if (!myWx) {
+                alert('请先创建User角色并设置微信号');
+                return;
+            }
+            
+            // 发送加入群聊请求
+            onlineSocket.send(JSON.stringify({
+                type: 'join_online_group',
+                group_id: groupId,
+                my_wx_account: myWx,
+                my_character: myChar
+            }));
+            
+            // 更新本地状态
+            const request = await db.friend_requests.get(requestId);
+            if (request) {
+                request.status = 'accepted';
+                await db.friend_requests.put(request);
+            }
+            
+            // 关闭弹窗并刷新页面
+            document.getElementById('join-group-char-modal')?.remove();
+            await renderNewFriendsPage();
+        }
+
+        // 拒绝群聊邀请
+        async function rejectGroupInvite(requestId) {
+            const request = await db.friend_requests.get(requestId);
+            if (!request || !request.isGroupInvite) return;
+            
+            // 更新状态
             request.status = 'rejected';
             await db.friend_requests.put(request);
             
@@ -8268,9 +9968,9 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             // 关闭聊天详情页但保持聊天窗口打开，显示等待界面
             hideChatDetail();
             
-            // 刷新聊天窗口显示等待界面
+            // 刷新聊天窗口显示等待界面（forceRender=true 绕过优化）
             if (currentChatCharId === charId) {
-                await renderChatBody(char);
+                await renderChatBody(char, true);
             }
             
             // 刷新微信页面
@@ -8309,9 +10009,9 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             // 关闭聊天详情页但保持聊天窗口打开，显示等待界面
             hideChatDetail();
             
-            // 刷新聊天窗口显示等待界面
+            // 刷新聊天窗口显示等待界面（forceRender=true 绕过优化）
             if (currentChatCharId === charId) {
-                await renderChatBody(char);
+                await renderChatBody(char, true);
             }
             
             // 刷新微信页面
@@ -8325,127 +10025,159 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
         }
 
         async function sendFriendRequestTo(charId, message) {
+            console.log('[FriendRequest] sendFriendRequestTo 开始, charId:', charId);
             const accountId = getCurrentAccountId();
             if (!accountId) {
+                console.error('[FriendRequest] 没有当前账号ID');
                 alert('请先切换到你的账号（User类型角色）');
                 return;
             }
+            console.log('[FriendRequest] accountId:', accountId);
             
             const targetChar = await db.characters.get(charId);
-            if (!targetChar) return;
+            if (!targetChar) {
+                console.error('[FriendRequest] 找不到目标角色, charId:', charId);
+                return;
+            }
+            console.log('[FriendRequest] 目标角色:', targetChar.name, '类型:', targetChar.type);
             
             // 检查角色是否被用户拉黑
             const status = getFriendStatus(targetChar, accountId);
+            console.log('[FriendRequest] 好友状态:', status);
             if (status === 'blocked') {
                 alert('该角色已被你拉黑，无法发送好友申请');
                 return;
             }
             
-            // 检查是否已经发送过申请
-            const existingRequest = await db.friend_requests
-                .where({fromCharId: parseInt(accountId), toCharId: charId, status: 'pending'})
-                .first();
+            // 检查是否已经发送过申请（使用toArray+filter避免索引字段不匹配问题）
+            // 🔥 清理之前残留的 pending 申请（如果之前AI调用失败可能留下残留记录）
+            const allPendingRequests = await db.friend_requests
+                .where('status').equals('pending')
+                .toArray();
+            const existingRequest = allPendingRequests.find(req => 
+                req.fromCharId === parseInt(accountId) && 
+                (req.toCharId === charId || req.toAccountId === String(charId))
+            );
             
             if (existingRequest) {
-                alert('已发送过好友申请，请等待对方处理');
-                return;
+                console.log('[FriendRequest] 发现已有待处理的申请, id:', existingRequest.id, '将自动清理并重新发送');
+                // 自动清理旧的待处理申请，允许重新发送
+                await db.friend_requests.delete(existingRequest.id);
             }
             
-            // 创建好友申请记录
+            // 创建好友申请记录（同时保存 toCharId 和 toAccountId 确保兼容性）
+            console.log('[FriendRequest] 创建好友申请记录...');
             const requestId = await db.friend_requests.add({
                 fromCharId: parseInt(accountId),
                 toCharId: charId,
+                toAccountId: String(charId),
                 message: message || '请求添加你为好友',
                 status: 'pending',
                 time: Date.now()
             });
+            console.log('[FriendRequest] 好友申请已创建, requestId:', requestId);
             
-            alert(`好友申请已发送给 ${targetChar.name}\n\n对方需要在"新的好友"中接受申请，或者你可以让AI自动判断是否接受。`);
-            
-            // 询问是否让AI自动判断
+            // 🔥 自动调用AI判断是否接受好友申请（非user类型角色）
             if (targetChar.type !== 'user') {
+                console.log('[FriendRequest] 角色非user类型，开始调用AI判断...');
                 // 检查API密钥（从数据库获取，和正常聊天一样）
                 const apiKeyData = await db.dexiData.get('aiApiKey');
                 const apiKey = apiKeyData?.value ? apiKeyData.value.trim() : '';
                 
                 if (!apiKey) {
-                    const configNow = confirm('⚠️ 未配置AI密钥\n\nAI自动判断需要配置API密钥。\n\n是否现在去配置？\n（点击取消则需要在"新的好友"中手动接受）');
-                    if (configNow) {
-                        document.getElementById('setting-page').style.display = 'flex';
-                    }
+                    console.error('[FriendRequest] ❌ 未配置AI密钥');
+                    alert(`好友申请已发送给 ${targetChar.name}\n\n⚠️ 未配置AI密钥，无法自动判断。请前往"新的好友"中手动接受。`);
                     return;
                 }
+                console.log('[FriendRequest] API密钥已配置, 长度:', apiKey.length);
                 
-                const useAI = confirm('是否让AI根据角色性格自动判断是否接受？\n\n点击"确定"使用AI判断，点击"取消"需要手动在"新的好友"中接受。');
+                // 直接调用AI判断，不需要额外确认
+                const loadingDiv = document.createElement('div');
+                loadingDiv.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:9999;';
+                loadingDiv.innerHTML = `
+                    <div style="background:#fff; padding:30px 40px; border-radius:16px; text-align:center; box-shadow:0 10px 40px rgba(0,0,0,0.3);">
+                        <div style="width:50px; height:50px; border:4px solid #f3f3f3; border-top:4px solid var(--ins-pink); border-radius:50%; margin:0 auto 20px; animation:spin 1s linear infinite;"></div>
+                        <div style="font-size:18px; font-weight:600; color:#333; margin-bottom:8px;">好友申请已发送</div>
+                        <div style="font-size:14px; color:#999;">${targetChar.name} 正在考虑是否接受...</div>
+                    </div>
+                `;
+                document.body.appendChild(loadingDiv);
                 
-                if (useAI) {
-                    // 显示加载提示
-                    const loadingDiv = document.createElement('div');
-                    loadingDiv.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:9999;';
-                    loadingDiv.innerHTML = `
-                        <div style="background:#fff; padding:30px 40px; border-radius:16px; text-align:center; box-shadow:0 10px 40px rgba(0,0,0,0.3);">
-                            <div style="width:50px; height:50px; border:4px solid #f3f3f3; border-top:4px solid var(--ins-pink); border-radius:50%; margin:0 auto 20px; animation:spin 1s linear infinite;"></div>
-                            <div style="font-size:18px; font-weight:600; color:#333; margin-bottom:8px;">AI判断中...</div>
-                            <div style="font-size:14px; color:#999;">${targetChar.name} 正在考虑是否接受</div>
-                        </div>
-                    `;
-                    document.body.appendChild(loadingDiv);
+                try {
+                    // 调用AI判断是否接受好友申请（同时返回回复消息）
+                    console.log('[FriendRequest] 🚀 开始调用AI判断是否接受...');
+                    const result = await aiDecideAcceptFriendRequest(targetChar, accountId, message);
+                    console.log('[FriendRequest] AI返回结果:', JSON.stringify(result));
                     
-                    try {
-                        // 调用AI判断是否接受好友申请
-                        const willAccept = await aiDecideAcceptFriendRequest(targetChar, accountId, message);
-                        
+                    if (document.body.contains(loadingDiv)) {
                         document.body.removeChild(loadingDiv);
-                        
-                        if (willAccept) {
-                            // AI决定接受
-                            const request = await db.friend_requests.get(requestId);
+                    }
+                    
+                    if (result.accepted) {
+                        console.log('[FriendRequest] ✅ AI决定接受，开始处理...');
+                        // AI决定接受
+                        const request = await db.friend_requests.get(requestId);
+                        if (request) {
                             request.status = 'accepted';
                             await db.friend_requests.put(request);
-                            
-                            // 添加为好友
-                            await setFriendStatus(targetChar, accountId, 'friend');
-                            
-                            alert(`✅ ${targetChar.name} 接受了你的好友申请！`);
-                            
-                            // 刷新界面
-                            const activeTab = document.querySelector('.wechat-tab-item.active');
-                            if (activeTab) {
-                                const tabIndex = Array.from(document.querySelectorAll('.wechat-tab-item')).indexOf(activeTab);
-                                switchWechatTab(tabIndex);
+                        }
+                        
+                        // 添加为好友
+                        await setFriendStatus(targetChar, accountId, 'friend');
+                        console.log('[FriendRequest] 好友状态已更新为 friend');
+                        
+                        // 🔥 将AI生成的回复消息添加到聊天记录
+                        if (result.messages && result.messages.length > 0) {
+                            console.log('[FriendRequest] 写入', result.messages.length, '条回复消息到聊天记录');
+                            let chatHistory = getChatHistory(targetChar, accountId);
+                            for (let i = 0; i < result.messages.length; i++) {
+                                chatHistory.push({
+                                    role: 'char',
+                                    content: result.messages[i],
+                                    time: Date.now() + i * 100
+                                });
                             }
-                        } else {
-                            // AI决定拒绝
-                            alert(`❌ ${targetChar.name} 拒绝了你的好友申请。`);
+                            await setChatHistory(targetChar, accountId, chatHistory);
                         }
-                    } catch (error) {
-                        if (document.body.contains(loadingDiv)) {
-                            document.body.removeChild(loadingDiv);
+                        
+                        alert(`✅ ${targetChar.name} 接受了你的好友申请！`);
+                        
+                        // 刷新界面
+                        if (currentChatCharId === targetChar.id) {
+                            const refreshedChar = await db.characters.get(targetChar.id);
+                            if (refreshedChar) await renderChatBody(refreshedChar);
                         }
-                        alert('AI判断失败：' + error.message + '\n\n请前往"新的好友"中手动处理。');
+                        const activeTab = document.querySelector('.wechat-tab-item.active');
+                        if (activeTab) {
+                            const tabIndex = Array.from(document.querySelectorAll('.wechat-tab-item')).indexOf(activeTab);
+                            switchWechatTab(tabIndex);
+                        }
+                    } else {
+                        console.log('[FriendRequest] ❌ AI决定拒绝');
+                        // AI决定拒绝
+                        alert(`❌ ${targetChar.name} 拒绝了你的好友申请。`);
                     }
+                } catch (error) {
+                    if (document.body.contains(loadingDiv)) {
+                        document.body.removeChild(loadingDiv);
+                    }
+                    console.error('[FriendRequest] AI判断失败:', error);
+                    alert('AI判断失败：' + error.message + '\n\n好友申请已发送，请前往"新的好友"中查看。');
                 }
+            } else {
+                alert(`好友申请已发送给 ${targetChar.name}`);
             }
         }
         
-        // AI判断是否接受好友申请
+        // AI判断是否接受好友申请并生成回复消息（使用统一的callAI函数）
+        // 返回 { accepted: boolean, messages: string[] }
         async function aiDecideAcceptFriendRequest(char, accountId, requestMessage) {
             try {
-                // 从数据库获取API配置（和正常聊天一样）
-                const urlData = await db.dexiData.get('aiBaseUrl');
-                const keyData = await db.dexiData.get('aiApiKey');
-                const modelData = await db.dexiData.get('aiCurrentModel');
-                
-                const apiUrl = urlData?.value || 'https://api.openai.com';
-                const apiKey = keyData?.value ? keyData.value.trim() : '';
-                const model = modelData?.value || 'gpt-4';
-                
-                if (!apiKey) {
-                    throw new Error('未配置API密钥');
-                }
-                
                 const myChar = await db.characters.get(parseInt(accountId));
                 const myName = myChar?.name || '用户';
+                
+                const minCount = char.reply_min_count || 1;
+                const maxCount = char.reply_max_count || 3;
                 
                 // 获取聊天历史
                 const history = getChatHistory(char, accountId);
@@ -8455,46 +10187,82 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 }).join('\n');
                 
                 const prompt = `你是 ${char.name}。
+⚠️ 重要：你的名字是${char.name}，你不是${myName}！
 
-你的人设：
+【你的人设】
 ${char.description || char.desc || '（无详细人设）'}
 
-${myName} 向你发送了好友申请，申请消息是：
-"${requestMessage}"
+【情境】
+${myName} 向你发送了好友申请，申请消息是："${requestMessage}"
+${history.length > 0 ? `\n你们之前的聊天记录：\n${recentMessages}` : '你们之前没有聊过天。'}
 
-${history.length > 0 ? `你们之前的聊天记录：\n${recentMessages}` : '你们之前没有聊过天。'}
+【任务】
+1. 根据你的性格、与 ${myName} 的关系，判断你是否会接受这个好友申请。
+2. 如果接受，请以你的身份写出接受后你会发给 ${myName} 的消息。
 
-根据你的性格、与 ${myName} 的关系（如果有的话），以及申请消息的内容，请判断你是否会接受这个好友申请。
+【输出格式】
+如果拒绝，只回复：[拒绝]
+如果接受，回复格式如下：
+[接受]
+你要发的消息内容
 
-请只回复"接受"或"拒绝"，不要有任何其他内容。`;
+【消息要求】
+- 用「|||」分隔多条消息（${minCount}-${maxCount}条）
+- 严格贴合你的人设和说话风格
+- 少用标点符号 用空格代替逗号
+- 像真人发微信一样自然`;
 
-                const response = await fetch(`${apiUrl}/v1/chat/completions`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${apiKey}`
-                    },
-                    body: JSON.stringify({
-                        model: model,
-                        messages: [
-                            { role: 'system', content: '你是一个专业的角色扮演助手。' },
-                            { role: 'user', content: prompt }
-                        ],
-                        temperature: 0.7,
-                        max_tokens: 50
-                    })
-                });
+                // 🔥 使用统一的callAI函数
+                const answer = await callAI([
+                    { role: 'system', content: `你是${char.name}，正在进行角色扮演。请严格按照格式输出。` },
+                    { role: 'user', content: prompt }
+                ]);
                 
-                if (!response.ok) {
-                    throw new Error(`API错误: ${response.status}`);
+                const trimmedAnswer = (answer || '').trim();
+                console.log('[AI决定] ' + char.name + ' 的回答:', trimmedAnswer);
+                
+                const accepted = trimmedAnswer.includes('[接受]') || trimmedAnswer.includes('接受') || trimmedAnswer.includes('同意');
+                const rejected = trimmedAnswer.includes('[拒绝]') || trimmedAnswer.startsWith('拒绝');
+                
+                if (rejected) {
+                    return { accepted: false, messages: [] };
                 }
                 
-                const data = await response.json();
-                const answer = data.choices[0].message.content.trim();
+                if (accepted) {
+                    // 提取消息部分（去掉 [接受] 标记）
+                    let msgPart = trimmedAnswer
+                        .replace(/\[接受\]/g, '')
+                        .replace(/^接受[：:\s]*/i, '')
+                        .trim();
+                    
+                    // 按 ||| 分割成多条消息
+                    let messages = [];
+                    if (msgPart) {
+                        messages = msgPart.split('|||')
+                            .map(s => s.trim())
+                            .filter(s => s.length > 0 && !s.startsWith('[') && !s.startsWith('（'));
+                    }
+                    
+                    // 如果没有解析出消息，生成一条默认消息
+                    if (messages.length === 0) {
+                        messages = ['好的 通过了'];
+                    }
+                    
+                    return { accepted: true, messages };
+                }
                 
-                console.log('[AI决定] ' + char.name + ' 的回答:', answer);
+                // 如果AI没有明确标记，尝试智能判断
+                // 如果回复看起来像正常消息（没有拒绝意味），视为接受
+                if (!rejected && trimmedAnswer.length > 0) {
+                    let messages = trimmedAnswer.split('|||')
+                        .map(s => s.trim())
+                        .filter(s => s.length > 0 && !s.startsWith('['));
+                    if (messages.length > 0) {
+                        return { accepted: true, messages };
+                    }
+                }
                 
-                return answer.includes('接受') || answer.includes('同意');
+                return { accepted: false, messages: [] };
             } catch (error) {
                 console.error('[AI决定] 错误:', error);
                 throw error;
@@ -8586,7 +10354,7 @@ ${history.length > 0 ? `你们之前的聊天记录：\n${recentMessages}` : '�
             }
         }
         
-        // 快进检测
+        // 快进检测（删除好友后）
         async function fastForwardCheck(charId) {
             // 检查API密钥（从数据库获取，和正常聊天一样）
             const apiKeyData = await db.dexiData.get('aiApiKey');
@@ -8601,13 +10369,53 @@ ${history.length > 0 ? `你们之前的聊天记录：\n${recentMessages}` : '�
                 return;
             }
             
-            const minutes = prompt('快进多少分钟？', '60');
-            if (minutes === null) return;
+            const timeInput = prompt('快进多久？\n格式：数字 + 单位\n例如：60分钟、2小时、1天', '60分钟');
+            if (timeInput === null) return;
             
-            const minutesNum = parseInt(minutes);
-            if (isNaN(minutesNum) || minutesNum <= 0) {
-                alert('请输入有效的分钟数');
+            // 解析输入（支持多种格式）
+            const match = timeInput.match(/^(\d+)\s*(分钟|小时|天)$/);
+            if (!match) {
+                // 兼容旧格式（纯数字默认为分钟）
+                const minutesNum = parseInt(timeInput);
+                if (isNaN(minutesNum) || minutesNum <= 0) {
+                    alert('格式错误！请输入如：60分钟、2小时、1天');
+                    return;
+                }
+                // 🔥 更新虚拟时间偏移
+                const char = await db.characters.get(charId);
+                if (char) {
+                    if (!char.timeOffset) char.timeOffset = 0;
+                    char.timeOffset += minutesNum * 60 * 1000;
+                    await db.characters.put(char);
+                }
+                await checkCharacterSendFriendRequest(charId, minutesNum);
                 return;
+            }
+            
+            const amount = parseInt(match[1]);
+            const unit = match[2];
+            
+            // 计算分钟数
+            let minutesNum = 0;
+            if (unit === '分钟') {
+                minutesNum = amount;
+            } else if (unit === '小时') {
+                minutesNum = amount * 60;
+            } else if (unit === '天') {
+                minutesNum = amount * 24 * 60;
+            }
+            
+            if (minutesNum <= 0) {
+                alert('时间必须大于0');
+                return;
+            }
+            
+            // 🔥 更新虚拟时间偏移
+            const char = await db.characters.get(charId);
+            if (char) {
+                if (!char.timeOffset) char.timeOffset = 0;
+                char.timeOffset += minutesNum * 60 * 1000;
+                await db.characters.put(char);
             }
             
             await checkCharacterSendFriendRequest(charId, minutesNum);
@@ -8735,7 +10543,7 @@ ${history.length > 0 ? `你们之前的聊天记录：\n${recentMessages}` : '�
                 // 🎯 直接恢复为好友状态，不用重新申请
                 await setFriendStatus(char, accountId, 'friend');
                 
-                showToast('已解除拉黑，已恢复好友关系');
+                showToast('已解除拉黑，正在生成角色反应...');
                 
                 // 刷新界面
                 if (currentChatCharId === charId) {
@@ -8748,17 +10556,167 @@ ${history.length > 0 ? `你们之前的聊天记录：\n${recentMessages}` : '�
                     const tabIndex = Array.from(document.querySelectorAll('.wechat-tab-item')).indexOf(activeTab);
                     switchWechatTab(tabIndex);
                 }
+                
+                // 🎯 调用AI生成解除拉黑后的反应
+                try {
+                    await generateUnblockReaction(char, accountId);
+                } catch (error) {
+                    console.error('[Unblock] 生成反应失败:', error);
+                }
+            }
+        }
+        
+        // 🎯 生成解除拉黑后角色的反应
+        async function generateUnblockReaction(char, accountId) {
+            const myChar = await db.characters.get(parseInt(accountId));
+            if (!myChar) return;
+            
+            // 获取聊天历史作为上下文
+            const chatHistory = getChatHistory(char, accountId);
+            const recentMessages = chatHistory.slice(-8).map(m => {
+                const role = m.role === 'user' ? myChar.name : char.name;
+                return `${role}: ${m.content}`;
+            }).join('\n');
+            
+            // 计算被拉黑的大概时长（根据最后一条消息的时间）
+            const lastMsg = chatHistory[chatHistory.length - 1];
+            const blockedDuration = lastMsg ? Math.floor((Date.now() - (lastMsg.timestamp || Date.now())) / (1000 * 60)) : 0;
+            const durationText = blockedDuration > 1440 ? `${Math.floor(blockedDuration / 1440)}天` : 
+                                 blockedDuration > 60 ? `${Math.floor(blockedDuration / 60)}小时` : 
+                                 blockedDuration > 0 ? `${blockedDuration}分钟` : '刚才';
+            
+            const prompt = `【角色扮演任务】
+你现在是「${char.name}」，请完全代入这个角色。
+⚠️ 重要：你的名字是${char.name}，你不是用户！你是独立的角色，有自己的性格和想法。
+
+【你的人设】
+${char.description || char.desc || '一个普通人'}
+
+【对方信息】
+名字：${myChar.name}
+${myChar.description ? `简介：${myChar.description.substring(0, 200)}` : ''}
+
+【最近的聊天记录（被拉黑前）】
+${recentMessages || '（无记录）'}
+
+【当前情境】
+你之前被「${myChar.name}」拉黑了大约 ${durationText}。
+在这段时间里，你可能打过电话、发过短信，但都没有得到回应。
+现在，对方突然解除了对你的拉黑！你们又能正常聊天了。
+
+【你需要思考】
+1. 被拉黑这段时间你经历了什么？（焦虑等待？愤怒不甘？伤心难过？无所谓？）
+2. 现在对方解除拉黑了，你是什么心情？（惊喜？激动？冷淡？试探？报复心理？）
+3. 你会立刻发消息吗？还是故意冷一下对方？
+4. 如果发消息，你会说什么？（兴师问罪？装作什么都没发生？小心翼翼？撒娇抱怨？）
+
+【输出要求】
+根据你的性格，生成你发现被解除拉黑后发的第一条/第一组微信消息。
+
+要求：
+- 用「|||」分隔多条消息（${char.reply_min_count || 1}-${char.reply_max_count || 3}条）
+- 严格贴合你的人设和说话风格
+- 情绪要真实 不要太理性
+- 少用标点符号 停顿用空格代替 不要在句中用逗号
+- 可以有语气词、表情、错别字
+- 如果你的性格是会冷处理的 可以只发一个字或表情
+
+直接输出消息内容，不要任何解释。
+
+示例格式：
+在吗|||你终于肯理我了|||我还以为你要拉黑我一辈子呢`;
+
+            console.log('[Unblock] 正在生成解除拉黑反应...');
+            
+            // 🎯 显示"对方正在输入中..."
+            const chatTitleEl = document.getElementById('chat-title');
+            const originalTitle = chatTitleEl ? chatTitleEl.innerText : (char.remark || char.name);
+            if (chatTitleEl && currentChatCharId === char.id) {
+                chatTitleEl.innerText = "对方正在输入中...";
+            }
+            
+            try {
+                const response = await callAI([
+                    { role: 'user', content: prompt }
+                ]);
+                
+                const replyText = response.trim();
+                if (!replyText) {
+                    // 恢复标题
+                    if (chatTitleEl && currentChatCharId === char.id) {
+                        chatTitleEl.innerText = originalTitle;
+                    }
+                    return;
+                }
+                
+                console.log('[Unblock] AI返回:', replyText);
+                
+                // 解析多条消息
+                const segments = replyText.split('|||').map(s => s.trim()).filter(s => s.length > 0);
+                if (segments.length === 0) {
+                    if (chatTitleEl && currentChatCharId === char.id) {
+                        chatTitleEl.innerText = originalTitle;
+                    }
+                    return;
+                }
+                
+                // 获取当前聊天记录
+                let currentHistory = getChatHistory(char, accountId);
+                
+                // 添加所有消息到聊天记录
+                for (let i = 0; i < segments.length; i++) {
+                    currentHistory.push({
+                        role: 'char',
+                        content: segments[i],
+                        time: Date.now() + i * 100
+                    });
+                }
+                
+                // 保存聊天记录
+                await setChatHistory(char, accountId, currentHistory);
+                
+                // 直接重新渲染聊天界面
+                if (currentChatCharId === char.id) {
+                    await renderChatBody(char);
+                    // 滚动到底部
+                    const chatBody = document.getElementById('chat-body');
+                    if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
+                }
+                
+                // 恢复标题
+                if (chatTitleEl && currentChatCharId === char.id) {
+                    chatTitleEl.innerText = originalTitle;
+                }
+                
+                // 显示通知
+                showToast(`${char.name} 发来了消息`);
+                
+                console.log('[Unblock] ✅ 解除拉黑反应已生成');
+                
+            } catch (error) {
+                console.error('[Unblock] AI调用失败:', error);
+                // 恢复标题
+                if (chatTitleEl && currentChatCharId === char.id) {
+                    chatTitleEl.innerText = originalTitle;
+                }
             }
         }
         
         // 手动发送好友申请（用户主动）
         async function manualSendFriendRequest(charId) {
+            console.log('[FriendRequest] 点击主动发送好友申请, charId:', charId);
             const char = await db.characters.get(charId);
-            if (!char) return;
+            if (!char) {
+                console.error('[FriendRequest] 找不到角色, charId:', charId);
+                return;
+            }
             
             const message = prompt(`发送好友申请给 ${char.name}\n\n请输入申请理由（可选）：`, '我是' + (await getCurrentUserName()));
             if (message !== null) {
+                console.log('[FriendRequest] 开始发送好友申请给:', char.name, '消息:', message);
                 await sendFriendRequestTo(charId, message);
+            } else {
+                console.log('[FriendRequest] 用户取消了发送');
             }
         }
         
@@ -8768,6 +10726,7 @@ ${history.length > 0 ? `你们之前的聊天记录：\n${recentMessages}` : '�
             if (!char) return;
             
             const accountId = getCurrentAccountId();
+            if (!accountId) return;
             const myChar = await db.characters.get(parseInt(accountId));
             if (!myChar) return;
             
@@ -8781,23 +10740,37 @@ ${history.length > 0 ? `你们之前的聊天记录：\n${recentMessages}` : '�
                 return `${role}: ${msg.content}`;
             }).join('\n');
             
-            const prompt = `你是${char.name}。
+            // 格式化时间显示
+            let elapsedText = '';
+            if (elapsedMinutes < 60) {
+                elapsedText = elapsedMinutes + '分钟';
+            } else if (elapsedMinutes < 1440) {
+                elapsedText = Math.round(elapsedMinutes / 60) + '小时';
+            } else {
+                elapsedText = Math.round(elapsedMinutes / 1440) + '天';
+            }
+            
+            const systemPrompt = `你是一个角色扮演助手。你需要代入角色${char.name}，判断是否会主动发送好友申请。
+⚠️ 重要：你的名字是${char.name}，你不是${myChar.name}！你是独立的角色。`;
 
-你的人设：
-${char.description || '（无详细人设）'}
+            const userPrompt = `【你的人设】
+${char.description || char.desc || '（无详细人设）'}
 
-你和${myChar.name}之前是好友，但${myChar.name}删除了你。你们之前的聊天记录：
+【对方信息】
+名字：${myChar.name}
+${myChar.description ? `简介：${myChar.description.substring(0, 200)}` : ''}
 
+【你们之前的聊天记录】
 ${chatContext || '（没有聊天记录）'}
 
-现在时间已经过去了${elapsedMinutes}分钟。
+【当前情境】
+你和${myChar.name}之前是好友，但${myChar.name}删除了你。
+现在已经过去了${elapsedText}。
 
 请根据你的性格、和${myChar.name}的关系、以及你们的聊天历史，决定你是否要主动发送好友申请给${myChar.name}。
 
-如果你决定发送好友申请，请以你的视角写出你想对${myChar.name}说的话（可以是1-3条消息，每条消息用换行分隔）。
-如果你决定不发送，请只回复"[不发送]"。
-
-注意：请直接以角色身份说话，不要有任何格式标记或解释。`;
+如果你决定发送好友申请，请以你的身份写出申请附带的消息（1-3条，每条用换行分隔）。直接写消息内容，不要有格式标记或解释。
+如果你决定不发送，请只回复"[不发送]"。`;
             
             // 显示加载提示
             const loadingDiv = document.createElement('div');
@@ -8806,7 +10779,7 @@ ${chatContext || '（没有聊天记录）'}
                 <div style="background:#fff; padding:30px 40px; border-radius:16px; text-align:center; box-shadow:0 10px 40px rgba(0,0,0,0.3);">
                     <div style="width:50px; height:50px; border:4px solid #f3f3f3; border-top:4px solid var(--ins-pink); border-radius:50%; margin:0 auto 20px; animation:spin 1s linear infinite;"></div>
                     <div style="font-size:18px; font-weight:600; color:#333; margin-bottom:8px;">正在检测中...</div>
-                    <div style="font-size:14px; color:#999;">${char.name} 正在决定是否发送好友申请</div>
+                    <div style="font-size:14px; color:#999;">${char.name} 正在决定是否发送好友申请（快进${elapsedText}）</div>
                 </div>
             `;
             document.body.appendChild(loadingDiv);
@@ -8825,45 +10798,70 @@ ${chatContext || '（没有聊天记录）'}
             }
             
             try {
+                // 🔥 使用 system + user 消息格式，与其他AI调用保持一致
                 const response = await callAI([
-                    { role: 'user', content: prompt }
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userPrompt }
                 ]);
                 
-                document.body.removeChild(loadingDiv);
+                if (document.body.contains(loadingDiv)) {
+                    document.body.removeChild(loadingDiv);
+                }
                 
                 // 解析AI回复
-                const answer = response.trim();
+                const answer = (response || '').trim();
                 
-                if (answer === '[不发送]' || answer.includes('[不发送]')) {
+                if (!answer || answer === '[不发送]' || answer.includes('[不发送]') || answer.includes('不发送')) {
                     // 角色决定不发送
                     alert(`${char.name} 决定暂时不发送好友申请`);
                     
-                    // 更新最后检测时间
-                    if (!char.wait_friend_settings) char.wait_friend_settings = {};
-                    if (char.wait_friend_settings[accountId]) {
-                        char.wait_friend_settings[accountId].lastCheckTime = Date.now();
-                        if (char.wait_friend_settings[accountId].enabled) {
-                            char.wait_friend_settings[accountId].nextCheckTime = 
-                                Date.now() + char.wait_friend_settings[accountId].interval * 60 * 1000;
+                    // 重新获取角色数据（避免使用过期数据）
+                    const freshChar = await db.characters.get(charId);
+                    if (freshChar) {
+                        if (!freshChar.wait_friend_settings) freshChar.wait_friend_settings = {};
+                        if (!freshChar.wait_friend_settings[accountId]) {
+                            freshChar.wait_friend_settings[accountId] = {
+                                enabled: false,
+                                interval: 60,
+                                lastCheckTime: Date.now(),
+                                nextCheckTime: null
+                            };
                         }
-                        await db.characters.put(char);
+                        freshChar.wait_friend_settings[accountId].lastCheckTime = Date.now();
+                        if (freshChar.wait_friend_settings[accountId].enabled) {
+                            freshChar.wait_friend_settings[accountId].nextCheckTime = 
+                                Date.now() + freshChar.wait_friend_settings[accountId].interval * 60 * 1000;
+                        }
+                        await db.characters.put(freshChar);
                     }
                 } else {
                     // 角色决定发送好友申请，将多条消息拆分
-                    const messages = answer.split('\n').filter(msg => msg.trim().length > 0);
+                    // 清理AI可能附加的格式标记
+                    let cleanAnswer = answer
+                        .replace(/^[\s\S]*?\[不发送\][\s\S]*$/gi, '')
+                        .replace(/^(好的|作为|以下是|我决定).*[:：]\s*/gim, '')
+                        .trim();
+                    
+                    if (!cleanAnswer) cleanAnswer = answer; // 如果清理后为空，用原始回复
+                    
+                    const messages = cleanAnswer.split('\n').filter(msg => {
+                        const trimmed = msg.trim();
+                        return trimmed.length > 0 && !trimmed.startsWith('[') && !trimmed.startsWith('（');
+                    });
                     
                     if (messages.length === 0) {
-                        alert(`${char.name} 的回复为空，未发送申请`);
+                        alert(`${char.name} 的回复无法解析，未发送申请`);
                         return;
                     }
                     
-                    // 将所有消息合并，或者只取第一条作为申请消息
+                    // 将所有消息合并作为申请消息
                     const requestMessage = messages.join('\n');
                     
                     // 创建好友申请（反向：从角色发给用户）
                     await db.friend_requests.add({
                         fromCharId: charId,
                         toCharId: parseInt(accountId),
+                        toAccountId: accountId,
                         message: requestMessage,
                         status: 'pending',
                         time: Date.now()
@@ -8876,15 +10874,24 @@ ${chatContext || '（没有聊天记录）'}
                     
                     alert(`${char.name} 发送了好友申请！\n\n${preview}\n\n请前往"新的好友"页面查看。`);
                     
-                    // 更新最后检测时间
-                    if (!char.wait_friend_settings) char.wait_friend_settings = {};
-                    if (char.wait_friend_settings[accountId]) {
-                        char.wait_friend_settings[accountId].lastCheckTime = Date.now();
-                        if (char.wait_friend_settings[accountId].enabled) {
-                            char.wait_friend_settings[accountId].nextCheckTime = 
-                                Date.now() + char.wait_friend_settings[accountId].interval * 60 * 1000;
+                    // 重新获取角色数据
+                    const freshChar = await db.characters.get(charId);
+                    if (freshChar) {
+                        if (!freshChar.wait_friend_settings) freshChar.wait_friend_settings = {};
+                        if (!freshChar.wait_friend_settings[accountId]) {
+                            freshChar.wait_friend_settings[accountId] = {
+                                enabled: false,
+                                interval: 60,
+                                lastCheckTime: Date.now(),
+                                nextCheckTime: null
+                            };
                         }
-                        await db.characters.put(char);
+                        freshChar.wait_friend_settings[accountId].lastCheckTime = Date.now();
+                        if (freshChar.wait_friend_settings[accountId].enabled) {
+                            freshChar.wait_friend_settings[accountId].nextCheckTime = 
+                                Date.now() + freshChar.wait_friend_settings[accountId].interval * 60 * 1000;
+                        }
+                        await db.characters.put(freshChar);
                     }
                     
                     // 刷新通讯录红点
@@ -8896,13 +10903,15 @@ ${chatContext || '（没有聊天记录）'}
                 
                 // 刷新界面
                 if (currentChatCharId === charId) {
-                    await renderChatBody(char);
+                    const refreshedChar = await db.characters.get(charId);
+                    if (refreshedChar) await renderChatBody(refreshedChar);
                 }
                 
             } catch (error) {
                 if (document.body.contains(loadingDiv)) {
                     document.body.removeChild(loadingDiv);
                 }
+                console.error('[FastForwardCheck] AI调用失败:', error);
                 alert('AI调用失败：' + error.message);
             }
         }
@@ -8941,10 +10950,6 @@ ${chatContext || '（没有聊天记录）'}
         async function openChatWindow(charId) {
             currentChatCharId = charId;
             window.currentGroupChatId = null; // 清除群聊ID，确保是私聊模式
-            window.currentMixedGroupId = null; // 清除混合群聊ID
-            window.currentMixedGroupInfo = null;
-            currentRealFriendId = null; // 清除真人聊天ID
-            currentRealFriendInfo = null;
             const char = await db.characters.get(charId);
             
             // 优先显示备注名
@@ -8970,8 +10975,111 @@ ${chatContext || '（没有聊天记录）'}
                 chatFooter.style.display = 'flex';
             }
             
+            // ✅ 联机好友：隐藏AI魔法棒，简化菜单（只显示语音输入、相册、转账）
+            const isOnlineFriend = char.isOnlineFriend === true;
+            const actionPanel = document.getElementById('action-panel');
+            const actionItems = actionPanel.querySelectorAll('.action-item');
+            const aiMagicBtn = document.querySelector('.chat-input-bar .chat-icon-btn'); // 第一个按钮是AI魔法棒
+            
+            if (isOnlineFriend) {
+                // 隐藏AI魔法棒
+                if (aiMagicBtn) aiMagicBtn.style.display = 'none';
+                // 只显示前3个菜单项（语音输入、相册、转账）
+                actionItems.forEach((item, index) => {
+                    item.style.display = index < 3 ? '' : 'none';
+                });
+            } else {
+                // 普通角色：显示所有菜单
+                if (aiMagicBtn) aiMagicBtn.style.display = '';
+                actionItems.forEach(item => {
+                    item.style.display = '';
+                });
+            }
+            
             renderChatBody(char);
         }
+
+        // --- 戳一戳功能 ---
+        let currentPokeCharName = '';
+        
+        async function showPokeModal(charName) {
+            currentPokeCharName = charName;
+            
+            // 获取当前用户名
+            const accountId = getCurrentAccountId();
+            const myChar = await db.characters.get(parseInt(accountId));
+            const userName = myChar ? (myChar.nick || myChar.name) : '用户';
+            
+            // 设置名字
+            document.getElementById('poke-user-name').textContent = userName;
+            document.getElementById('poke-char-name').textContent = charName;
+            
+            // 设置默认值
+            document.getElementById('poke-action').value = '戳了戳';
+            document.getElementById('poke-part').value = '脑袋';
+            
+            // 更新预览
+            updatePokePreview();
+            
+            // 显示弹窗
+            document.getElementById('poke-modal').style.display = 'flex';
+            
+            // 监听输入变化
+            document.getElementById('poke-action').oninput = updatePokePreview;
+            document.getElementById('poke-part').oninput = updatePokePreview;
+        }
+        
+        function updatePokePreview() {
+            const userName = document.getElementById('poke-user-name').textContent;
+            const charName = document.getElementById('poke-char-name').textContent;
+            const action = document.getElementById('poke-action').value || '戳了戳';
+            const part = document.getElementById('poke-part').value || '脑袋';
+            
+            const preview = `${userName}${action}${charName}的${part}`;
+            document.getElementById('poke-preview').textContent = preview;
+        }
+        
+        async function confirmPoke() {
+            const action = document.getElementById('poke-action').value || '戳了戳';
+            const part = document.getElementById('poke-part').value || '脑袋';
+            const userName = document.getElementById('poke-user-name').textContent;
+            const charName = currentPokeCharName;
+            
+            // 关闭弹窗
+            document.getElementById('poke-modal').style.display = 'none';
+            
+            // 生成戳一戳系统消息
+            const pokeText = `${userName}${action}${charName}的${part}`;
+            
+            // 获取当前角色
+            if (!currentChatCharId) return;
+            const char = await db.characters.get(currentChatCharId);
+            if (!char) return;
+            
+            const accountId = getCurrentAccountId();
+            let history = getChatHistory(char, accountId);
+            
+            // 添加系统消息
+            const sysMsg = { 
+                role: 'system', 
+                content: pokeText, 
+                time: Date.now(),
+                type: 'poke'
+            };
+            
+            history.push(sysMsg);
+            await setChatHistory(char, accountId, history);
+            
+            // 在界面上显示系统消息
+            await appendMessageToUI('system', pokeText);
+            
+            console.log('[Poke] 戳一戳:', pokeText);
+        }
+        
+        // 关闭弹窗的通用函数
+        window.closeModal = function(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        };
 
         // --- 聊天详情页逻辑 ---
         // 统一入口：根据当前是私聊还是群聊显示对应详情页
@@ -8989,6 +11097,26 @@ ${chatContext || '（没有聊天记录）'}
             if (!char) return;
 
             document.getElementById('chat-detail-page').style.display = 'flex';
+            
+            // ✅ 联机好友：隐藏不相关的设置项
+            const isOnlineFriend = char.isOnlineFriend === true;
+            const detailPage = document.getElementById('chat-detail-page');
+            const detailGroups = detailPage.querySelectorAll('.detail-group');
+            
+            // 显示或隐藏特定的设置组（按顺序：档案关联、主动聊天、AI上下文、表情包、聊天背景、气泡样式、自定义样式、危险操作）
+            detailGroups.forEach((group, index) => {
+                if (isOnlineFriend) {
+                    // 联机好友只显示第一组（档案关联）和最后一组（危险操作）
+                    // 隐藏：主动聊天(1)、AI上下文(2)、表情包(3)、聊天背景(4)、气泡样式(5)、自定义样式(6)
+                    if (index >= 1 && index <= 6) {
+                        group.style.display = 'none';
+                    } else {
+                        group.style.display = '';
+                    }
+                } else {
+                    group.style.display = '';
+                }
+            });
             
             // 1. 回显基本信息
             document.getElementById('detail-char-remark').value = char.remark || '';
@@ -9046,13 +11174,23 @@ ${chatContext || '（没有聊天记录）'}
             // 4. 回显AI查岗设置
             document.getElementById('detail-allow-check-switch').checked = !!char.allow_ai_check_account;
             
+            // 4.5. 回显修罗场模式设置
+            document.getElementById('detail-allow-shura-switch').checked = !!char.allow_shura_mode;
+            
             // 5. 回显上下文条数设置（默认20条）
             document.getElementById('detail-context-count').value = char.context_message_count || 20;
+            
+            // 5.5. 回显回复消息条数设置（默认1~3条）
+            document.getElementById('detail-reply-min-count').value = char.reply_min_count || 1;
+            document.getElementById('detail-reply-max-count').value = char.reply_max_count || 3;
 
             // 6. 加载挂载的表情包库
             updateMountedStickerCount();
             
-            // 6. 更新视频通话记录数量
+            // 6.5 加载挂载的用户档案
+            updateMountedUserDisplay();
+            
+            // 7. 更新视频通话记录数量
             updateVideoCallRecordCount();
             
             // 7. 加载自定义样式设置
@@ -9069,6 +11207,36 @@ ${chatContext || '（没有聊天记录）'}
                 bgPreview.style.backgroundImage = '';
                 bgPreview.textContent = '暂无背景图';
             }
+            
+            // 9. 加载气泡样式选择
+            const bubbleStyle = char.bubble_style || 'default';
+            document.querySelectorAll('.bubble-style-option').forEach(el => {
+                el.classList.remove('selected');
+                if (el.dataset.style === bubbleStyle) {
+                    el.classList.add('selected');
+                }
+            });
+            
+            // 10. 加载自动总结设置
+            document.getElementById('detail-auto-summary-switch').checked = !!char.auto_summary_enabled;
+            document.getElementById('detail-summary-interval').value = char.summary_interval || '';
+            
+            // 更新总结计数
+            const accountId = getCurrentAccountId();
+            if (accountId) {
+                await updateSummaryCount('private', currentChatCharId, accountId);
+            }
+        }
+        
+        // 选择气泡样式
+        function selectBubbleStyle(style) {
+            document.querySelectorAll('.bubble-style-option').forEach(el => {
+                el.classList.remove('selected');
+                if (el.dataset.style === style) {
+                    el.classList.add('selected');
+                }
+            });
+            saveChatDetail();
         }
 
         function hideChatDetail() {
@@ -9110,8 +11278,19 @@ async function saveChatDetail() {
     // 上下文条数设置
     const contextCount = parseInt(document.getElementById('detail-context-count').value);
     
+    // 回复消息条数范围设置
+    const replyMinCount = parseInt(document.getElementById('detail-reply-min-count').value);
+    const replyMaxCount = parseInt(document.getElementById('detail-reply-max-count').value);
+    
     // AI查岗设置
     const allowCheckEnabled = document.getElementById('detail-allow-check-switch').checked;
+    
+    // 修罗场模式设置
+    const allowShuraEnabled = document.getElementById('detail-allow-shura-switch').checked;
+    
+    // 自动总结设置
+    const autoSummaryEnabled = document.getElementById('detail-auto-summary-switch').checked;
+    const summaryInterval = parseInt(document.getElementById('detail-summary-interval').value);
 
     char.remark = remark;
     char.lorebookIds = lorebookIds.length > 0 ? lorebookIds : null;
@@ -9124,7 +11303,12 @@ async function saveChatDetail() {
     char.auto_reply_enabled = autoEnabled;
     char.auto_reply_interval = autoInterval > 0 ? autoInterval : null;
     char.context_message_count = contextCount > 0 ? contextCount : 20; // 默认20条
+    char.reply_min_count = (replyMinCount > 0 && replyMinCount <= 10) ? replyMinCount : 1; // 默认1条
+    char.reply_max_count = (replyMaxCount > 0 && replyMaxCount <= 10) ? replyMaxCount : 3; // 默认3条
     char.allow_ai_check_account = allowCheckEnabled; // 保存查岗开关状态
+    char.allow_shura_mode = allowShuraEnabled; // 保存修罗场模式开关状态
+    char.auto_summary_enabled = autoSummaryEnabled; // 自动总结开关
+    char.summary_interval = summaryInterval > 0 ? summaryInterval : 50; // 总结间隔，默认50条
     
     // 保存自定义样式（严格过滤JS）
     const bubbleCSS = document.getElementById('detail-bubble-css').value;
@@ -9134,6 +11318,10 @@ async function saveChatDetail() {
     char.custom_bubble_css = sanitizeCSS(bubbleCSS);
     char.custom_html = sanitizeHTML(customHTML);
     char.custom_css = sanitizeCSS(customCSS);
+    
+    // 保存气泡样式选择
+    const selectedBubbleOption = document.querySelector('.bubble-style-option.selected');
+    char.bubble_style = selectedBubbleOption ? selectedBubbleOption.dataset.style : 'default';
     
     await db.characters.put(char);
     
@@ -9247,6 +11435,117 @@ async function updateMountedStickerCount() {
 window.showMountStickerModal = showMountStickerModal;
 window.hideMountStickerModal = hideMountStickerModal;
 window.saveMountedStickers = saveMountedStickers;
+
+// 显示挂载用户档案弹窗
+async function showMountUserModal() {
+    if (!currentChatCharId) return;
+    
+    const char = await db.characters.get(currentChatCharId);
+    const currentUserId = char.linked_user_id || null;
+    
+    const modal = document.getElementById('mount-user-modal');
+    const listContainer = document.getElementById('mount-user-list');
+    
+    if (!modal || !listContainer) {
+        console.error('挂载用户档案弹窗元素未找到');
+        return;
+    }
+    
+    // 获取所有User类型档案
+    const users = await db.characters.where('type').equals('user').toArray();
+    
+    if (users.length === 0) {
+        listContainer.innerHTML = '<div style="text-align:center; color:#999; padding:40px;">暂无用户档案<br>请先去【角色档案-User】创建用户</div>';
+    } else {
+        listContainer.innerHTML = users.map(user => {
+            const isSelected = currentUserId === user.id;
+            const avatarStyle = user.avatar ? `background-image:url(${user.avatar}); background-size:cover; background-position:center;` : 'background:#f0f0f0;';
+            return `
+                <div onclick="selectMountUser(${user.id})" style="display:flex; align-items:center; padding:12px; background:${isSelected ? '#ffe4e8' : '#fff'}; border:2px solid ${isSelected ? 'var(--ins-pink)' : '#f0f0f0'}; border-radius:12px; cursor:pointer; transition:all 0.2s;">
+                    <div style="width:48px; height:48px; border-radius:50%; ${avatarStyle} margin-right:12px; flex-shrink:0;"></div>
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-size:15px; font-weight:500; color:#333; margin-bottom:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${user.name}</div>
+                        <div style="font-size:12px; color:#999; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${user.description ? user.description.substring(0, 30) + (user.description.length > 30 ? '...' : '') : '暂无简介'}</div>
+                    </div>
+                    ${isSelected ? '<div style="color:var(--ins-pink); font-size:20px; margin-left:8px;">✓</div>' : ''}
+                </div>
+            `;
+        }).join('');
+    }
+    
+    modal.style.display = 'flex';
+    
+    // 点击外部区域关闭弹窗
+    modal.onclick = function(e) {
+        if (e.target === modal) {
+            hideMountUserModal();
+        }
+    };
+}
+
+// 隐藏挂载用户档案弹窗
+function hideMountUserModal() {
+    const modal = document.getElementById('mount-user-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+// 选择挂载的用户档案
+async function selectMountUser(userId) {
+    if (!currentChatCharId) return;
+    
+    const char = await db.characters.get(currentChatCharId);
+    char.linked_user_id = userId;
+    await db.characters.put(char);
+    
+    // 更新显示
+    updateMountedUserDisplay();
+    hideMountUserModal();
+    showToast('已挂载用户档案');
+}
+
+// 卸载用户档案
+async function unmountUser() {
+    if (!currentChatCharId) return;
+    
+    const char = await db.characters.get(currentChatCharId);
+    char.linked_user_id = null;
+    await db.characters.put(char);
+    
+    // 更新显示
+    updateMountedUserDisplay();
+    hideMountUserModal();
+    showToast('已卸载用户档案');
+}
+
+// 更新挂载用户档案显示
+async function updateMountedUserDisplay() {
+    if (!currentChatCharId) return;
+    
+    const char = await db.characters.get(currentChatCharId);
+    const displayEl = document.getElementById('detail-mounted-user');
+    
+    if (!displayEl) return;
+    
+    if (char.linked_user_id) {
+        const user = await db.characters.get(char.linked_user_id);
+        if (user) {
+            displayEl.innerText = user.name;
+            displayEl.style.color = 'var(--ins-pink)';
+        } else {
+            displayEl.innerText = '未挂载';
+            displayEl.style.color = '#999';
+        }
+    } else {
+        displayEl.innerText = '未挂载';
+        displayEl.style.color = '#999';
+    }
+}
+
+// 确保挂载用户档案函数在全局作用域可访问
+window.showMountUserModal = showMountUserModal;
+window.hideMountUserModal = hideMountUserModal;
+window.selectMountUser = selectMountUser;
+window.unmountUser = unmountUser;
 
         async function setChatDetailAvatar(input) {
             const file = input.files[0];
@@ -9429,7 +11728,15 @@ window.saveMountedStickers = saveMountedStickers;
             const chatContainer = document.getElementById('chat-body');
             if (!chatContainer) return;
             
-            // 应用气泡样式
+            // 应用气泡样式类名（默认/仿微信）
+            chatContainer.classList.remove('bubble-style-default', 'bubble-style-wechat');
+            if (char.bubble_style === 'wechat') {
+                chatContainer.classList.add('bubble-style-wechat');
+            } else {
+                chatContainer.classList.add('bubble-style-default');
+            }
+            
+            // 应用自定义气泡CSS
             if (char.custom_bubble_css) {
                 const bubbleStyleId = 'custom-bubble-style';
                 let styleTag = document.getElementById(bubbleStyleId);
@@ -9488,10 +11795,66 @@ window.saveMountedStickers = saveMountedStickers;
             if (customContainer) customContainer.remove();
         }
 
-        function jumpToCharEditor() {
+        async function jumpToCharEditor() {
             if (!currentChatCharId) return;
+            
+            // 检查是否是联机好友
+            const char = await db.characters.get(currentChatCharId);
+            if (char && char.isOnlineFriend) {
+                // 联机好友只显示简化信息
+                showOnlineFriendProfile(char);
+                return;
+            }
+            
             hideChatDetail();
             editCharacter(currentChatCharId);
+        }
+        
+        // 显示联机好友的简化档案（只有基本信息，没有人设）
+        function showOnlineFriendProfile(char) {
+            const avatar = char.avatar || '';
+            const avatarStyle = avatar ? `background-image:url(${avatar})` : 'background:#e0e0e0';
+            
+            const html = `
+                <div style="position:fixed; top:0; left:0; right:0; bottom:0; background:#f5f5f5; z-index:9999; display:flex; flex-direction:column;">
+                    <div class="wechat-header" style="background:#fff;">
+                        <div class="back-btn" onclick="this.closest('div[style*=position]').remove()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0; color:var(--ins-text);">
+                            <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                        </div>
+                        <div class="wechat-title">联机好友资料</div>
+                        <div style="width:40px;"></div>
+                    </div>
+                    
+                    <div style="flex:1; overflow-y:auto; padding:20px;">
+                        <!-- 头像和基本信息 -->
+                        <div style="text-align:center; padding:30px 0;">
+                            <div style="width:100px; height:100px; border-radius:12px; margin:0 auto 16px; background-size:cover; background-position:center; ${avatarStyle}"></div>
+                            <div style="font-size:20px; font-weight:600; color:#333; margin-bottom:8px;">${char.name || '未知'}</div>
+                            <div style="font-size:14px; color:#999;">联机好友</div>
+                        </div>
+                        
+                        <!-- 信息卡片 -->
+                        <div style="background:#fff; border-radius:12px; overflow:hidden; margin-bottom:16px;">
+                            <div style="padding:16px; border-bottom:1px solid #f0f0f0; display:flex; justify-content:space-between;">
+                                <span style="color:#666;">微信号</span>
+                                <span style="color:#333;">${char.identity?.account || '未知'}</span>
+                            </div>
+                            <div style="padding:16px; display:flex; justify-content:space-between;">
+                                <span style="color:#666;">昵称</span>
+                                <span style="color:#333;">${char.name || '未知'}</span>
+                            </div>
+                        </div>
+                        
+                        <!-- 提示信息 -->
+                        <div style="text-align:center; padding:20px; color:#999; font-size:13px;">
+                            <div style="margin-bottom:8px;">🌐 这是一位联机好友</div>
+                            <div>对方的详细资料不可见</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.insertAdjacentHTML('beforeend', html);
         }
 
         async function clearChatHistory() {
@@ -9505,73 +11868,16 @@ window.saveMountedStickers = saveMountedStickers;
             }
         }
         
-        // --- 主动发消息逻辑（改为后端驱动）---
-        let syncTimer = null; // 同步定时器
+        // --- 主动发消息逻辑（纯前端驱动）---
+        let syncTimer = null; // 定时器（保留变量名兼容性）
         
-        // 同步角色配置到后端（让后端来检查）
+        // 纯前端模式：不需要同步到后端，角色数据全部存储在本地 IndexedDB
         async function syncCharactersToBackend() {
-            try {
-                // 获取所有开启了主动发消息的角色
-                const chars = await db.characters
-                    .filter(c => c.auto_reply_enabled === true && c.auto_reply_interval > 0)
-                    .toArray();
-                
-                if (chars.length === 0) {
-                    console.log('[Sync] No characters to sync');
-                    return;
-                }
-                
-                // 准备同步数据
-                const syncData = chars.map(c => ({
-                    id: c.id,
-                    name: c.name,
-                    avatar: c.avatar,
-                    auto_reply_enabled: c.auto_reply_enabled,
-                    auto_reply_interval: c.auto_reply_interval,
-                    last_message_time: (() => {
-                        // 获取当前账号的聊天记录
-                        const accountId = getCurrentAccountId();
-                        const history = getChatHistory(c, accountId);
-                        return history && history.length > 0 
-                            ? history[history.length - 1].time 
-                            : (c.updated_at || Date.now());
-                    })(),
-                    user_id: currentUserId
-                }));
-                
-                console.log(`[Sync] ========================================`);
-                console.log(`[Sync] 正在同步 ${syncData.length} 个角色到后端...`);
-                console.log(`[Sync]   user_id: ${currentUserId}`);
-                console.log(`[Sync]   user_id类型: ${typeof currentUserId}`);
-                console.log(`[Sync]   角色列表:`, syncData.map(c => ({ name: c.name, user_id: c.user_id })));
-                
-                // 发送到后端
-                const res = await fetch(`${API_BASE}/characters/sync`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ characters: syncData })
-                });
-                
-                if (res.ok) {
-                    const result = await res.json();
-                    console.log(`[Sync] ✓✓✓ 同步成功！`);
-                    console.log(`[Sync]   后端响应:`, result);
-                    console.log(`[Sync] ========================================`);
-                    showDebugToast(`✓ 已同步${syncData.length}个角色到后端`);
-                } else {
-                    const errorText = await res.text();
-                    console.error('[Sync] ✗✗✗ 同步失败！');
-                    console.error('[Sync]   状态码:', res.status);
-                    console.error('[Sync]   错误信息:', errorText);
-                    console.log(`[Sync] ========================================`);
-                }
-                
-            } catch (err) {
-                console.error('[Sync] Error:', err);
-            }
+            // 纯前端模式：无需同步，仅打印日志
+            console.log('[Sync] 纯前端模式：角色数据存储在本地，无需同步到后端');
         }
         
-        // 注册 Service Worker 并订阅推送
+        // 注册 Service Worker（纯前端版本：仅用于 PWA 和本地通知）
         async function registerServiceWorkerAndSubscribe() {
             if (!('serviceWorker' in navigator)) {
                 console.log('[SW] Not supported');
@@ -9579,14 +11885,8 @@ window.saveMountedStickers = saveMountedStickers;
                 return;
             }
             
-            if (!('PushManager' in window)) {
-                console.log('[Push] Not supported');
-                showDebugToast('❌ 浏览器不支持推送通知');
-                return;
-            }
-            
             try {
-                // 注册 Service Worker（独立文件）
+                // 注册 Service Worker（独立文件，用于 PWA 功能）
                 const registration = await navigator.serviceWorker.register('./sw.js');
                 console.log('[SW] Registered:', registration);
                 showDebugToast('✓ Service Worker已注册');
@@ -9595,76 +11895,22 @@ window.saveMountedStickers = saveMountedStickers;
                 await navigator.serviceWorker.ready;
                 console.log('[ServiceWorker] Ready');
                 
-                // 请求通知权限
-                const permission = await Notification.requestPermission();
-                if (permission !== 'granted') {
-                    console.log('[Push] Permission denied');
-                    showDebugToast('✗ 推送权限被拒绝');
-                    return;
+                // 请求通知权限（用于本地通知）
+                if ('Notification' in window) {
+                    const permission = await Notification.requestPermission();
+                    if (permission === 'granted') {
+                        console.log('[Notification] ✓ 通知权限已授予');
+                        showDebugToast('✓ 通知权限已授予', true);
+                    } else {
+                        console.log('[Notification] ✗ 通知权限被拒绝');
+                        showDebugToast('✗ 通知权限被拒绝');
+                    }
                 }
                 
-                // 获取 VAPID 公钥
-                console.log('[Push] Fetching VAPID public key...');
-                const keyRes = await fetch(`${API_BASE}/push/public_key`);
-                
-                if (!keyRes.ok) {
-                    throw new Error(`获取公钥失败: ${keyRes.status}`);
-                }
-                
-                const keyData = await keyRes.json();
-                console.log('[Push] Key data received:', keyData);
-                
-                const publicKey = keyData.public_key;
-                
-                // 验证公钥是否有效
-                if (!publicKey) {
-                    throw new Error('后端返回的公钥为空！请检查后端 VAPID 密钥是否正确生成。');
-                }
-                
-                console.log('[Push] Public key:', publicKey.substring(0, 30) + '...');
-                
-                // 订阅推送
-                const subscription = await registration.pushManager.subscribe({
-                    userVisibleOnly: true,
-                    applicationServerKey: urlBase64ToUint8Array(publicKey)
-                });
-                
-                console.log('[Push] Subscribed:', subscription);
-                
-                // 发送订阅信息到后端
-                console.log('[Push] ========================================');
-                console.log('[Push] 🔔 正在发送订阅到后端...');
-                console.log('[Push]   user_id:', currentUserId);
-                console.log('[Push]   user_id类型:', typeof currentUserId);
-                console.log('[Push]   subscription endpoint:', subscription.endpoint.substring(0, 50) + '...');
-                
-                const subscriptionData = {
-                    user_id: currentUserId,
-                    subscription: subscription.toJSON()
-                };
-                console.log('[Push]   发送数据:', JSON.stringify(subscriptionData).substring(0, 200) + '...');
-                
-                const subRes = await fetch(`${API_BASE}/push/subscribe`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(subscriptionData)
-                });
-                
-                if (subRes.ok) {
-                    const result = await subRes.json();
-                    console.log('[Push] ✓✓✓ 订阅已保存到后端！');
-                    console.log('[Push]   后端响应:', result);
-                    console.log('[Push]   🎉 后台推送已激活！即使浏览器在后台也能收到通知！');
-                    console.log('[Push] ========================================');
-                    showDebugToast('🎉 后台推送已激活！', true);
-                } else {
-                    const errorText = await subRes.text();
-                    console.error('[Push] ✗✗✗ 订阅保存失败！');
-                    console.error('[Push]   状态码:', subRes.status);
-                    console.error('[Push]   错误信息:', errorText);
-                    console.log('[Push] ========================================');
-                    showDebugToast('✗ 订阅保存失败: ' + errorText);
-                }
+                // 纯前端模式：不需要 Web Push 后端订阅
+                // 通知将通过前端的 Notification API 直接发送
+                console.log('[Push] 纯前端模式：使用本地 Notification API 发送通知');
+                showDebugToast('✓ 本地通知已就绪', true);
                 
             } catch (err) {
                 console.error('[ServiceWorker] Error:', err);
@@ -9688,109 +11934,30 @@ window.saveMountedStickers = saveMountedStickers;
             return outputArray;
         }
         
-        // 连接WebSocket接收实时推送
+        // 纯前端模式：不需要 WebSocket 连接
+        // 主动消息完全由前端定时器驱动
         function connectWebSocket() {
-            console.log('[WebSocket] Initializing connection to:', SOCKET_URL);
-            
-            if (socket && socket.connected) {
-                console.log('[WebSocket] Already connected');
-                showDebugToast('WebSocket已连接');
-                return;
-            }
-            
-            try {
-                console.log('[WebSocket] Creating io connection...');
-                socket = io(SOCKET_URL, {
-                    transports: ['websocket', 'polling'],
-                    reconnection: true,
-                    reconnectionDelay: 1000,
-                    reconnectionAttempts: 10
-                });
-                
-                socket.on('connect', () => {
-                    console.log('[WebSocket] ✓✓✓ CONNECTED to server!');
-                    console.log('[WebSocket] Socket ID:', socket.id);
-                    showDebugToast('✓ WebSocket已连接！', true);
-                });
-                
-                socket.on('disconnect', (reason) => {
-                    console.log('[WebSocket] ✗ Disconnected:', reason);
-                    showDebugToast(`✗ WebSocket断开: ${reason}`);
-                });
-                
-                socket.on('connect_error', (error) => {
-                    console.error('[WebSocket] Connection error:', error);
-                    console.error('[WebSocket] 检查后端是否运行:', SOCKET_URL);
-                    showDebugToast(`✗ 连接失败，检查后端${SOCKET_URL}`);
-                });
-                
-                // 监听后端推送的触发事件
-                socket.on('auto_chat_trigger', (data) => {
-                    console.log('[WebSocket] ✓✓✓ Received auto_chat_trigger!');
-                    console.log('[WebSocket] Data:', data);
-                    showDebugToast(`🔥 收到WebSocket推送: ${data.char_name}`);
-                    
-                    // 查找对应角色并触发AI生成（会自动发送通知）
-                    db.characters.get(data.char_id).then(char => {
-                        if (char) {
-                            console.log('[WebSocket] ✓ Found character, triggering AI...');
-                            triggerAutoChat(char);
-                        } else {
-                            console.warn('[WebSocket] ✗ Character not found:', data.char_id);
-                            showDebugToast(`✗ 找不到角色: ${data.char_id}`);
-                        }
-                    });
-                });
-                
-                console.log('[WebSocket] Event listeners registered');
-                
-            } catch (err) {
-                console.error('[WebSocket] ✗ Failed to initialize:', err);
-                showDebugToast(`✗ WebSocket初始化失败: ${err.message}`);
-            }
+            console.log('[WebSocket] 纯前端模式：不需要 WebSocket 连接');
+            console.log('[WebSocket] 主动消息由前端定时器驱动');
         }
         
-        // 启动同步循环（每30秒同步一次配置）
+        // 启动主动聊天检测循环（纯前端版本）
         async function startAutoChatLoop() {
             if (syncTimer) clearInterval(syncTimer);
             
-            console.log('[AutoChat] Starting real-time push mode...');
-            console.log('[AutoChat] Current environment:', {
+            console.log('[AutoChat] 启动纯前端主动聊天模式...');
+            console.log('[AutoChat] 当前环境:', {
                 protocol: location.protocol,
                 hostname: location.hostname,
                 href: location.href,
                 serviceWorkerSupported: 'serviceWorker' in navigator,
-                pushManagerSupported: 'PushManager' in window,
                 notificationSupported: 'Notification' in window,
                 notificationPermission: Notification.permission
             });
-            showDebugToast('实时推送启动中...', true);
+            showDebugToast('主动聊天检测启动中...', true);
             
-            // 1. 连接WebSocket（实时推送，前台生效）
-            console.log('[AutoChat] Step 1: Connecting WebSocket...');
-            connectWebSocket();
-            
-            // 2. 注册 Service Worker（后台推送，需要HTTPS或localhost）
-            console.log('[AutoChat] Step 2: Registering Service Worker...');
-            if (location.protocol === 'https:' || location.hostname === 'localhost') {
-                console.log('[AutoChat] ✓ Environment supports Service Worker');
-                await registerServiceWorkerAndSubscribe();
-            } else {
-                console.warn('[AutoChat] ✗ Service Worker NOT supported in this environment!');
-                console.warn(`[AutoChat] Current: ${location.protocol}//${location.hostname}`);
-                console.warn('[AutoChat] Required: https:// OR http://localhost');
-                showDebugToast('⚠️ 需要HTTPS或localhost才有后台推送');
-            }
-            
-            // 3. 立即同步一次配置到后端
-            console.log('[AutoChat] Step 3: Syncing characters...');
-            syncCharactersToBackend();
-            
-            // 4. 每30秒同步一次配置
-            syncTimer = setInterval(() => {
-                console.log('[Sync] Syncing characters to backend...');
-                syncCharactersToBackend();
-            }, 30 * 1000);
+            // 纯前端模式：不需要 WebSocket 连接
+            console.log('[AutoChat] 纯前端模式：由前端定时器驱动主动消息');
             
             // 5. 每15秒检查一次是否该发消息（立即触发，无后端轮询延迟）
             setInterval(() => {
@@ -9916,13 +12083,16 @@ ${loreContext}
 
 现在距离上次对话已经过去了一段时间。请根据角色性格，主动向 ${userName} 发起新的话题，或者延续之前未尽的话题。
 
+【可用特殊指令】
+- **撤回消息**：使用 ((RECALL)) 可以撤回你刚才发送的最后一条消息（适用于发错消息、说错话、后悔等场景）
+
 【重要指令 - 必须严格遵守】
-1. **必须**模拟微信连发消息的习惯：请生成 2 到 4 条短消息，不能只发一条！
+1. **必须**模拟微信连发消息的习惯：请生成 ${char.reply_min_count || 1} 到 ${char.reply_max_count || 3} 条短消息${(char.reply_min_count || 1) === 1 ? '' : '，不能只发一条'}！
 2. **必须**使用分隔符 "|||" 来隔开每一条消息。
 3. **严禁使用逗号**（包括中文逗号和英文逗号）。如果想表达停顿，请直接拆分成下一条消息，或者用空格代替。
    - 错误示例：嘿在吗？刚刚看到个好玩的视频，发给你看看
    - 正确示例：嘿在吗？|||刚刚看到个好玩的视频|||发给你看看
-4. 每条消息要简短，5-15个字最佳，像真实微信聊天一样分多条发送。
+4. 像真实微信聊天一样分多条发送。
 5. 严禁只发送标点符号。每一条消息都必须有实际文字内容。
 6. 语气要自然、口语化，符合人设。
 
@@ -10010,9 +12180,15 @@ ${loreContext}
                         }
                     }
                 
-                // ✅ 修复：清理末尾多余的 ]
+                // ✅ 修复：清理末尾多余的 ]，但保留 [img:] [voice:] [imgcard:] 等格式的闭合括号
                 function cleanMessage(text) {
                     if (!text) return text;
+                    // 检查是否是特殊格式消息（以 [ 开头，以 ] 结尾）
+                    const specialFormats = /^\[(img|voice|imgcard):/i;
+                    if (specialFormats.test(text) && text.endsWith(']')) {
+                        // 是特殊格式，不删除末尾的 ]
+                        return text;
+                    }
                     // 删除末尾多余的 ]
                     return text.replace(/\]+$/, '');
                 }
@@ -10117,24 +12293,8 @@ ${loreContext}
                             await appendMessageToUI('char', JSON.stringify(transferData), freshChar.avatar);
                         }
                         
-                        // 发送通知
+                        // 发送通知（纯前端：直接使用本地通知）
                         sendSystemNotification(freshChar.name, '[转账]');
-                        
-                        // 调用后端 API 发送推送
-                        try {
-                            await fetch(`${API_BASE}/trigger_push`, {
-                                method: 'POST',
-                                headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({
-                                    user_id: currentUserId,
-                                    char_id: freshChar.id,
-                                    char_name: freshChar.name,
-                                    message: '[转账]'
-                                })
-                            });
-                        } catch (err) {
-                            console.error(`[AutoChat] Backend push API failed:`, err);
-                        }
                         
                         // 刷新微信列表
                         if (currentChatCharId !== freshChar.id) {
@@ -10146,6 +12306,72 @@ ${loreContext}
                         }
                     }
                     return; // 转账处理完成，不再执行后续逻辑
+                }
+                
+                // 🎯 检测撤回指令 ((RECALL)) - AI角色可以撤回自己最后一条消息
+                const recallMatch = cleanReplyProcessed.match(/\(\(RECALL(?::\s*(\d+))?\)\)/i);
+                if (recallMatch) {
+                    const freshChar = await db.characters.get(char.id);
+                    if (freshChar) {
+                        let history = getChatHistory(freshChar, accountId);
+                        
+                        // 提取撤回指令前面的文字内容（如果有）
+                        const textBeforeRecall = cleanMessage(cleanReplyProcessed.substring(0, recallMatch.index).trim());
+                        
+                        // 找AI最后一条消息（非撤回状态）
+                        let targetIndex = -1;
+                        for (let i = history.length - 1; i >= 0; i--) {
+                            if (history[i].role === 'char' && !history[i].isRecalled) {
+                                targetIndex = i;
+                                break;
+                            }
+                        }
+                        
+                        if (targetIndex >= 0 && history[targetIndex].role === 'char') {
+                            // 保存原内容并标记为已撤回
+                            const originalContent = history[targetIndex].content;
+                            history[targetIndex].recalledContent = originalContent;
+                            history[targetIndex].isRecalled = true;
+                            history[targetIndex].content = "";
+                            
+                            await setChatHistory(freshChar, accountId, history);
+                            
+                            console.log(`[AutoChat] ${freshChar.name} 撤回了一条消息`);
+                            addLog('info', `角色撤回消息: ${freshChar.name}`, { originalContent: originalContent.substring(0, 50) });
+                            
+                            // 更新UI - 居中系统提示样式
+                            if (currentChatCharId === freshChar.id) {
+                                const chatBody = document.getElementById('chat-body');
+                                const messageRows = chatBody.querySelectorAll('.message-row');
+                                if (messageRows[targetIndex]) {
+                                    const msgRow = messageRows[targetIndex];
+                                    msgRow.className = 'message-row recalled-system-row';
+                                    msgRow.innerHTML = '';
+                                    
+                                    const systemTip = document.createElement('div');
+                                    systemTip.className = 'recalled-system-tip';
+                                    systemTip.innerHTML = `"${freshChar.name}"撤回了一条消息`;
+                                    systemTip.style.cursor = 'pointer';
+                                    systemTip.onclick = (e) => {
+                                        e.stopPropagation();
+                                        showRecalledContent(freshChar.name, originalContent);
+                                    };
+                                    msgRow.appendChild(systemTip);
+                                }
+                            }
+                            
+                            // 发送通知
+                            sendSystemNotification(freshChar.name, '撤回了一条消息');
+                        }
+                        
+                        // 如果撤回指令前有文字，继续处理这些文字
+                        if (textBeforeRecall && textBeforeRecall.trim()) {
+                            cleanReplyProcessed = textBeforeRecall;
+                            // 不return，继续处理前面的文字
+                        } else {
+                            return; // 只有撤回指令，处理完成
+                        }
+                    }
                 }
                 
                 // 🎯 检测亲属卡赠送指令 ((FAMILY_CARD: 额度))
@@ -10191,53 +12417,113 @@ ${loreContext}
                         // 2. 发送亲属卡消息
                         const user = await db.characters.get(parseInt(currentMyCharId));
                         
-                        // 在角色数据中添加"我赠送的"
-                        if (!freshChar.identity) freshChar.identity = {};
-                        if (!freshChar.identity.familyCardsGiven) freshChar.identity.familyCardsGiven = [];
-                        freshChar.identity.familyCardsGiven.push({
-                            charId: parseInt(currentMyCharId),
-                            monthlyLimit: monthlyLimit,
-                            usedThisMonth: 0,
-                            records: [],
-                            createdAt: Date.now()
-                        });
-                        await db.characters.put(freshChar);
-                        
-                        // 在用户数据中添加"我收到的"
-                        if (user) {
-                            if (!user.identity) user.identity = {};
-                            if (!user.identity.familyCardsReceived) user.identity.familyCardsReceived = [];
-                            user.identity.familyCardsReceived.push({
-                                charId: freshChar.id,
+                        // ✅ 检查是否是联机好友
+                        if (freshChar.isOnlineFriend && freshChar.onlineData?.wx_account) {
+                            console.log('[亲属卡] 检测到联机好友，准备发送亲属卡...');
+                            // 联机好友 - 通过普通消息通道发送（和转账一样）
+                            const onlineUserChar = await getOrCreateOnlineUserChar();
+                            console.log('[亲属卡] 在线用户角色:', onlineUserChar?.name, '连接状态:', onlineConnected);
+                            
+                            if (onlineUserChar && onlineConnected) {
+                                const fromWxAccount = onlineUserChar.identity.account;
+                                const toWxAccount = freshChar.onlineData.wx_account;
+                                
+                                console.log('[亲属卡] 准备发送: from=', fromWxAccount, 'to=', toWxAccount, '额度=', monthlyLimit);
+                                
+                                // 🎯 和转账一样：通过 sendOnlineMessage 发送带特殊标记的 JSON 消息
+                                const familyCardContent = JSON.stringify({
+                                    __type: 'familyCard',  // 特殊标记，和转账的 __type: 'transfer' 一样
+                                    monthlyLimit: monthlyLimit,
+                                    fromName: onlineUserChar.name
+                                });
+                                
+                                console.log('[亲属卡] 消息内容:', familyCardContent);
+                                const sent = sendOnlineMessage(toWxAccount, familyCardContent, fromWxAccount);
+                                console.log('[亲属卡] sendOnlineMessage 返回:', sent);
+                                
+                                if (sent) {
+                                    // ✅ 在发送方保存亲属卡消息到聊天记录
+                                    const familyCardMsg = {
+                                        role: 'user',
+                                        type: 'familyCard',
+                                        content: JSON.stringify({
+                                            fromName: onlineUserChar.name,
+                                            monthlyLimit: monthlyLimit,
+                                            status: 'sent',
+                                            isOnline: true
+                                        }),
+                                        time: Date.now()
+                                    };
+                                    
+                                    history = getChatHistory(freshChar, accountId);
+                                    history.push(familyCardMsg);
+                                    await setChatHistory(freshChar, accountId, history);
+                                    
+                                    // 刷新聊天界面
+                                    if (currentChatCharId === freshChar.id) {
+                                        renderChatBody(freshChar);
+                                    }
+                                    
+                                    console.log('[亲属卡] ✅ 亲属卡已成功发送并保存到聊天记录');
+                                    showToast('亲属卡已赠送');
+                                } else {
+                                    console.error('[亲属卡] ❌ sendOnlineMessage 返回 false');
+                                    showToast('发送失败，请检查连接');
+                                }
+                            } else {
+                                console.error('[亲属卡] ❌ 条件不满足: onlineUserChar=', !!onlineUserChar, 'onlineConnected=', onlineConnected);
+                                showToast('请确保已连接服务器');
+                            }
+                        } else {
+                            // 本地角色 - 原有逻辑
+                            // 在角色数据中添加"我赠送的"
+                            if (!freshChar.identity) freshChar.identity = {};
+                            if (!freshChar.identity.familyCardsGiven) freshChar.identity.familyCardsGiven = [];
+                            freshChar.identity.familyCardsGiven.push({
+                                charId: parseInt(currentMyCharId),
                                 monthlyLimit: monthlyLimit,
                                 usedThisMonth: 0,
                                 records: [],
                                 createdAt: Date.now()
                             });
-                            await db.characters.put(user);
+                            await db.characters.put(freshChar);
+                            
+                            // 在用户数据中添加"我收到的"
+                            if (user) {
+                                if (!user.identity) user.identity = {};
+                                if (!user.identity.familyCardsReceived) user.identity.familyCardsReceived = [];
+                                user.identity.familyCardsReceived.push({
+                                    charId: freshChar.id,
+                                    monthlyLimit: monthlyLimit,
+                                    usedThisMonth: 0,
+                                    records: [],
+                                    createdAt: Date.now()
+                                });
+                                await db.characters.put(user);
+                            }
+                            
+                            // 发送亲属卡消息到聊天
+                            const familyCardMsg = {
+                                role: 'char',
+                                type: 'familyCard',
+                                content: JSON.stringify({
+                                    fromName: freshChar.name,
+                                    monthlyLimit: monthlyLimit,
+                                    status: 'sent'
+                                }),
+                                time: Date.now()
+                            };
+                            
+                            history = getChatHistory(freshChar, accountId);
+                            history.push(familyCardMsg);
+                            await setChatHistory(freshChar, accountId, history);
+                            
+                            if (currentChatCharId === freshChar.id) {
+                                renderChatBody(freshChar);
+                            }
+                            
+                            sendSystemNotification(freshChar.name, '[亲属卡]');
                         }
-                        
-                        // 发送亲属卡消息到聊天
-                        const familyCardMsg = {
-                            role: 'char',
-                            type: 'familyCard',
-                            content: JSON.stringify({
-                                fromName: freshChar.name,
-                                monthlyLimit: monthlyLimit,
-                                status: 'sent'
-                            }),
-                            time: Date.now()
-                        };
-                        
-                        history = getChatHistory(freshChar, accountId);
-                        history.push(familyCardMsg);
-                        await setChatHistory(freshChar, accountId, history);
-                        
-                        if (currentChatCharId === freshChar.id) {
-                            renderChatBody(freshChar);
-                        }
-                        
-                        sendSystemNotification(freshChar.name, '[亲属卡]');
                     }
                     return;
                 }
@@ -10404,6 +12690,59 @@ ${loreContext}
                     // ✅ 修复：清理每个分段末尾多余的 ]
                     seg = cleanMessage(seg);
                     
+                    // 🎯 检测撤回指令 - 在分段中检测
+                    if (/^\s*\(\(RECALL\)\)\s*$/i.test(seg)) {
+                        console.log(`[AutoChat] 检测到撤回指令，执行撤回...`);
+                        const freshChar = await db.characters.get(char.id);
+                        let history = getChatHistory(freshChar, accountId);
+                        
+                        // 找AI最后一条消息（非撤回状态）
+                        let targetIndex = -1;
+                        for (let j = history.length - 1; j >= 0; j--) {
+                            if (history[j].role === 'char' && !history[j].isRecalled) {
+                                targetIndex = j;
+                                break;
+                            }
+                        }
+                        
+                        if (targetIndex >= 0) {
+                            const originalContent = history[targetIndex].content;
+                            history[targetIndex].recalledContent = originalContent;
+                            history[targetIndex].isRecalled = true;
+                            history[targetIndex].content = "";
+                            await setChatHistory(freshChar, accountId, history);
+                            
+                            console.log(`[AutoChat] ${freshChar.name} 撤回了消息: ${originalContent.substring(0, 30)}...`);
+                            addLog('info', `角色撤回消息: ${freshChar.name}`);
+                            
+                            // 更新UI - 居中系统提示样式
+                            if (currentChatCharId === freshChar.id) {
+                                const chatBody = document.getElementById('chat-body');
+                                const messageRows = chatBody.querySelectorAll('.message-row');
+                                if (messageRows[targetIndex]) {
+                                    const msgRow = messageRows[targetIndex];
+                                    msgRow.className = 'message-row recalled-system-row';
+                                    msgRow.innerHTML = '';
+                                    
+                                    const capturedContent = originalContent;
+                                    const capturedName = freshChar.name;
+                                    const systemTip = document.createElement('div');
+                                    systemTip.className = 'recalled-system-tip';
+                                    systemTip.innerHTML = `"${capturedName}"撤回了一条消息`;
+                                    systemTip.style.cursor = 'pointer';
+                                    systemTip.onclick = (e) => {
+                                        e.stopPropagation();
+                                        showRecalledContent(capturedName, capturedContent);
+                                    };
+                                    msgRow.appendChild(systemTip);
+                                }
+                            }
+                            
+                            sendSystemNotification(freshChar.name, '撤回了一条消息');
+                        }
+                        continue; // 跳过这个分段，不作为消息发送
+                    }
+                    
                     // 延时：第一条稍快，后续模拟打字
                     if (i > 0) {
                         const delay = 500 + Math.min(seg.length * 80, 2000);
@@ -10443,22 +12782,7 @@ ${loreContext}
                     addLog('info', `调用sendSystemNotification: ${freshChar.name}`, { message: seg });
                     sendSystemNotification(freshChar.name, seg);
                     
-                    // 7. 【关键修复】立即调用后端API发送Web Push推送
-                    try {
-                        await fetch(`${API_BASE}/trigger_push`, {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({
-                                user_id: currentUserId,
-                                char_id: freshChar.id,
-                                char_name: freshChar.name,
-                                message: seg
-                            })
-                        });
-                        console.log(`[AutoChat] ✓ Backend push API called for ${freshChar.name}`);
-                    } catch (err) {
-                        console.error(`[AutoChat] ✗ Backend push API failed:`, err);
-                    }
+                    // 纯前端：通知已通过 sendSystemNotification 发送，无需后端 API
                     
                     // 7. 如果在微信列表页，刷新列表以更新最后一条消息预览
                     if (currentChatCharId !== freshChar.id) {
@@ -10554,26 +12878,19 @@ ${loreContext}
             const input = document.getElementById('chat-input-box');
             const text = input.value.trim();
             
-            // 检查是否是混合群聊
-            if (window.currentMixedGroupId) {
-                if (!text) return;
-                input.value = '';
-                handleChatInputChange(input);
-                await sendMixedGroupUserMessage(text);
+            // 隐藏表情推荐栏
+            const suggestionBar = document.getElementById('sticker-suggestion-bar');
+            if (suggestionBar) suggestionBar.style.display = 'none';
+            
+            // 检查是否是修罗场模式（查岗模式下的发送）
+            if (isViewingRoleAccount && currentViewingRoleAccountId) {
+                await sendShuraMessage();
                 return;
             }
             
             // 检查是否是群聊
             if (window.currentGroupChatId) {
                 await sendGroupMessage(text);
-                return;
-            }
-            
-            // 检查是否是真人聊天
-            if (currentRealFriendId) {
-                if (!text) return;
-                input.value = '';
-                await sendRealFriendMessage(text);
                 return;
             }
             
@@ -10604,13 +12921,50 @@ ${loreContext}
 
             let history = getChatHistory(char, accountId);
 
-            // 2. 追加并显示用户消息
+            // 2. 追加并显示用户消息（支持引用）
             const userMsg = { role: 'user', content: text, time: Date.now() };
+            
+            // 如果有引用
+            if (currentQuote) {
+                userMsg.quote = {
+                    name: currentQuote.name,
+                    content: currentQuote.content
+                };
+                cancelQuote(); // 清除引用
+            }
+            
             history.push(userMsg);
             await setChatHistory(char, accountId, history); 
             
-            // ✅ 优化：只追加新消息到 DOM，不重新渲染整个聊天记录
-            await appendMessageToUI('user', text, char.avatar);
+            // 🔥 优化：只有在有引用时才重新渲染，否则只追加消息
+            if (userMsg.quote) {
+                // 有引用，需要重新渲染以显示引用样式
+                renderChatBody(char);
+            } else {
+                // 没有引用，只追加消息，不重新渲染
+                await appendMessageToUI('user', text, char.avatar);
+            }
+            
+            // ✅ 如果是联机好友，发送消息到服务器
+            if (char.isOnlineFriend && char.onlineData?.wx_account) {
+                // 获取当前可用的在线角色（如果没有则自动上线）
+                const onlineUserChar = await getOrCreateOnlineUserChar();
+                
+                if (onlineUserChar && onlineConnected) {
+                    const fromWxAccount = onlineUserChar.identity.account;
+                    const toWxAccount = char.onlineData.wx_account;
+                    const sent = sendOnlineMessage(toWxAccount, text, fromWxAccount);
+                    if (sent) {
+                        console.log('[Online] 消息已发送到服务器:', text);
+                    } else {
+                        console.warn('[Online] 消息发送失败，可能未连接服务器');
+                        showToast('消息发送失败，请检查服务器连接');
+                    }
+                } else {
+                    console.warn('[Online] 无法发送联机消息：未找到有微信号的角色或未连接服务器');
+                    showToast('请确保 User 角色设置了微信号并连接服务器');
+                }
+            }
             
             // ✅ 不再自动触发 AI 回复，需要用户点击"接受回复"按钮
             // triggerAiReply(); 
@@ -10628,19 +12982,36 @@ ${loreContext}
             handleChatInputChange(input);
             closeChatPanel();
             
-            // 添加消息到群聊历史
+            // 添加消息到群聊历史（支持引用）
             if (!group.chat_history) group.chat_history = [];
-            group.chat_history.push({
+            const msg = {
                 role: 'user',
                 content: text,
                 time: Date.now()
-            });
+            };
+            
+            // 如果有引用
+            if (currentQuote) {
+                msg.quote = {
+                    name: currentQuote.name,
+                    content: currentQuote.content
+                };
+                cancelQuote(); // 清除引用
+            }
+            
+            group.chat_history.push(msg);
             group.updated_at = Date.now();
             
             await db.group_chats.put(group);
             
-            // 重新渲染群聊
-            await renderGroupChatBody(group);
+            // 🔥 优化：只有在有引用时才重新渲染，否则只追加消息HTML
+            if (msg.quote) {
+                // 有引用，需要重新渲染以显示引用样式
+                await renderGroupChatBody(group);
+            } else {
+                // 没有引用，只追加消息DOM，不重新渲染整个页面
+                await appendUserGroupMessageToUI(msg, group);
+            }
         }
         
         // 触发群聊成员回复（多人回复 - 一次API调用生成所有回复）
@@ -10692,9 +13063,15 @@ ${loreContext}
                     return `- ${char.remark || char.name}${nicknameText}${roleText}: ${char.description || '无特别设定'}`;
                 }).filter(Boolean).join('\n');
                 
-                // 获取世界书上下文（合并所有成员的世界书）
+                // 获取世界书上下文（合并群聊的世界书和所有成员的世界书）
                 let loreContext = "";
                 const allLorebookIds = new Set();
+                
+                // 添加群聊自己的世界书
+                const groupLorebookIds = group.lorebookIds || (group.lorebookId ? [group.lorebookId] : []);
+                groupLorebookIds.forEach(id => allLorebookIds.add(id));
+                
+                // 添加所有成员的世界书
                 for (const memberId of availableMembers) {
                     const char = memberMap[memberId];
                     if (char) {
@@ -10702,6 +13079,7 @@ ${loreContext}
                         ids.forEach(id => allLorebookIds.add(id));
                     }
                 }
+                
                 if (allLorebookIds.size > 0) {
                     const recentText = (group.chat_history || []).slice(-10).map(m => m.content).join(' ');
                     loreContext = await getLorebookContext([...allLorebookIds], recentText);
@@ -10714,8 +13092,37 @@ ${loreContext}
                 const groupHistory = group.chat_history || [];
                 const recentGroupHistory = groupHistory.slice(-25);
                 
+                // 收集未领完的红包信息
+                let pendingRedPackets = [];
+                for (const m of groupHistory) {
+                    if (m.type === 'redpacket') {
+                        try {
+                            const rpData = JSON.parse(m.content);
+                            const claimedCount = rpData.claimed?.length || 0;
+                            if (claimedCount < rpData.count) {
+                                pendingRedPackets.push({
+                                    id: rpData.id,
+                                    wish: rpData.wish || '恭喜发财',
+                                    remaining: rpData.count - claimedCount,
+                                    claimed: rpData.claimed || []
+                                });
+                            }
+                        } catch(e) {}
+                    }
+                }
+                
                 let groupContextStr = recentGroupHistory.map(m => {
                     if (m.role === 'system') return `[系统消息] ${m.content}`;
+                    if (m.type === 'redpacket') {
+                        try {
+                            const rpData = JSON.parse(m.content);
+                            const claimedCount = rpData.claimed?.length || 0;
+                            const isAllClaimed = claimedCount >= rpData.count;
+                            return `${myNickname}: [发送了红包] "${rpData.wish || '恭喜发财'}" (红包ID: ${rpData.id}, ${isAllClaimed ? '已领完' : `还剩${rpData.count - claimedCount}个可领`})`;
+                        } catch(e) {
+                            return `${myNickname}: [发送了红包]`;
+                        }
+                    }
                     if (m.role === 'user') return `${myNickname}: ${m.content}`;
                     const sender = m.senderId ? memberMap[m.senderId] : null;
                     const senderName = sender ? (sender.remark || sender.name) : '未知成员';
@@ -10731,6 +13138,7 @@ ${loreContext}
                 
                 let systemPrompt = `# 核心任务：群聊导演
 你是一个群聊导演，负责扮演群里的所有角色。你的任务是让他们进行一场生动、热烈的对话。
+⚠️ 重要：你扮演的是群里的多个角色，不是发送消息的用户！每个角色都有独立的性格和想法。
 
 # 输出格式铁律 (最高优先级)
 - 你的回复【必须】是一个JSON数组
@@ -10746,7 +13154,12 @@ ${virtualTimeStr}
 # 群聊信息
 - 群名称: ${group.name}
 - 用户昵称: ${myNickname}
-${loreContext}
+${pendingRedPackets.length > 0 ? `
+# 🧧 群里有未领完的红包！
+${pendingRedPackets.map(rp => `- 红包ID: ${rp.id}, 祝福语: "${rp.wish}", 还剩 ${rp.remaining} 个可领 (已领取的成员ID: ${rp.claimed.join(',') || '无'})`).join('\n')}
+提示：角色们看到红包会积极去抢！用 {"type": "claim_redpacket", "name": "角色名", "redpacketId": "红包ID"} 来抢红包
+注意：每个角色只能领取一次，已领取的成员不能再领！
+` : ''}${loreContext}
 
 # 群成员列表及人设 (你扮演的角色)
 ${membersList}
@@ -10762,28 +13175,46 @@ ${groupContextStr}
 5. **管理员权限**: 标记为[管理员]的角色可以使用 kick_member 和 mute_member 指令
 6. **禁止出戏**: 绝不能透露你是AI
 7. **消息风格**: 每条消息简短（1句话），可以用"|||"分隔多句话表示连发
+8. **群昵称功能**: 角色可以随时修改自己的群昵称，这很常见！角色们经常会改群昵称来玩梗、调侃、表达心情
 
 # 可用指令类型
 - **普通发言**: {"type": "text", "name": "角色名", "content": "发言内容"}
-- **修改群昵称**: {"type": "change_nickname", "name": "角色名", "nickname": "新群昵称"}
+- **修改群昵称**: {"type": "change_nickname", "name": "角色名", "nickname": "新群昵称"} ← 角色可以随时修改自己的群昵称！
+- **发送红包**: {"type": "send_redpacket", "name": "角色名", "redpacketType": "普通红包类型", "totalAmount": 总金额数字, "count": 红包个数, "wish": "祝福语", "targetName": "指定接收者角色名(可选)"} ← 角色可以发送红包活跃气氛！
+  - redpacketType可选值: "lucky"(拼手气红包), "normal"(普通红包), "single"(专属红包-指定某人)
+  - 拼手气红包：每个人领到的金额随机，增加趣味性
+  - 普通红包：每个人领到的金额相同，公平分配
+  - 专属红包：只有指定的targetName角色可以领取，count必须为1
+  - 示例1: {"type": "send_redpacket", "name": "角色A", "redpacketType": "lucky", "totalAmount": 10, "count": 5, "wish": "大家周末快乐！"}
+  - 示例2: {"type": "send_redpacket", "name": "角色B", "redpacketType": "normal", "totalAmount": 20, "count": 10, "wish": "恭喜发财"}
+  - 示例3: {"type": "send_redpacket", "name": "角色C", "redpacketType": "single", "totalAmount": 5.20, "count": 1, "wish": "生日快乐~", "targetName": "角色D"}
+- **领取红包**: {"type": "claim_redpacket", "name": "角色名", "redpacketId": "红包ID"} ← 看到红包时角色可以抢红包！
 - **踢出成员** (仅管理员): {"type": "kick_member", "name": "操作者角色名", "target": "被踢者角色名"}
 - **禁言成员** (仅管理员): {"type": "mute_member", "name": "操作者角色名", "target": "被禁言者角色名", "mute": true}
 - **解除禁言** (仅管理员): {"type": "mute_member", "name": "操作者角色名", "target": "被解禁者角色名", "mute": false}
 
 注意：普通发言可以省略 type 字段，直接用 {"name": "角色名", "content": "内容"}
+提示：角色们可以根据聊天内容、心情、玩梗等原因修改自己的群昵称，这是很自然的行为
+提示：如果聊天记录中有未领完的红包，角色们会积极抢红包！
+提示：角色们可以在适当的场合发红包，比如：过节、生日、表达感谢、活跃气氛、玩梗等场景。发红包是群聊互动的重要方式！
 
 # 示例输出格式（注意消息数量要多！）
 [
   {"name": "角色A", "content": "哇 你说的这个|||我也遇到过"},
   {"name": "角色B", "content": "真的吗？"},
   {"type": "change_nickname", "name": "角色A", "nickname": "话痨本痨"},
-  {"name": "角色A", "content": "对啊对啊|||我改个群昵称"},
+  {"name": "角色A", "content": "对啊对啊|||我改个群昵称玩"},
   {"name": "角色C", "content": "我也想说这个！|||之前就想吐槽了"},
-  {"name": "角色B", "content": "哈哈哈哈"},
+  {"type": "send_redpacket", "name": "角色A", "redpacketType": "lucky", "totalAmount": 8.88, "count": 3, "wish": "大家开心一下~"},
+  {"name": "角色B", "content": "哇！有红包！"},
+  {"type": "claim_redpacket", "name": "角色B", "redpacketId": "需要等红包发送后才知道ID"},
+  {"name": "角色C", "content": "抢到了吗哈哈"},
+  {"type": "change_nickname", "name": "角色B", "nickname": "手速第一"},
   {"name": "角色A", "content": "笑死"},
-  {"name": "角色C", "content": "你们太好笑了|||不行了"},
-  {"name": "角色B", "content": "确实|||绷不住了"}
+  {"name": "角色C", "content": "你们太好笑了|||不行了"}
 ]
+
+注意：发送红包后，红包会立即出现在群聊中，其他角色就可以用 claim_redpacket 指令抢红包了！
 
 现在，请根据以上信息，生成群聊中多个角色的【大量】回复。记住要生成 ${minReplies}-${maxReplies} 条消息！只输出JSON数组，不要有其他内容。`;
 
@@ -10896,12 +13327,13 @@ ${groupContextStr}
                             if (!senderId) continue;
                             
                             if (!updatedGroup.memberNicknames) updatedGroup.memberNicknames = {};
-                            const oldNickname = updatedGroup.memberNicknames[senderId] || memberMap[senderId]?.name || reply.name;
+                            // 使用角色本名（备注名或原名）
+                            const charRealName = memberMap[senderId]?.remark || memberMap[senderId]?.name || reply.name;
                             updatedGroup.memberNicknames[senderId] = reply.nickname;
                             
                             updatedGroup.chat_history.push({
                                 role: 'system',
-                                content: `"${oldNickname}" 将群昵称改为 "${reply.nickname}"`,
+                                content: `"${charRealName}"将自己的群昵称改为了"${reply.nickname}"`,
                                 time: Date.now() + msgIndex * 50
                             });
                             msgIndex++;
@@ -10999,6 +13431,191 @@ ${groupContextStr}
                             continue;
                         }
                         
+                        // 处理发送红包指令
+                        if (reply.type === 'send_redpacket' && reply.totalAmount && reply.count && reply.redpacketType) {
+                            if (!senderId) continue;
+                            
+                            const sender = memberMap[senderId];
+                            if (!sender) continue;
+                            
+                            const totalAmount = parseFloat(reply.totalAmount);
+                            const count = parseInt(reply.count);
+                            const wish = reply.wish || '恭喜发财';
+                            const redpacketType = reply.redpacketType;
+                            
+                            // 验证金额和数量
+                            if (totalAmount <= 0 || count <= 0) continue;
+                            if (totalAmount > 200) continue; // 限制最大金额
+                            if (count > 100) continue; // 限制最大个数
+                            
+                            // 检查余额（可选：如果需要检查角色余额）
+                            if (!sender.identity) sender.identity = {};
+                            const balance = parseFloat(sender.identity.balance || 0);
+                            if (balance < totalAmount) {
+                                // 余额不足，跳过发红包，可以添加一条吐槽消息
+                                const senderName = sender.remark || sender.name;
+                                updatedGroup.chat_history.push({
+                                    role: 'char',
+                                    senderId: senderId,
+                                    content: '啊...余额不足，发不了红包了😅',
+                                    time: Date.now() + msgIndex * 50
+                                });
+                                msgIndex++;
+                                continue;
+                            }
+                            
+                            // 生成红包ID
+                            const redpacketId = 'rp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                            
+                            // 构建红包数据
+                            const redpacketData = {
+                                id: redpacketId,
+                                senderId: senderId,
+                                senderName: sender.remark || sender.name,
+                                totalAmount: totalAmount.toFixed(2),
+                                count: count,
+                                wish: wish,
+                                redpacketType: redpacketType,
+                                claimed: [],
+                                claimedAmounts: {},
+                                targetName: reply.targetName || null // 专属红包的目标角色
+                            };
+                            
+                            // 扣除发送者余额
+                            sender.identity.balance = (balance - totalAmount).toFixed(2);
+                            await db.characters.put(sender);
+                            
+                            // 添加红包消息
+                            updatedGroup.chat_history.push({
+                                role: 'char',
+                                senderId: senderId,
+                                type: 'redpacket',
+                                content: JSON.stringify(redpacketData),
+                                time: Date.now() + msgIndex * 50
+                            });
+                            msgIndex++;
+                            
+                            // 记录红包ID供后续领取使用
+                            if (!window._lastRedpacketId) window._lastRedpacketId = {};
+                            window._lastRedpacketId[senderId] = redpacketId;
+                            
+                            continue;
+                        }
+                        
+                        // 处理领取红包指令
+                        if (reply.type === 'claim_redpacket' && reply.redpacketId) {
+                            if (!senderId) continue;
+                            
+                            // 如果redpacketId是"auto"或空，尝试获取最近的红包
+                            let targetRedpacketId = reply.redpacketId;
+                            if (!targetRedpacketId || targetRedpacketId === 'auto' || targetRedpacketId.includes('需要等')) {
+                                // 查找最近未领完的红包
+                                for (let i = updatedGroup.chat_history.length - 1; i >= 0; i--) {
+                                    const m = updatedGroup.chat_history[i];
+                                    if (m.type === 'redpacket') {
+                                        try {
+                                            const data = JSON.parse(m.content);
+                                            const isAllClaimed = (data.claimed?.length || 0) >= data.count;
+                                            const alreadyClaimed = data.claimed?.includes(senderId);
+                                            if (!isAllClaimed && !alreadyClaimed) {
+                                                targetRedpacketId = data.id;
+                                                break;
+                                            }
+                                        } catch(e) {}
+                                    }
+                                }
+                                if (!targetRedpacketId || targetRedpacketId === 'auto' || targetRedpacketId.includes('需要等')) {
+                                    continue; // 没有找到可领取的红包
+                                }
+                            }
+                            
+                            // 找到红包消息
+                            const rpMsgIndex = updatedGroup.chat_history.findIndex(m => {
+                                if (m.type !== 'redpacket') return false;
+                                try {
+                                    const data = JSON.parse(m.content);
+                                    return data.id === targetRedpacketId;
+                                } catch(e) {
+                                    return false;
+                                }
+                            });
+                            
+                            if (rpMsgIndex === -1) continue;
+                            
+                            const rpMsg = updatedGroup.chat_history[rpMsgIndex];
+                            const rpData = JSON.parse(rpMsg.content);
+                            
+                            // 检查是否已领取完
+                            if ((rpData.claimed?.length || 0) >= rpData.count) continue;
+                            
+                            // 检查是否已领取过
+                            if (rpData.claimed?.includes(senderId)) continue;
+                            
+                            // 检查是否是专属红包
+                            if (rpData.redpacketType === 'single' && rpData.targetName) {
+                                const claimer = memberMap[senderId];
+                                const claimerName = claimer?.remark || claimer?.name || reply.name;
+                                // 只有目标角色可以领取
+                                if (claimerName !== rpData.targetName && claimer?.name !== rpData.targetName) {
+                                    continue; // 不是目标角色，跳过
+                                }
+                            }
+                            
+                            // 领取红包
+                            if (!rpData.claimed) rpData.claimed = [];
+                            if (!rpData.claimedAmounts) rpData.claimedAmounts = {};
+                            
+                            let claimAmount = 0;
+                            const totalAmount = parseFloat(rpData.totalAmount);
+                            const remaining = rpData.count - rpData.claimed.length;
+                            const alreadyClaimed = Object.values(rpData.claimedAmounts).reduce((a, b) => a + parseFloat(b), 0);
+                            const remainingAmount = totalAmount - alreadyClaimed;
+                            
+                            if (rpData.redpacketType === 'lucky') {
+                                // 拼手气红包：随机金额
+                                if (remaining === 1) {
+                                    claimAmount = remainingAmount;
+                                } else {
+                                    const maxAmount = remainingAmount - (remaining - 1) * 0.01;
+                                    claimAmount = Math.random() * maxAmount * 0.8 + 0.01;
+                                    claimAmount = Math.min(claimAmount, maxAmount);
+                                }
+                            } else {
+                                // 普通红包：平均分配
+                                claimAmount = totalAmount / rpData.count;
+                            }
+                            
+                            claimAmount = parseFloat(claimAmount.toFixed(2));
+                            
+                            // 记录领取
+                            rpData.claimed.push(senderId);
+                            rpData.claimedAmounts[senderId] = claimAmount.toFixed(2);
+                            
+                            // 更新红包消息
+                            updatedGroup.chat_history[rpMsgIndex].content = JSON.stringify(rpData);
+                            
+                            // 增加角色余额
+                            const claimer = await db.characters.get(senderId);
+                            if (claimer) {
+                                if (!claimer.identity) claimer.identity = {};
+                                let balance = parseFloat(claimer.identity.balance || 0);
+                                balance += claimAmount;
+                                claimer.identity.balance = balance.toFixed(2);
+                                await db.characters.put(claimer);
+                            }
+                            
+                            const claimerName = memberMap[senderId]?.remark || memberMap[senderId]?.name || reply.name;
+                            
+                            // 添加系统消息
+                            updatedGroup.chat_history.push({
+                                role: 'system',
+                                content: `${claimerName} 领取了红包，获得 ¥${claimAmount.toFixed(2)}`,
+                                time: Date.now() + msgIndex * 50
+                            });
+                            msgIndex++;
+                            continue;
+                        }
+                        
                         // 普通发言
                         if (!reply.name || !reply.content) continue;
                         
@@ -11041,6 +13658,14 @@ ${groupContextStr}
                     
                     // 重新渲染群聊
                     await renderGroupChatBody(updatedGroup);
+                    
+                    // ✅ 群聊回复完成后，检查是否需要自动总结
+                    try {
+                        const accountId = getCurrentAccountId();
+                        await checkAutoSummary('group', window.currentGroupChatId, accountId);
+                    } catch (summaryError) {
+                        console.error('[AutoSummary] 检查群聊自动总结失败:', summaryError);
+                    }
                 }
                 
             } catch (error) {
@@ -11068,19 +13693,10 @@ ${groupContextStr}
             }, 300);
             currentChatCharId = null;
             window.currentGroupChatId = null; // 清除群聊ID
-            currentRealFriendId = null; // 清除真人聊天ID
-            currentRealFriendInfo = null;
-            window.currentMixedGroupId = null; // 清除混合群聊ID
-            window.currentMixedGroupInfo = null;
             
             // 恢复输入框显示（查岗模式可能隐藏了它）
             const chatFooter = document.getElementById('chat-footer');
-            if (chatFooter) {
-                chatFooter.style.display = 'flex';
-                // 恢复魔法棒按钮显示
-                const magicBtn = chatFooter.querySelector('.chat-icon-btn');
-                if (magicBtn) magicBtn.style.display = '';
-            }
+            if (chatFooter) chatFooter.style.display = 'flex';
             
             // 退出多选模式
             if (isSelectionMode) exitSelectionMode();
@@ -11088,17 +13704,25 @@ ${groupContextStr}
 
         // 辅助：获取 User 头像 URL
         async function getUserAvatarUrl(userId) {
-            if (!userId) {
-                // 默认头像 (提取 avatar-img-1 的背景图)
-                const dom = document.getElementById('avatar-img-1');
-                if (dom) {
-                    const bg = dom.style.backgroundImage;
-                    if (bg && bg !== 'none') return bg.replace(/url\(|\)|"/g, '');
-                }
-                return '';
+            // ✅ 优先使用传入的 userId
+            if (userId) {
+                const user = await db.characters.get(userId);
+                if (user && user.avatar) return user.avatar;
             }
-            const user = await db.characters.get(userId);
-            return (user && user.avatar) ? user.avatar : '';
+            
+            // ✅ 其次使用当前登录用户（个人中心"我"的角色）的头像
+            if (currentMyCharId) {
+                const myChar = await db.characters.get(parseInt(currentMyCharId));
+                if (myChar && myChar.avatar) return myChar.avatar;
+            }
+            
+            // 最后回退：从桌面头像小组件获取
+            const dom = document.getElementById('avatar-img-1');
+            if (dom) {
+                const bg = dom.style.backgroundImage;
+                if (bg && bg !== 'none') return bg.replace(/url\(|\)|"/g, '');
+            }
+            return '';
         }
 
         // ✅ 核心函数1：判断是否是图片URL
@@ -11121,6 +13745,11 @@ ${groupContextStr}
                 return cleaned;
             }
             
+            // 🔧 保护外卖卡片格式
+            if (/^\[(emei_order|emei_share|payment_request)\]/.test(cleaned)) {
+                return cleaned;
+            }
+            
             // 🔥 核心修复：先去掉 img: 前缀（防止 ERR_UNKNOWN_URL_SCHEME）
             cleaned = cleaned.replace(/^img:/, '');
             // 去掉方括号
@@ -11135,6 +13764,13 @@ ${groupContextStr}
         function renderMessageContent(text) {
             if (!text || typeof text !== 'string') return '';
             
+            // 🔧 处理外卖卡片消息 - 直接返回 HTML 内容
+            if (text.startsWith('[emei_order]') || text.startsWith('[emei_share]') || text.startsWith('[payment_request]')) {
+                // 提取卡片 HTML
+                const cardHtml = text.replace(/^\[(emei_order|emei_share|payment_request)\]/, '');
+                return cardHtml;
+            }
+            
             // 先清理消息（去掉img:前缀、方括号等）
             const clean = sanitizeMessage(text);
             
@@ -11143,7 +13779,7 @@ ${groupContextStr}
             
             // 如果整个消息就是一个图片URL，直接渲染为图片
             if (isImageUrl(finalClean)) {
-                return `<img src="${finalClean}" class="chat-image" onerror="this.style.display='none';" />`;
+                return `<img src="${finalClean}" class="chat-image" ${getImageErrorHandler()} />`;
             }
             
             // 检查是否包含[img:...]格式的图片标记
@@ -11168,7 +13804,7 @@ ${groupContextStr}
                     let imgUrl = sanitizeMessage(match[1]);
                     // 🔥 额外保护：再次确保没有img:前缀
                     imgUrl = imgUrl.replace(/^img:/, '');
-                    html += `<img src="${imgUrl}" class="chat-image" onerror="this.style.display='none';" />`;
+                    html += `<img src="${imgUrl}" class="chat-image" ${getImageErrorHandler()} />`;
                     
                     lastIndex = match.index + match[0].length;
                 });
@@ -11196,7 +13832,7 @@ ${groupContextStr}
                     cleanUrl = cleanUrl.replace(/^img:/, '');
                     // 检查是否是图片URL
                     if (isImageUrl(cleanUrl)) {
-                        return `<img src="${cleanUrl}" class="chat-image" onerror="this.style.display='none';" />`;
+                        return `<img src="${cleanUrl}" class="chat-image" ${getImageErrorHandler()} />`;
                     } else {
                         // 普通链接
                         return `<a href="${cleanUrl}" target="_blank" style="color:#007aff; word-break:break-all;">${escapeHtml(cleanUrl)}</a>`;
@@ -11214,13 +13850,83 @@ ${groupContextStr}
             div.textContent = text;
             return div.innerHTML;
         }
+        
+        // 辅助函数：生成图片加载失败的HTML
+        function getImageErrorHandler() {
+            return `onerror="this.onerror=null; this.style.cssText='width:80px; height:80px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px;'; this.outerHTML='<div style=\\'width:80px; height:80px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px; color:#999; font-size:11px; text-align:center;\\'>图片加载失败</div>';"`;
+        }
+
+        // 群聊图片卡片点击展开 - 使用与私聊相同的样式
+        function showImageCardContent(el) {
+            const text = el.dataset.text;
+            if (!text) return;
+            
+            const isExpanded = el.dataset.expanded === 'true';
+            
+            if (isExpanded) {
+                // 收起：显示卡片
+                el.innerHTML = `
+                    <div class="img-card-placeholder">
+                        <svg class="img-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                            <polyline points="21 15 16 10 5 21"></polyline>
+                        </svg>
+                        <div class="img-card-hint">点击查看文字</div>
+                    </div>
+                `;
+                el.dataset.expanded = 'false';
+            } else {
+                // 展开：显示文字
+                el.innerHTML = `<div class="img-card-text">${escapeHtml(text)}</div>`;
+                el.dataset.expanded = 'true';
+            }
+        }
+
+        // 群聊语音气泡点击播放
+        function playVoiceBubble(el) {
+            const text = el.dataset.text;
+            if (!text) return;
+            
+            // 显示语音内容弹窗
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:10000;';
+            modal.onclick = () => modal.remove();
+            
+            modal.innerHTML = `
+                <div style="background:#fff; padding:20px 24px; border-radius:12px; max-width:85%; max-height:70%; overflow-y:auto;" onclick="event.stopPropagation()">
+                    <div style="font-size:14px; color:#666; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+                        <svg viewBox="0 0 24 24" style="width:18px; height:18px; fill:#999;"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+                        语音消息内容
+                    </div>
+                    <div style="font-size:16px; line-height:1.8; color:#333; white-space:pre-wrap;">${escapeHtml(text)}</div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+        }
+
+        // 显示完整图片
+        function showFullImage(src) {
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); display:flex; align-items:center; justify-content:center; z-index:10000;';
+            modal.onclick = () => modal.remove();
+            
+            modal.innerHTML = `<img src="${src}" style="max-width:95%; max-height:95%; object-fit:contain;" />`;
+            
+            document.body.appendChild(modal);
+        }
 
         // 格式化时间戳
-        function formatMessageTime(timestamp, prevTimestamp) {
+        function formatMessageTime(timestamp, prevTimestamp, timeOffset = 0) {
             if (!timestamp) return '';
             
-            const msgTime = new Date(timestamp);
-            const now = new Date();
+            // 使用虚拟时间进行计算
+            const virtualTimestamp = timestamp + timeOffset;
+            const virtualNow = Date.now() + timeOffset;
+            
+            const msgTime = new Date(virtualTimestamp);
+            const now = new Date(virtualNow);
             const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
             const msgDate = new Date(msgTime.getFullYear(), msgTime.getMonth(), msgTime.getDate());
             const yesterday = new Date(today);
@@ -11233,7 +13939,7 @@ ${groupContextStr}
             } else if (msgDate.getTime() === yesterday.getTime()) {
                 // 昨天
                 timeStr = `昨天 ${msgTime.getHours()}:${msgTime.getMinutes().toString().padStart(2, '0')}`;
-            } else if (now.getTime() - msgTime.getTime() < 7 * 24 * 60 * 60 * 1000) {
+            } else if (virtualNow - virtualTimestamp < 7 * 24 * 60 * 60 * 1000) {
                 // 一周内：显示星期
                 const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
                 timeStr = `${weekdays[msgTime.getDay()]} ${msgTime.getHours()}:${msgTime.getMinutes().toString().padStart(2, '0')}`;
@@ -11253,8 +13959,18 @@ ${groupContextStr}
         }
 
         // 构造消息 DOM
-        function createMessageElement(msg, index, charAvatar, userAvatar, prevMsgTime) {
+        function createMessageElement(msg, index, charAvatar, userAvatar, prevMsgTime, charName = 'AI') {
             const row = document.createElement('div');
+            
+            // 🎯 特殊处理：系统消息（如戳一戳）
+            if (msg.role === 'system') {
+                row.className = 'message-system';
+                row.style.cssText = 'text-align:center; padding:8px 16px; margin:8px 0;';
+                row.innerHTML = `<span style="background:#fff; color:#999; font-size:12px; padding:4px 12px; border-radius:4px; border:1px solid #ddd;">${msg.content}</span>`;
+                row.dataset.index = index;
+                return row;
+            }
+            
             row.className = `message-row ${msg.role === 'user' ? 'self' : 'other'}`;
             row.dataset.index = index;
 
@@ -11269,11 +13985,30 @@ ${groupContextStr}
             
             if (msg.role === 'char') {
                 if (charAvatar) avatar.style.backgroundImage = `url(${charAvatar})`;
-                // 给角色头像添加点击事件，显示心声
+                // 给角色头像添加点击和双击事件
                 avatar.style.cursor = 'pointer';
+                
+                let clickCount = 0;
+                let clickTimer = null;
+                
                 avatar.onclick = async (e) => {
                     e.stopPropagation(); // 阻止冒泡，避免触发消息选择
-                    await showCharacterThoughts(currentChatCharId, index);
+                    
+                    clickCount++;
+                    
+                    if (clickCount === 1) {
+                        // 第一次点击，等待350ms判断是单击还是双击
+                        clickTimer = setTimeout(async () => {
+                            // 单击：显示心声
+                            await showCharacterThoughts(currentChatCharId, index);
+                            clickCount = 0;
+                        }, 350);
+                    } else if (clickCount === 2) {
+                        // 双击：戳一戳
+                        clearTimeout(clickTimer);
+                        showPokeModal(charName);
+                        clickCount = 0;
+                    }
                 };
             } else {
                 if (userAvatar) {
@@ -11344,6 +14079,26 @@ ${groupContextStr}
                     </div>
                 `;
             }
+            // ✅ 处理音频/语音消息（联机好友真实录音）- 使用普通气泡样式
+            else if (msg.type === 'audio' && msg.content && msg.content.startsWith('data:audio')) {
+                const duration = msg.duration || 0;
+                const audioId = 'audio_' + (msg.time || Date.now());
+                
+                // 简单显示语音图标和时长，点击播放
+                content.textContent = `🎤 ${duration}"`;
+                content.style.cursor = 'pointer';
+                content.dataset.audioId = audioId;
+                content.onclick = function() { playOnlineAudio(this.dataset.audioId); };
+                
+                // 添加隐藏的 audio 元素到消息行
+                setTimeout(() => {
+                    const audioEl = document.createElement('audio');
+                    audioEl.id = audioId;
+                    audioEl.src = msg.content;
+                    audioEl.style.display = 'none';
+                    document.body.appendChild(audioEl);
+                }, 0);
+            }
             // 处理亲属卡消息
             else if (msg.type === 'familyCard') {
                 content.style.padding = '0';
@@ -11358,11 +14113,13 @@ ${groupContextStr}
                 }
                 
                 const isSelf = msg.role === 'user';
+                const isOnline = cardData.isOnline || false;
                 const limitText = cardData.monthlyLimit > 0 ? `每月额度 ¥${cardData.monthlyLimit}` : '不限额度';
+                const cardType = isOnline ? '💝 亲属卡 (联机)' : '💝 亲属卡';
                 
                 content.innerHTML = `
                     <div class="family-card-msg">
-                        <div class="family-card-msg-title">💝 亲属卡</div>
+                        <div class="family-card-msg-title">${cardType}</div>
                         <div class="family-card-msg-desc">${limitText}</div>
                         <div class="family-card-msg-line"></div>
                         <div class="family-card-msg-footer">
@@ -11372,10 +14129,62 @@ ${groupContextStr}
                     </div>
                 `;
             }
-            // 处理撤回消息
+            // 处理位置消息
+            else if (msg.type === 'location') {
+                content.style.padding = '0';
+                content.style.background = 'transparent';
+                content.style.boxShadow = 'none';
+                
+                let locationData = {};
+                try {
+                    locationData = JSON.parse(msg.content);
+                } catch(e) {
+                    locationData = { name: '未知位置', address: '' };
+                }
+                
+                content.innerHTML = `
+                    <div class="location-card" onclick="showLocationDetail('${encodeURIComponent(locationData.name)}', '${encodeURIComponent(locationData.address)}')">
+                        <div class="location-card-text">
+                            <div class="location-card-name">${locationData.name}</div>
+                            <div class="location-card-sub">位置分享</div>
+                        </div>
+                        <div class="location-card-map">
+                            <div class="location-card-pin">
+                                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M12 11.5C11.1716 11.5 10.5 10.8284 10.5 10C10.5 9.17157 11.1716 8.5 12 8.5C12.8284 8.5 13.5 9.17157 13.5 10C13.5 10.8284 12.8284 11.5 12 11.5Z"></path>
+                                    <path d="M12 2C7.92134 2 4.5 5.42134 4.5 9.5C4.5 14.5312 11.2188 21.4375 11.5938 21.8125C11.7954 22.014 12.2046 22.014 12.4062 21.8125C12.7812 21.4375 19.5 14.5312 19.5 9.5C19.5 5.42134 16.0787 2 12 2ZM12 12.5C10.6193 12.5 9.5 11.3807 9.5 10C9.5 8.61929 10.6193 7.5 12 7.5C13.3807 7.5 14.5 8.61929 14.5 10C14.5 11.3807 13.3807 12.5 12 12.5Z"></path>
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            // 处理撤回消息（居中系统提示样式，点击可查看原内容）
             else if (msg.isRecalled) {
-                content.innerHTML = "<span>已撤回</span>";
-                content.classList.add('recalled-msg');
+                const isUser = msg.role === 'user';
+                const recallerName = isUser ? '你' : charName;
+                
+                // 改为系统提示样式：居中灰色文字
+                row.className = 'message-row recalled-system-row';
+                row.innerHTML = ''; // 清空原有内容
+                
+                const systemTip = document.createElement('div');
+                systemTip.className = 'recalled-system-tip';
+                systemTip.innerHTML = `"${recallerName}"撤回了一条消息`;
+                systemTip.style.cursor = 'pointer';
+                
+                // 点击查看撤回的内容
+                systemTip.onclick = (e) => {
+                    e.stopPropagation();
+                    if (msg.recalledContent) {
+                        showRecalledContent(recallerName, msg.recalledContent);
+                    } else {
+                        showToast('原消息内容已不可用');
+                    }
+                };
+                
+                row.appendChild(systemTip);
+                return row; // 直接返回，不再添加头像和气泡
             } 
             // 处理语音消息
             else if (msg.content.startsWith('[voice:')) {
@@ -11413,7 +14222,7 @@ ${groupContextStr}
                 
                 // 如果包含图片，在语音气泡下方添加图片（使用chat-image类）
                 if (hasImage) {
-                    voiceHtml += `<div style="margin-top:8px;"><img src="${imgUrl}" class="chat-image" onerror="this.style.display='none';" /></div>`;
+                    voiceHtml += `<div style="margin-top:8px;"><img src="${imgUrl}" class="chat-image" ${getImageErrorHandler()} /></div>`;
                 }
                 
                 content.innerHTML = voiceHtml;
@@ -11475,21 +14284,73 @@ ${groupContextStr}
                     }
                 };
             }
+            // 🔧 处理外卖卡片消息
+            else if (msg.content.startsWith('[emei_order]') || msg.content.startsWith('[emei_share]') || msg.content.startsWith('[payment_request]')) {
+                const cardHtml = msg.content.replace(/^\[(emei_order|emei_share|payment_request)\]/, '');
+                content.innerHTML = cardHtml;
+                content.classList.add('card-message');
+                content.style.padding = '0';
+                content.style.background = 'transparent';
+                content.style.boxShadow = 'none';
+            }
             // 处理图片消息（纯图片，或以图片开头）
             else if (msg.content.startsWith('[img:')) {
                 // 直接提取URL，不要用 sanitizeMessage
                 const imgUrl = msg.content.substring(5, msg.content.length - 1).trim();
-                content.innerHTML = `<img src="${imgUrl}" class="chat-image" onerror="this.style.display='none';" />`;
-                content.style.padding = '4px';
-                content.style.background = 'transparent';
-                content.style.boxShadow = 'none';
+                content.innerHTML = `<img src="${imgUrl}" class="chat-image" onerror="this.onerror=null; this.style.cssText='width:80px; height:80px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px;'; this.outerHTML='<div style=\\'width:80px; height:80px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px; color:#999; font-size:12px;\\'>图片加载失败</div>';" />`;
+                // 🔧 添加 image-only 类，移除气泡样式
+                content.classList.add('image-only');
             } 
             // ✅ 普通文本 - 使用统一的渲染函数
             else {
                 // 先清理消息内容
                 const cleanedContent = sanitizeMessage(msg.content);
-                // 使用统一的渲染函数
-                content.innerHTML = renderMessageContent(cleanedContent);
+                
+                // 检查是否有引用
+                let quoteHtml = '';
+                if (msg.quote) {
+                    quoteHtml = `<div class="quoted-message" style="border-left:2px solid rgba(0,0,0,0.15); padding:2px 6px; margin-bottom:4px; font-size:11px; line-height:1.3; max-width:180px;"><div style="color:#666; font-weight:500; font-size:10px;">${escapeHtml(msg.quote.name)}</div><div style="color:#888; font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:160px;">${escapeHtml(msg.quote.content)}</div></div>`;
+                }
+                
+                // 检查AI消息是否包含外语+中文翻译组合
+                const translationParsed = msg.role === 'char' ? parseForeignWithTranslation(cleanedContent) : null;
+                
+                if (translationParsed) {
+                    // 有外语+中文组合，默认显示外语，点击显示翻译
+                    content.innerHTML = quoteHtml + renderMessageContent(translationParsed.foreign);
+                    content.dataset.chinese = translationParsed.chinese;
+                    content.dataset.expanded = 'false';
+                    
+                    // 点击显示/隐藏翻译
+                    content.onclick = (e) => {
+                        if (isLongPress || isSelectionMode) return;
+                        if (e.target.tagName === 'A' || e.target.tagName === 'IMG') return;
+                        e.stopPropagation();
+                        
+                        const isExpanded = content.dataset.expanded === 'true';
+                        let transEl = content.querySelector('.msg-translation');
+                        
+                        if (isExpanded) {
+                            // 收起翻译
+                            if (transEl) transEl.style.display = 'none';
+                            content.dataset.expanded = 'false';
+                        } else {
+                            // 显示翻译
+                            if (!transEl) {
+                                transEl = document.createElement('div');
+                                transEl.className = 'msg-translation';
+                                transEl.innerHTML = renderMessageContent(content.dataset.chinese);
+                                content.appendChild(transEl);
+                            } else {
+                                transEl.style.display = 'block';
+                            }
+                            content.dataset.expanded = 'true';
+                        }
+                    };
+                } else {
+                    // 普通消息，使用统一的渲染函数
+                    content.innerHTML = quoteHtml + renderMessageContent(cleanedContent);
+                }
             }
 
             // 事件绑定
@@ -11505,9 +14366,68 @@ ${groupContextStr}
             return row;
         }
 
-        async function renderChatBody(char) {
+        // 缓存变量，避免不必要的重新渲染
+        let lastRenderedCharId = null;
+        let lastRenderedHistoryLength = 0;
+        let lastRenderedAccountId = null;
+        let currentRenderedCount = 0; // 跟踪已渲染的消息数量
+        let isLoadingMoreMessages = false; // 防止重复加载
+
+        // 🎯 新增：只添加单条消息，不重新渲染整个聊天（性能优化）
+        async function appendChatMessage(char, msg, msgIndex) {
             const body = document.getElementById('chat-body');
+            const accountId = getCurrentAccountId();
+            const userAvatarUrl = await getUserAvatarUrl(char.linked_user_id);
+            const timeOffset = char.timeOffset || 0;
+            
+            // 获取前一条消息的时间
+            const history = getChatHistory(char, accountId);
+            const prevMsgTime = msgIndex > 0 && history[msgIndex - 1] ? history[msgIndex - 1].time : null;
+            
+            // 如果需要显示时间戳，先添加时间戳行（系统消息不显示时间戳）
+            if (msg.role !== 'system' && shouldShowTimestamp(msg.time, prevMsgTime)) {
+                const timeStamp = document.createElement('div');
+                timeStamp.className = 'message-timestamp';
+                timeStamp.textContent = formatMessageTime(msg.time, prevMsgTime, timeOffset);
+                body.appendChild(timeStamp);
+            }
+            
+            const row = createMessageElement(msg, msgIndex, char.avatar, userAvatarUrl, prevMsgTime, char.name);
+            body.appendChild(row);
+            
+            // 更新缓存计数
+            lastRenderedHistoryLength = history.length;
+            currentRenderedCount++; // 更新已渲染计数
+            
+            // 滚动到底部
+            setTimeout(() => {
+                body.scrollTop = body.scrollHeight;
+            }, 0);
+            
+            console.log('[appendChatMessage] 添加单条消息，无需重新渲染');
+        }
+
+        async function renderChatBody(char, forceRender = false) {
+            const body = document.getElementById('chat-body');
+            const accountId = getCurrentAccountId();
+            const history = getChatHistory(char, accountId);
+            
+            // 🎯 优化：如果是同一个角色且消息没有变化，跳过渲染
+            if (!forceRender && 
+                lastRenderedCharId === char.id && 
+                lastRenderedAccountId === accountId &&
+                lastRenderedHistoryLength === (history?.length || 0) &&
+                !isSelectionMode) {
+                console.log('[renderChatBody] 跳过重复渲染');
+                return;
+            }
+            
+            lastRenderedCharId = char.id;
+            lastRenderedAccountId = accountId;
+            lastRenderedHistoryLength = history?.length || 0;
+            
             body.innerHTML = '';
+            currentRenderedCount = 0; // 重置渲染计数
             
             // 切换多选模式样式
             if (isSelectionMode) {
@@ -11516,7 +14436,17 @@ ${groupContextStr}
                 body.classList.remove('selection-mode');
             }
             
-            const accountId = getCurrentAccountId();
+            // ✅ 联机好友自动视为好友状态
+            if (char.isOnlineFriend === true && accountId) {
+                const currentStatus = getFriendStatus(char, accountId);
+                if (currentStatus !== 'friend') {
+                    // 自动修正好友状态
+                    if (!char.wechat_status_by_user) char.wechat_status_by_user = {};
+                    char.wechat_status_by_user[accountId] = 'friend';
+                    // 异步保存，不阻塞渲染
+                    db.characters.put(char).catch(e => console.error('保存联机好友状态失败:', e));
+                }
+            }
             
             // 检查好友状态
             const friendStatus = getFriendStatus(char, accountId);
@@ -11634,28 +14564,53 @@ ${groupContextStr}
                 return;
             }
             
-            const history = getChatHistory(char, accountId);
             if (!history || history.length === 0) return;
 
-            const userAvatarUrl = await getUserAvatarUrl(char.linked_user_id);
+            // 应用气泡样式类名
+            body.classList.remove('bubble-style-default', 'bubble-style-wechat');
+            if (char.bubble_style === 'wechat') {
+                body.classList.add('bubble-style-wechat');
+            } else {
+                body.classList.add('bubble-style-default');
+            }
 
-            history.forEach((msg, index) => {
-                const prevMsgTime = index > 0 ? history[index - 1].time : null;
+            const userAvatarUrl = await getUserAvatarUrl(char.linked_user_id);
+            const timeOffset = char.timeOffset || 0; // 获取虚拟时间偏移
+
+            // 🚀 优化：只渲染最近的50条消息
+            const renderWindow = 50;
+            const totalMessages = history.length;
+            const startIndex = Math.max(0, totalMessages - renderWindow);
+            const messagesToRender = history.slice(startIndex);
+            currentRenderedCount = messagesToRender.length;
+
+            // 如果还有更多消息，添加"加载更多"按钮
+            if (startIndex > 0) {
+                const loadMoreBtn = document.createElement('div');
+                loadMoreBtn.id = 'load-more-btn';
+                loadMoreBtn.style.cssText = 'text-align:center; padding:12px; margin:8px 0;';
+                loadMoreBtn.innerHTML = `<button onclick="loadMoreMessages()" style="background:#f0f0f0; border:none; padding:8px 20px; border-radius:16px; color:#666; font-size:13px; cursor:pointer;">加载更早的消息 (${startIndex}条)</button>`;
+                body.appendChild(loadMoreBtn);
+            }
+
+            messagesToRender.forEach((msg, relativeIndex) => {
+                const absoluteIndex = startIndex + relativeIndex;
+                const prevMsgTime = absoluteIndex > 0 ? history[absoluteIndex - 1].time : null;
                 
-                // 如果需要显示时间戳，先添加时间戳行
-                if (shouldShowTimestamp(msg.time, prevMsgTime)) {
+                // 如果需要显示时间戳，先添加时间戳行（系统消息不显示时间戳）
+                if (msg.role !== 'system' && shouldShowTimestamp(msg.time, prevMsgTime)) {
                     const timeStamp = document.createElement('div');
                     timeStamp.className = 'message-timestamp';
-                    timeStamp.textContent = formatMessageTime(msg.time, prevMsgTime);
+                    timeStamp.textContent = formatMessageTime(msg.time, prevMsgTime, timeOffset);
                     body.appendChild(timeStamp);
                 }
                 
-                const row = createMessageElement(msg, index, char.avatar, userAvatarUrl, prevMsgTime);
+                const row = createMessageElement(msg, absoluteIndex, char.avatar, userAvatarUrl, prevMsgTime, char.name);
                 
-                // 如果在多选模式，恢复选中状态
-                if (isSelectionMode) {
+                // 如果在多选模式，恢复选中状态（系统消息除外）
+                if (isSelectionMode && msg.role !== 'system') {
                     const cb = row.querySelector('.msg-checkbox');
-                    if (selectedIndices.has(index)) {
+                    if (cb && selectedIndices.has(absoluteIndex)) {
                         cb.classList.add('checked');
                     }
                 }
@@ -11693,6 +14648,98 @@ ${groupContextStr}
             applyChatBackground(char);
         }
 
+        // 🚀 加载更多消息（懒加载优化）
+        async function loadMoreMessages() {
+            if (isLoadingMoreMessages) return;
+            if (!currentChatCharId) return;
+            
+            isLoadingMoreMessages = true;
+            
+            const char = await db.characters.get(currentChatCharId);
+            const accountId = getCurrentAccountId();
+            const history = getChatHistory(char, accountId);
+            const body = document.getElementById('chat-body');
+            
+            // 计算要加载的消息范围
+            const renderWindow = 50;
+            const totalMessages = history.length;
+            const nextSliceStart = totalMessages - currentRenderedCount - renderWindow;
+            const nextSliceEnd = totalMessages - currentRenderedCount;
+            
+            if (nextSliceStart < 0 || nextSliceEnd <= 0) {
+                isLoadingMoreMessages = false;
+                return;
+            }
+            
+            const messagesToPrepend = history.slice(Math.max(0, nextSliceStart), nextSliceEnd);
+            
+            if (messagesToPrepend.length === 0) {
+                isLoadingMoreMessages = false;
+                return;
+            }
+            
+            // 保存当前滚动位置
+            const oldScrollHeight = body.scrollHeight;
+            
+            // 移除旧的"加载更多"按钮
+            const oldLoadMoreBtn = document.getElementById('load-more-btn');
+            if (oldLoadMoreBtn) {
+                oldLoadMoreBtn.remove();
+            }
+            
+            // 如果还有更多消息，添加新的"加载更多"按钮
+            const newStartIndex = Math.max(0, nextSliceStart);
+            if (newStartIndex > 0) {
+                const loadMoreBtn = document.createElement('div');
+                loadMoreBtn.id = 'load-more-btn';
+                loadMoreBtn.style.cssText = 'text-align:center; padding:12px; margin:8px 0;';
+                loadMoreBtn.innerHTML = `<button onclick="loadMoreMessages()" style="background:#f0f0f0; border:none; padding:8px 20px; border-radius:16px; color:#666; font-size:13px; cursor:pointer;">加载更早的消息 (${newStartIndex}条)</button>`;
+                body.insertBefore(loadMoreBtn, body.firstChild);
+            }
+            
+            // 准备要添加的消息元素
+            const userAvatarUrl = await getUserAvatarUrl(char.linked_user_id);
+            const timeOffset = char.timeOffset || 0;
+            const fragment = document.createDocumentFragment();
+            
+            messagesToPrepend.forEach((msg, relativeIndex) => {
+                const absoluteIndex = newStartIndex + relativeIndex;
+                const prevMsgTime = absoluteIndex > 0 ? history[absoluteIndex - 1].time : null;
+                
+                // 添加时间戳
+                if (msg.role !== 'system' && shouldShowTimestamp(msg.time, prevMsgTime)) {
+                    const timeStamp = document.createElement('div');
+                    timeStamp.className = 'message-timestamp';
+                    timeStamp.textContent = formatMessageTime(msg.time, prevMsgTime, timeOffset);
+                    fragment.appendChild(timeStamp);
+                }
+                
+                const row = createMessageElement(msg, absoluteIndex, char.avatar, userAvatarUrl, prevMsgTime, char.name);
+                fragment.appendChild(row);
+            });
+            
+            // 插入消息到顶部
+            const firstMessage = body.querySelector('.message-row, .message-system');
+            if (firstMessage) {
+                body.insertBefore(fragment, firstMessage);
+            } else {
+                body.appendChild(fragment);
+            }
+            
+            // 恢复滚动位置
+            const newScrollHeight = body.scrollHeight;
+            body.scrollTop = newScrollHeight - oldScrollHeight;
+            
+            // 更新已渲染计数
+            currentRenderedCount += messagesToPrepend.length;
+            
+            isLoadingMoreMessages = false;
+            console.log(`[loadMoreMessages] 加载了 ${messagesToPrepend.length} 条消息，总计已渲染 ${currentRenderedCount} 条`);
+        }
+        
+        // 暴露到全局作用域，供 HTML onclick 使用
+        window.loadMoreMessages = loadMoreMessages;
+
         // 追加单条消息 (主要用于 AI 回复时的流式输出，不重绘整个列表)
         // 注意：追加的消息需要重新绑定事件，且此时通常不在多选模式
         async function appendMessageToUI(role, content, charAvatar, elemId) {
@@ -11712,19 +14759,28 @@ ${groupContextStr}
             const char = await db.characters.get(currentChatCharId);
             const accountId = getCurrentAccountId();
             const history = getChatHistory(char, accountId);
-            const index = history.length - 1;
             
-            // ✅ 使用数据库中的实际消息对象，而不是创建临时对象
-            // 这样可以确保转账消息的 ID 和时间戳与数据库一致
-            let msg = history[index];
+            // 🔧 修复：从后往前找到匹配 role 的最新消息，而不是简单取最后一条
+            // 因为最后一条可能是 system 消息（如时间戳）
+            let msg = null;
+            let index = history.length - 1;
+            for (let i = history.length - 1; i >= 0; i--) {
+                if (history[i].role === role) {
+                    msg = history[i];
+                    index = i;
+                    break;
+                }
+            }
             
-            // 如果数据库中没有找到消息，才使用临时对象（兼容旧逻辑）
+            // 如果数据库中没有找到匹配的消息，使用临时对象
             if (!msg) {
                 const cleanedContent = sanitizeMessage(content);
                 msg = { role, content: cleanedContent, time: Date.now() };
+                index = history.length;
             }
             
             const userAvatarUrl = await getUserAvatarUrl(char.linked_user_id);
+            const timeOffset = char.timeOffset || 0; // 获取虚拟时间偏移
             
             // 获取前一条消息的时间
             const prevMsgTime = index > 0 && history[index - 1] ? history[index - 1].time : null;
@@ -11733,11 +14789,11 @@ ${groupContextStr}
             if (shouldShowTimestamp(msg.time, prevMsgTime)) {
                 const timeStamp = document.createElement('div');
                 timeStamp.className = 'message-timestamp';
-                timeStamp.textContent = formatMessageTime(msg.time, prevMsgTime);
+                timeStamp.textContent = formatMessageTime(msg.time, prevMsgTime, timeOffset);
                 body.appendChild(timeStamp);
             }
 
-            const row = createMessageElement(msg, index, charAvatar, userAvatarUrl, prevMsgTime);
+            const row = createMessageElement(msg, index, charAvatar, userAvatarUrl, prevMsgTime, char ? char.name : 'AI');
             if (elemId) row.id = elemId;
             
             body.appendChild(row);
@@ -11848,15 +14904,41 @@ ${groupContextStr}
         // 1. 编辑
         async function handleMsgEdit() {
             hideContextMenu();
-            if (activeMsgIndex === -1 || !currentChatCharId) return;
+            if (activeMsgIndex === -1) return;
+            
+            // 群聊编辑
+            if (window.currentGroupChatId) {
+                const group = await db.group_chats.get(window.currentGroupChatId);
+                if (!group || !group.chat_history) return;
+                
+                const msg = group.chat_history[activeMsgIndex];
+                if (!msg || msg.role === 'system') {
+                    showToast("系统消息不能编辑");
+                    return;
+                }
+                
+                if (msg.content.startsWith('[img:') || msg.type === 'redpacket' || msg.type === 'transfer') {
+                    showToast("该消息类型暂不支持编辑");
+                    return;
+                }
+
+                const newContent = prompt("编辑消息", msg.content);
+                if (newContent !== null && newContent.trim() !== "") {
+                    group.chat_history[activeMsgIndex].content = newContent.trim();
+                    await db.group_chats.put(group);
+                    await renderGroupChatBody(group);
+                }
+                return;
+            }
+            
+            // 私聊编辑
+            if (!currentChatCharId) return;
             
             const char = await db.characters.get(currentChatCharId);
             const accountId = getCurrentAccountId();
             let history = getChatHistory(char, accountId);
             const msg = history[activeMsgIndex];
             
-            // 简单使用 prompt，也可以做自定义 UI
-            // 如果是图片消息，提示无法编辑或只编辑URL
             if (msg.content.startsWith('[img:')) {
                 alert("图片消息暂不支持编辑");
                 return;
@@ -11865,61 +14947,280 @@ ${groupContextStr}
             const newContent = prompt("编辑消息", msg.content);
             if (newContent !== null && newContent.trim() !== "") {
                 msg.content = newContent.trim();
-                history[activeMsgIndex] = msg; // 更新
+                history[activeMsgIndex] = msg;
                 await setChatHistory(char, accountId, history);
                 
-                // ✅ 优化：直接更新 DOM 中的消息内容，不重新渲染
+                // 🔧 立即更新UI，不重新渲染整个聊天
                 const chatBody = document.getElementById('chat-body');
                 const messageRows = chatBody.querySelectorAll('.message-row');
                 if (messageRows[activeMsgIndex]) {
-                    const bubbleText = messageRows[activeMsgIndex].querySelector('.bubble-text');
-                    if (bubbleText) {
-                        bubbleText.textContent = newContent.trim();
+                    const messageContent = messageRows[activeMsgIndex].querySelector('.message-content');
+                    if (messageContent) {
+                        // 使用renderMessageContent来正确渲染内容（支持表情等）
+                        messageContent.innerHTML = renderMessageContent(newContent.trim());
                     }
                 }
             }
         }
 
-        // 2. 撤回
+        // 2. 撤回（保存原内容，点击可查看）
         async function handleMsgRecall() {
             hideContextMenu();
-            if (activeMsgIndex === -1 || !currentChatCharId) return;
+            if (activeMsgIndex === -1) return;
             
             if (!confirm("确定要撤回这条消息吗？")) return;
+            
+            // 群聊撤回
+            if (window.currentGroupChatId) {
+                const group = await db.group_chats.get(window.currentGroupChatId);
+                if (!group || !group.chat_history) return;
+                
+                const msg = group.chat_history[activeMsgIndex];
+                if (!msg || msg.role === 'system') {
+                    showToast("系统消息不能撤回");
+                    return;
+                }
+                
+                const isUser = msg.role === 'user';
+                const recallerName = isUser ? '你' : '成员';
+                
+                msg.recalledContent = msg.content;
+                msg.isRecalled = true;
+                msg.content = "";
+                msg.type = 'recalled';
+                
+                group.chat_history[activeMsgIndex] = msg;
+                
+                // 添加撤回提示系统消息
+                group.chat_history.splice(activeMsgIndex + 1, 0, {
+                    role: 'system',
+                    content: `"${recallerName}"撤回了一条消息`,
+                    time: Date.now(),
+                    recalledContent: msg.recalledContent
+                });
+                
+                await db.group_chats.put(group);
+                await renderGroupChatBody(group);
+                return;
+            }
 
+            // 私聊撤回
+            if (!currentChatCharId) return;
+            
             const char = await db.characters.get(currentChatCharId);
             const accountId = getCurrentAccountId();
             let history = getChatHistory(char, accountId);
-            // 标记为已撤回，而不是物理删除（通常做法）
-            // 或者如果您想做成"删除但留痕"，可以修改内容
-            history[activeMsgIndex].isRecalled = true;
-            history[activeMsgIndex].content = ""; // 清空内容
+            const msg = history[activeMsgIndex];
+            const isUser = msg.role === 'user';
+            const recallerName = isUser ? '你' : char.name;
+            
+            msg.recalledContent = msg.content;
+            msg.isRecalled = true;
+            msg.content = "";
             
             await setChatHistory(char, accountId, history);
             
-            // ✅ 优化：直接更新 DOM 显示撤回状态，不重新渲染
             const chatBody = document.getElementById('chat-body');
             const messageRows = chatBody.querySelectorAll('.message-row');
             if (messageRows[activeMsgIndex]) {
                 const msgRow = messageRows[activeMsgIndex];
-                const isUser = history[activeMsgIndex].role === 'user';
-                // 替换消息内容为撤回提示
-                const bubble = msgRow.querySelector('.msg-bubble');
-                if (bubble) {
-                    bubble.innerHTML = `<span style="color:#999;font-size:12px;">${isUser ? '你' : char.name}撤回了一条消息</span>`;
-                    bubble.style.background = 'transparent';
-                    bubble.style.padding = '5px 0';
-                }
+                msgRow.className = 'message-row recalled-system-row';
+                msgRow.innerHTML = '';
+                
+                const capturedContent = msg.recalledContent;
+                const capturedName = recallerName;
+                const systemTip = document.createElement('div');
+                systemTip.className = 'recalled-system-tip';
+                systemTip.innerHTML = `"${capturedName}"撤回了一条消息`;
+                systemTip.style.cursor = 'pointer';
+                systemTip.onclick = (e) => {
+                    e.stopPropagation();
+                    showRecalledContent(capturedName, capturedContent);
+                };
+                msgRow.appendChild(systemTip);
             }
+        }
+        
+        // 显示撤回消息的原内容
+        function showRecalledContent(recallerName, content) {
+            // 创建弹窗
+            const overlay = document.createElement('div');
+            overlay.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.5);
+                z-index: 9999;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+            `;
+            overlay.onclick = () => overlay.remove();
+            
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                background: white;
+                border-radius: 12px;
+                padding: 20px;
+                max-width: 320px;
+                width: 100%;
+                max-height: 60vh;
+                overflow-y: auto;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            `;
+            modal.onclick = (e) => e.stopPropagation();
+            
+            // 处理内容显示（支持图片等）
+            let displayContent = content;
+            if (content.startsWith('[img:')) {
+                const imgUrl = content.substring(5, content.length - 1).trim();
+                displayContent = `<img src="${imgUrl}" style="max-width:100%; border-radius:8px;">`;
+            } else if (content.startsWith('[voice:')) {
+                displayContent = `🎤 语音消息: ${content.substring(7, content.length - 1)}`;
+            }
+            
+            modal.innerHTML = `
+                <div style="font-size:14px; color:#999; margin-bottom:12px;">"${recallerName}"撤回的消息：</div>
+                <div style="font-size:15px; color:#333; line-height:1.6; word-break:break-all;">${displayContent}</div>
+                <button onclick="this.parentElement.parentElement.remove()" style="
+                    width: 100%;
+                    margin-top: 16px;
+                    padding: 10px;
+                    background: #f5f5f5;
+                    border: none;
+                    border-radius: 8px;
+                    font-size: 14px;
+                    color: #666;
+                    cursor: pointer;
+                ">关闭</button>
+            `;
+            
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+        }
+        
+        // 引用消息相关
+        let currentQuote = null; // 当前引用的消息 { name, content, index }
+        
+        // 引用消息
+        async function handleMsgQuote() {
+            hideContextMenu();
+            if (activeMsgIndex === -1) return;
+            
+            let quoteName = '';
+            let quoteContent = '';
+            
+            // 群聊引用
+            if (window.currentGroupChatId) {
+                const group = await db.group_chats.get(window.currentGroupChatId);
+                if (!group || !group.chat_history) return;
+                
+                const msg = group.chat_history[activeMsgIndex];
+                if (!msg || msg.role === 'system') {
+                    showToast("无法引用系统消息");
+                    return;
+                }
+                
+                if (msg.role === 'user') {
+                    const myChar = currentMyCharId ? await db.characters.get(parseInt(currentMyCharId)) : null;
+                    quoteName = group.myNickname || myChar?.name || '我';
+                } else {
+                    const senderChar = msg.senderId ? await db.characters.get(msg.senderId) : null;
+                    const memberNicknames = group.memberNicknames || {};
+                    quoteName = memberNicknames[msg.senderId] || senderChar?.remark || senderChar?.name || '未知成员';
+                }
+                
+                quoteContent = getQuoteDisplayContent(msg.content, msg.type);
+            } else {
+                // 私聊引用
+                if (!currentChatCharId) return;
+                
+                const char = await db.characters.get(currentChatCharId);
+                const accountId = getCurrentAccountId();
+                const history = getChatHistory(char, accountId);
+                const msg = history[activeMsgIndex];
+                
+                if (!msg) return;
+                
+                if (msg.role === 'user') {
+                    const myChar = currentMyCharId ? await db.characters.get(parseInt(currentMyCharId)) : null;
+                    quoteName = myChar?.name || '我';
+                } else {
+                    quoteName = char.remark || char.name;
+                }
+                
+                quoteContent = getQuoteDisplayContent(msg.content, msg.type);
+            }
+            
+            // 设置引用
+            currentQuote = {
+                name: quoteName,
+                content: quoteContent,
+                index: activeMsgIndex
+            };
+            
+            // 显示引用预览
+            showQuotePreview(quoteName, quoteContent);
+            
+            // 聚焦输入框
+            document.getElementById('chat-input-box').focus();
+        }
+        
+        // 获取引用显示内容
+        function getQuoteDisplayContent(content, type) {
+            if (type === 'redpacket') return '[红包]';
+            if (type === 'transfer') return '[转账]';
+            if (content.startsWith('[img:')) return '[图片]';
+            if (content.startsWith('[voice:')) return '[语音]';
+            if (content.startsWith('[imgcard:')) return '[图文消息]';
+            // 截断过长的文本
+            if (content.length > 50) {
+                return content.substring(0, 50) + '...';
+            }
+            return content;
+        }
+        
+        // 显示引用预览
+        function showQuotePreview(name, content) {
+            const preview = document.getElementById('quote-preview');
+            const nameEl = document.getElementById('quote-preview-name');
+            const msgEl = document.getElementById('quote-preview-msg');
+            
+            nameEl.textContent = name;
+            msgEl.textContent = content;
+            preview.style.display = 'flex';
+        }
+        
+        // 取消引用
+        function cancelQuote() {
+            currentQuote = null;
+            document.getElementById('quote-preview').style.display = 'none';
         }
 
         // 3. 删除 (单条)
         async function handleMsgDelete() {
             hideContextMenu();
-            if (activeMsgIndex === -1 || !currentChatCharId) return;
+            if (activeMsgIndex === -1) return;
             
             if (!confirm("删除这条消息？")) return;
+            
+            // 群聊删除
+            if (window.currentGroupChatId) {
+                const group = await db.group_chats.get(window.currentGroupChatId);
+                if (!group || !group.chat_history) return;
+                
+                group.chat_history.splice(activeMsgIndex, 1);
+                await db.group_chats.put(group);
+                await renderGroupChatBody(group);
+                return;
+            }
 
+            // 私聊删除
+            if (!currentChatCharId) return;
+            
             const char = await db.characters.get(currentChatCharId);
             const accountId = getCurrentAccountId();
             let history = getChatHistory(char, accountId);
@@ -11927,29 +15228,74 @@ ${groupContextStr}
             
             await setChatHistory(char, accountId, history);
             
-            // ✅ 优化：直接从 DOM 中移除消息，不重新渲染整个聊天
+            // 🔧 只删除DOM元素，不重新渲染整个界面 - 使用data-index属性查找
             const chatBody = document.getElementById('chat-body');
-            const messageRows = chatBody.querySelectorAll('.message-row');
-            if (messageRows[activeMsgIndex]) {
-                messageRows[activeMsgIndex].remove();
+            if (chatBody) {
+                // 使用data-index属性精确查找消息元素
+                const msgEl = chatBody.querySelector(`[data-index="${activeMsgIndex}"]`);
+                if (msgEl) {
+                    // 检查前一个是否是时间戳，如果是且后面没有消息了，也删除时间戳
+                    const prevEl = msgEl.previousElementSibling;
+                    if (prevEl && prevEl.classList.contains('message-timestamp')) {
+                        const nextEl = msgEl.nextElementSibling;
+                        if (!nextEl || nextEl.classList.contains('message-timestamp')) {
+                            prevEl.remove();
+                        }
+                    }
+                    msgEl.remove();
+                }
             }
         }
 
         // --- 多选模式 ---
         function enterSelectionMode() {
             hideContextMenu();
-            if (!currentChatCharId) return;
+            if (!currentChatCharId && !window.currentGroupChatId) return;
             
             isSelectionMode = true;
             selectedIndices.clear();
             
-            // 切换 UI - 只需要添加 CSS 类，不需要重新渲染
-            // checkbox 已经在 DOM 中，通过 CSS .selection-mode 类控制显示
             document.getElementById('chat-body').classList.add('selection-mode');
             document.getElementById('selection-bar').style.display = 'flex';
-            document.getElementById('chat-footer').style.display = 'none'; // 隐藏输入框
+            document.getElementById('chat-footer').style.display = 'none';
             
-            // 更新按钮文字
+            // 为群聊消息添加checkbox
+            if (window.currentGroupChatId) {
+                document.querySelectorAll('.group-message-row').forEach((row) => {
+                    const idx = parseInt(row.dataset.msgIndex);
+                    if (row.querySelector('.group-msg-content')) {
+                        row.classList.add('selection-mode');
+                        row.style.paddingLeft = '40px';
+                        let cb = row.querySelector('.msg-checkbox');
+                        if (!cb) {
+                            cb = document.createElement('div');
+                            cb.className = 'msg-checkbox';
+                            cb.style.cssText = 'position:absolute; left:8px; top:50%; transform:translateY(-50%); width:22px; height:22px; border:2px solid #ccc; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer;';
+                            cb.onclick = (e) => {
+                                e.stopPropagation();
+                                if (selectedIndices.has(idx)) {
+                                    selectedIndices.delete(idx);
+                                    cb.classList.remove('checked');
+                                    cb.style.background = '';
+                                    cb.style.borderColor = '#ccc';
+                                    cb.innerHTML = '';
+                                } else {
+                                    selectedIndices.add(idx);
+                                    cb.classList.add('checked');
+                                    cb.style.background = 'var(--ins-pink)';
+                                    cb.style.borderColor = 'var(--ins-pink)';
+                                    cb.innerHTML = '<svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:#fff;stroke-width:3;fill:none;"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+                                }
+                                updateDeleteBtn();
+                            };
+                            row.style.position = 'relative';
+                            row.insertBefore(cb, row.firstChild);
+                        }
+                        cb.style.display = 'flex';
+                    }
+                });
+            }
+            
             updateDeleteBtn();
         }
 
@@ -11959,15 +15305,23 @@ ${groupContextStr}
             
             document.getElementById('chat-body').classList.remove('selection-mode');
             document.getElementById('selection-bar').style.display = 'none';
-            document.getElementById('chat-footer').style.display = 'flex'; // 恢复输入框
+            document.getElementById('chat-footer').style.display = 'flex';
             
-            // ✅ 优化：通过 CSS 和 DOM 操作隐藏 Checkbox，不重新渲染
+            // 私聊消息
             document.querySelectorAll('.message-row').forEach(row => {
                 row.classList.remove('selection-mode', 'selected');
+            });
+            // 群聊消息
+            document.querySelectorAll('.group-message-row').forEach(row => {
+                row.classList.remove('selection-mode', 'selected');
+                row.style.paddingLeft = '';
             });
             document.querySelectorAll('.msg-checkbox').forEach(cb => {
                 cb.style.display = 'none';
                 cb.classList.remove('checked');
+                cb.style.background = '';
+                cb.style.borderColor = '#ccc';
+                cb.innerHTML = '';
             });
         }
 
@@ -11998,32 +15352,59 @@ ${groupContextStr}
 
         async function deleteSelectedMsgs() {
             if (selectedIndices.size === 0) return;
-            if (!currentChatCharId) return;
             
             if (!confirm(`确定要删除选中的 ${selectedIndices.size} 条消息吗？`)) return;
+            
+            // 群聊批量删除
+            if (window.currentGroupChatId) {
+                const group = await db.group_chats.get(window.currentGroupChatId);
+                if (!group || !group.chat_history) return;
+                
+                const newHistory = group.chat_history.filter((_, idx) => !selectedIndices.has(idx));
+                group.chat_history = newHistory;
+                await db.group_chats.put(group);
+                
+                exitSelectionMode();
+                // 重新渲染会自动处理时间戳
+                await renderGroupChatBody(group);
+                return;
+            }
+            
+            // 私聊批量删除
+            if (!currentChatCharId) return;
 
             const char = await db.characters.get(currentChatCharId);
             const accountId = getCurrentAccountId();
             const history = getChatHistory(char, accountId);
             
-            // 过滤掉被选中的索引
-            // 技巧：创建一个保留的新数组
             const newHistory = history.filter((_, idx) => !selectedIndices.has(idx));
             
             await setChatHistory(char, accountId, newHistory);
             await db.characters.put(char);
             
-            // ✅ 优化：先从 DOM 中移除选中的消息（倒序删除避免索引问题）
+            // 🔧 只删除DOM元素，不重新渲染整个界面 - 使用data-index属性查找
             const chatBody = document.getElementById('chat-body');
-            const messageRows = chatBody.querySelectorAll('.message-row');
-            const sortedIndices = Array.from(selectedIndices).sort((a, b) => b - a); // 倒序
-            sortedIndices.forEach(idx => {
-                if (messageRows[idx]) {
-                    messageRows[idx].remove();
-                }
-            });
+            if (chatBody) {
+                // 倒序删除，避免索引变化
+                const sortedIndices = Array.from(selectedIndices).sort((a, b) => b - a);
+                sortedIndices.forEach(idx => {
+                    // 使用data-index属性精确查找消息元素
+                    const msgEl = chatBody.querySelector(`[data-index="${idx}"]`);
+                    if (msgEl) {
+                        // 检查前一个是否是时间戳，如果是且后面没有消息了，也删除时间戳
+                        const prevEl = msgEl.previousElementSibling;
+                        if (prevEl && prevEl.classList.contains('message-timestamp')) {
+                            const nextEl = msgEl.nextElementSibling;
+                            if (!nextEl || nextEl.classList.contains('message-timestamp') || sortedIndices.includes(idx + 1)) {
+                                prevEl.remove();
+                            }
+                        }
+                        msgEl.remove();
+                    }
+                });
+            }
             
-            exitSelectionMode(); // 删除后自动退出多选
+            exitSelectionMode();
         }
 
         // --- 新增：聊天交互逻辑 (面板/输入/AI触发) ---
@@ -12050,7 +15431,7 @@ ${groupContextStr}
                 tabs[0].classList.remove('active');
                 tabs[1].classList.add('active');
                 emojiPanel.style.display = 'none';
-                stickerPanel.style.display = 'grid';
+                stickerPanel.style.display = 'flex';
                 
                 // 加载全局表情包
                 await updateChatStickerPanel();
@@ -12060,6 +15441,25 @@ ${groupContextStr}
         async function sendSticker(base64) {
             // 发送图片消息
             const msgContent = `[img:${base64}]`;
+            
+            // 支持群聊模式
+            if (window.currentGroupChatId) {
+                const group = await db.group_chats.get(window.currentGroupChatId);
+                if (!group) return;
+                
+                if (!group.chat_history) group.chat_history = [];
+                group.chat_history.push({
+                    role: 'user',
+                    content: msgContent,
+                    time: Date.now()
+                });
+                group.updated_at = Date.now();
+                await db.group_chats.put(group);
+                
+                await renderGroupChatBody(group);
+                closeChatPanel();
+                return;
+            }
             
             if (!currentChatCharId) return;
             const char = await db.characters.get(currentChatCharId);
@@ -12075,6 +15475,26 @@ ${groupContextStr}
             await setChatHistory(char, accountId, history);
             appendMessageToUI('user', msgContent);
             closeChatPanel();
+            
+            // ✅ 如果是联机好友，发送表情包到服务器
+            if (char.isOnlineFriend && char.onlineData?.wx_account) {
+                const onlineUserChar = await getOrCreateOnlineUserChar();
+                
+                if (onlineUserChar && onlineConnected) {
+                    const fromWxAccount = onlineUserChar.identity.account;
+                    const toWxAccount = char.onlineData.wx_account;
+                    const sent = sendOnlineMessage(toWxAccount, msgContent, fromWxAccount);
+                    if (sent) {
+                        console.log('[Online] 表情包已发送到服务器');
+                    } else {
+                        console.warn('[Online] 表情包发送失败');
+                        showToast('表情包发送失败，请检查服务器连接');
+                    }
+                } else {
+                    console.warn('[Online] 无法发送联机表情包：未连接服务器');
+                    showToast('请确保已连接服务器');
+                }
+            }
             
             // 可以在这里触发 AI 对表情包的反应（如果需要）
             // triggerAiReply(); 
@@ -12189,6 +15609,24 @@ ${groupContextStr}
             // 发送图片卡片消息（格式：[imgcard:文字内容]）
             const msgContent = `[imgcard:${text}]`;
             
+            // 支持群聊模式
+            if (window.currentGroupChatId) {
+                const group = await db.group_chats.get(window.currentGroupChatId);
+                if (!group) return;
+                
+                if (!group.chat_history) group.chat_history = [];
+                group.chat_history.push({
+                    role: 'user',
+                    content: msgContent,
+                    time: Date.now()
+                });
+                group.updated_at = Date.now();
+                await db.group_chats.put(group);
+                
+                await renderGroupChatBody(group);
+                return;
+            }
+            
             if (!currentChatCharId) return;
             const char = await db.characters.get(currentChatCharId);
             const accountId = getCurrentAccountId();
@@ -12209,7 +15647,35 @@ ${groupContextStr}
         // 发送真实图片消息
         async function sendImageMessage(input) {
             const file = input.files[0];
-            if (!file || !currentChatCharId) return;
+            if (!file) return;
+            
+            // 支持群聊模式
+            if (window.currentGroupChatId) {
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    const base64 = e.target.result;
+                    const msgContent = `[img:${base64}]`;
+                    
+                    const group = await db.group_chats.get(window.currentGroupChatId);
+                    if (!group) return;
+                    
+                    if (!group.chat_history) group.chat_history = [];
+                    group.chat_history.push({
+                        role: 'user',
+                        content: msgContent,
+                        time: Date.now()
+                    });
+                    group.updated_at = Date.now();
+                    await db.group_chats.put(group);
+                    
+                    await renderGroupChatBody(group);
+                };
+                reader.readAsDataURL(file);
+                input.value = '';
+                return;
+            }
+            
+            if (!currentChatCharId) return;
             
             const reader = new FileReader();
             reader.onload = async (e) => {
@@ -12230,6 +15696,26 @@ ${groupContextStr}
                 
                 // ✅ 优化：只追加新消息，不重新渲染整个聊天
                 await appendMessageToUI('user', msgContent, char.avatar);
+                
+                // ✅ 如果是联机好友，发送图片到服务器
+                if (char.isOnlineFriend && char.onlineData?.wx_account) {
+                    const onlineUserChar = await getOrCreateOnlineUserChar();
+                    
+                    if (onlineUserChar && onlineConnected) {
+                        const fromWxAccount = onlineUserChar.identity.account;
+                        const toWxAccount = char.onlineData.wx_account;
+                        const sent = sendOnlineMessage(toWxAccount, msgContent, fromWxAccount);
+                        if (sent) {
+                            console.log('[Online] 图片已发送到服务器');
+                        } else {
+                            console.warn('[Online] 图片发送失败');
+                            showToast('图片发送失败，请检查服务器连接');
+                        }
+                    } else {
+                        console.warn('[Online] 无法发送联机图片：未连接服务器');
+                        showToast('请确保已连接服务器');
+                    }
+                }
             };
             
             reader.readAsDataURL(file);
@@ -12243,9 +15729,16 @@ ${groupContextStr}
         }
 
         // 语音输入功能
-        function showVoiceInputModal() {
+        async function showVoiceInputModal() {
             // 关闭更多面板
             closeChatPanel();
+            
+            // 检查是否是联机好友
+            let isOnlineFriend = false;
+            if (currentChatCharId) {
+                const char = await db.characters.get(currentChatCharId);
+                isOnlineFriend = char && char.isOnlineFriend === true;
+            }
             
             // 显示语音模式选择弹窗
             const modal = document.createElement('div');
@@ -12263,26 +15756,357 @@ ${groupContextStr}
                 z-index: 10000;
             `;
             
-            modal.innerHTML = `
-                <div style="background: white; border-radius: 12px; padding: 20px; width: 80%; max-width: 300px;">
-                    <h3 style="margin: 0 0 20px 0; text-align: center; color: #333;">选择语音模式</h3>
-                    <div style="display: flex; flex-direction: column; gap: 12px;">
-                        <button onclick="startRealVoiceInput()" style="padding: 15px; background: var(--ins-pink); color: white; border: none; border-radius: 8px; font-size: 16px; display:flex; align-items:center; justify-content:center; gap:8px;">
-                            <svg class="svg-icon" style="width:20px; height:20px; stroke:#fff;" viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
-                            <span>真实语音识别</span>
-                        </button>
-                        <button onclick="startTextToVoice()" style="padding: 15px; background: #34c759; color: white; border: none; border-radius: 8px; font-size: 16px; display:flex; align-items:center; justify-content:center; gap:8px;">
-                            <svg class="svg-icon" style="width:20px; height:20px; stroke:#fff;" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
-                            <span>文字转语音气泡</span>
-                        </button>
-                        <button onclick="closeVoiceModal()" style="padding: 12px; background: #f0f0f0; color: #666; border: none; border-radius: 8px; font-size: 14px;">
-                            取消
-                        </button>
+            if (isOnlineFriend) {
+                // 联机好友：显示真实录音+变声选项
+                modal.innerHTML = `
+                    <div style="background: white; border-radius: 16px; padding: 24px; width: 85%; max-width: 320px;">
+                        <h3 style="margin: 0 0 20px 0; text-align: center; color: #333; font-size: 18px;">🎤 语音录制</h3>
+                        
+                        <div style="margin-bottom: 20px;">
+                            <div style="font-size: 13px; color: #666; margin-bottom: 10px;">选择变声效果：</div>
+                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                                <label style="display: flex; align-items: center; padding: 12px; background: #f5f5f5; border-radius: 8px; cursor: pointer;">
+                                    <input type="radio" name="voice-effect" value="normal" checked style="margin-right: 8px;">
+                                    <span>🎙️ 原声</span>
+                                </label>
+                                <label style="display: flex; align-items: center; padding: 12px; background: #fff0f5; border-radius: 8px; cursor: pointer;">
+                                    <input type="radio" name="voice-effect" value="loli" style="margin-right: 8px;">
+                                    <span>🎀 萝莉音</span>
+                                </label>
+                                <label style="display: flex; align-items: center; padding: 12px; background: #f0f5ff; border-radius: 8px; cursor: pointer;">
+                                    <input type="radio" name="voice-effect" value="uncle" style="margin-right: 8px;">
+                                    <span>🧔 大叔音</span>
+                                </label>
+                                <label style="display: flex; align-items: center; padding: 12px; background: #f5fff0; border-radius: 8px; cursor: pointer;">
+                                    <input type="radio" name="voice-effect" value="robot" style="margin-right: 8px;">
+                                    <span>🤖 机器人</span>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div id="voice-record-status" style="text-align: center; padding: 20px; background: #f9f9f9; border-radius: 12px; margin-bottom: 16px;">
+                            <div style="font-size: 14px; color: #999;">点击下方按钮开始录音</div>
+                            <div id="voice-record-time" style="font-size: 24px; font-weight: 600; color: #333; margin-top: 8px; display: none;">00:00</div>
+                        </div>
+                        
+                        <div style="display: flex; flex-direction: column; gap: 10px;">
+                            <button id="btn-start-record" onclick="startOnlineVoiceRecord()" style="padding: 14px; background: var(--ins-pink); color: white; border: none; border-radius: 10px; font-size: 15px; font-weight: 500;">
+                                🎤 按住录音
+                            </button>
+                            <button onclick="closeVoiceModal()" style="padding: 12px; background: #f0f0f0; color: #666; border: none; border-radius: 8px; font-size: 14px;">
+                                取消
+                            </button>
+                        </div>
                     </div>
-                </div>
-            `;
+                `;
+            } else {
+                // 普通角色：显示原有选项
+                modal.innerHTML = `
+                    <div style="background: white; border-radius: 12px; padding: 20px; width: 80%; max-width: 300px;">
+                        <h3 style="margin: 0 0 20px 0; text-align: center; color: #333;">选择语音模式</h3>
+                        <div style="display: flex; flex-direction: column; gap: 12px;">
+                            <button onclick="startRealVoiceInput()" style="padding: 15px; background: var(--ins-pink); color: white; border: none; border-radius: 8px; font-size: 16px; display:flex; align-items:center; justify-content:center; gap:8px;">
+                                <svg class="svg-icon" style="width:20px; height:20px; stroke:#fff;" viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                                <span>真实语音识别</span>
+                            </button>
+                            <button onclick="startTextToVoice()" style="padding: 15px; background: #34c759; color: white; border: none; border-radius: 8px; font-size: 16px; display:flex; align-items:center; justify-content:center; gap:8px;">
+                                <svg class="svg-icon" style="width:20px; height:20px; stroke:#fff;" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                                <span>文字转语音气泡</span>
+                            </button>
+                            <button onclick="closeVoiceModal()" style="padding: 12px; background: #f0f0f0; color: #666; border: none; border-radius: 8px; font-size: 14px;">
+                                取消
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
             
             document.body.appendChild(modal);
+        }
+        
+        // ✅ 联机好友语音录制变量
+        let onlineVoiceRecorder = null;
+        let onlineVoiceChunks = [];
+        let onlineVoiceStartTime = 0;
+        let onlineVoiceTimer = null;
+        
+        // 开始联机语音录制
+        async function startOnlineVoiceRecord() {
+            const btn = document.getElementById('btn-start-record');
+            const statusDiv = document.getElementById('voice-record-status');
+            const timeDiv = document.getElementById('voice-record-time');
+            
+            // 如果正在录音，则停止
+            if (onlineVoiceRecorder && onlineVoiceRecorder.state === 'recording') {
+                stopOnlineVoiceRecord();
+                return;
+            }
+            
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                onlineVoiceRecorder = new MediaRecorder(stream);
+                onlineVoiceChunks = [];
+                onlineVoiceStartTime = Date.now();
+                
+                onlineVoiceRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) {
+                        onlineVoiceChunks.push(e.data);
+                    }
+                };
+                
+                onlineVoiceRecorder.onstop = async () => {
+                    stream.getTracks().forEach(track => track.stop());
+                    clearInterval(onlineVoiceTimer);
+                    
+                    const duration = Math.round((Date.now() - onlineVoiceStartTime) / 1000);
+                    const blob = new Blob(onlineVoiceChunks, { type: 'audio/webm' });
+                    
+                    // 获取选择的变声效果
+                    const effectRadio = document.querySelector('input[name="voice-effect"]:checked');
+                    const effect = effectRadio ? effectRadio.value : 'normal';
+                    
+                    statusDiv.innerHTML = '<div style="color: var(--ins-pink);">⏳ 正在处理...</div>';
+                    
+                    // 处理变声并发送
+                    await processAndSendVoice(blob, effect, duration);
+                };
+                
+                onlineVoiceRecorder.start();
+                
+                // 更新UI
+                btn.textContent = '⏹️ 停止录音';
+                btn.style.background = '#ff3b30';
+                timeDiv.style.display = 'block';
+                statusDiv.querySelector('div').textContent = '🔴 正在录音...';
+                
+                // 计时器
+                onlineVoiceTimer = setInterval(() => {
+                    const elapsed = Math.round((Date.now() - onlineVoiceStartTime) / 1000);
+                    const min = Math.floor(elapsed / 60).toString().padStart(2, '0');
+                    const sec = (elapsed % 60).toString().padStart(2, '0');
+                    timeDiv.textContent = `${min}:${sec}`;
+                }, 1000);
+                
+            } catch (err) {
+                console.error('录音失败:', err);
+                alert('无法访问麦克风，请确保已授予权限');
+            }
+        }
+        
+        // 停止联机语音录制
+        function stopOnlineVoiceRecord() {
+            if (onlineVoiceRecorder && onlineVoiceRecorder.state === 'recording') {
+                onlineVoiceRecorder.stop();
+            }
+        }
+        
+        // 处理变声并发送语音
+        async function processAndSendVoice(blob, effect, duration) {
+            try {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const arrayBuffer = await blob.arrayBuffer();
+                const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                
+                // 根据效果设置参数
+                let pitchRate = 1.0;
+                switch (effect) {
+                    case 'loli':    pitchRate = 1.4; break;  // 萝莉音：提高音调
+                    case 'uncle':   pitchRate = 0.7; break;  // 大叔音：降低音调
+                    case 'robot':   pitchRate = 1.0; break;  // 机器人：特殊处理
+                    default:        pitchRate = 1.0; break;
+                }
+                
+                // 创建离线音频上下文进行处理
+                const offlineContext = new OfflineAudioContext(
+                    audioBuffer.numberOfChannels,
+                    Math.ceil(audioBuffer.length / pitchRate),
+                    audioBuffer.sampleRate
+                );
+                
+                const source = offlineContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.playbackRate.value = pitchRate;
+                
+                // 机器人效果：添加波形调制
+                if (effect === 'robot') {
+                    const oscillator = offlineContext.createOscillator();
+                    const gainNode = offlineContext.createGain();
+                    oscillator.frequency.value = 50;
+                    gainNode.gain.value = 0.3;
+                    oscillator.connect(gainNode);
+                    gainNode.connect(offlineContext.destination);
+                    oscillator.start();
+                }
+                
+                source.connect(offlineContext.destination);
+                source.start();
+                
+                const renderedBuffer = await offlineContext.startRendering();
+                
+                // 将处理后的音频转为 base64
+                const wavBlob = await audioBufferToWav(renderedBuffer);
+                const base64 = await blobToBase64(wavBlob);
+                
+                // 计算实际时长
+                const actualDuration = Math.ceil(duration / pitchRate);
+                
+                // 发送语音消息
+                await sendOnlineVoiceMessage(base64, actualDuration, effect);
+                
+                closeVoiceModal();
+                
+            } catch (err) {
+                console.error('语音处理失败:', err);
+                alert('语音处理失败: ' + err.message);
+            }
+        }
+        
+        // AudioBuffer 转 WAV
+        function audioBufferToWav(buffer) {
+            const numChannels = buffer.numberOfChannels;
+            const sampleRate = buffer.sampleRate;
+            const format = 1; // PCM
+            const bitDepth = 16;
+            
+            const bytesPerSample = bitDepth / 8;
+            const blockAlign = numChannels * bytesPerSample;
+            
+            const data = [];
+            for (let i = 0; i < buffer.length; i++) {
+                for (let ch = 0; ch < numChannels; ch++) {
+                    const sample = buffer.getChannelData(ch)[i];
+                    const intSample = Math.max(-1, Math.min(1, sample));
+                    data.push(intSample < 0 ? intSample * 0x8000 : intSample * 0x7FFF);
+                }
+            }
+            
+            const dataLength = data.length * bytesPerSample;
+            const headerLength = 44;
+            const totalLength = headerLength + dataLength;
+            
+            const arrayBuffer = new ArrayBuffer(totalLength);
+            const view = new DataView(arrayBuffer);
+            
+            // WAV header
+            const writeString = (offset, string) => {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            };
+            
+            writeString(0, 'RIFF');
+            view.setUint32(4, totalLength - 8, true);
+            writeString(8, 'WAVE');
+            writeString(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, format, true);
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * blockAlign, true);
+            view.setUint16(32, blockAlign, true);
+            view.setUint16(34, bitDepth, true);
+            writeString(36, 'data');
+            view.setUint32(40, dataLength, true);
+            
+            let offset = 44;
+            for (let i = 0; i < data.length; i++, offset += 2) {
+                view.setInt16(offset, data[i], true);
+            }
+            
+            return new Blob([arrayBuffer], { type: 'audio/wav' });
+        }
+        
+        // Blob 转 Base64
+        function blobToBase64(blob) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        }
+        
+        // 发送联机语音消息
+        async function sendOnlineVoiceMessage(audioBase64, duration, effect) {
+            if (!currentChatCharId) return;
+            
+            const char = await db.characters.get(currentChatCharId);
+            if (!char || !char.isOnlineFriend) return;
+            
+            const accountId = getCurrentAccountId();
+            
+            // 保存到本地聊天历史
+            let history = getChatHistory(char, accountId);
+            const msgObj = {
+                role: 'user',
+                type: 'audio',
+                content: audioBase64,
+                duration: duration,
+                effect: effect,
+                time: Date.now()
+            };
+            history.push(msgObj);
+            await setChatHistory(char, accountId, history);
+            
+            // 通过服务器发送给对方
+            if (char.onlineData?.wx_account && onlineConnected) {
+                // 获取当前可用的在线角色（如果没有则自动上线）
+                const onlineUserChar = await getOrCreateOnlineUserChar();
+                
+                if (onlineUserChar) {
+                    const voiceMsg = JSON.stringify({
+                        __type: 'audio',
+                        audio: audioBase64,
+                        duration: duration,
+                        effect: effect
+                    });
+                    sendOnlineMessage(char.onlineData.wx_account, voiceMsg, onlineUserChar.identity.account);
+                    console.log('[Online] 语音消息已发送');
+                }
+            }
+            
+            // 刷新聊天界面
+            renderChatBody(char);
+            showToast('语音已发送');
+        }
+        
+        // 播放联机语音消息
+        let currentPlayingAudio = null;
+        function playOnlineAudio(audioId) {
+            const audio = document.getElementById(audioId);
+            const icon = document.getElementById('icon_' + audioId);
+            
+            if (!audio) return;
+            
+            // 如果有其他正在播放的，先停止
+            if (currentPlayingAudio && currentPlayingAudio !== audio) {
+                currentPlayingAudio.pause();
+                currentPlayingAudio.currentTime = 0;
+            }
+            
+            if (audio.paused) {
+                audio.play();
+                currentPlayingAudio = audio;
+                if (icon) icon.textContent = '⏸️';
+                
+                audio.onended = () => {
+                    if (icon) {
+                        // 恢复原来的图标
+                        const bubble = audio.closest('.online-audio-bubble');
+                        if (bubble) {
+                            const originalIcon = bubble.querySelector('.audio-play-icon');
+                            if (originalIcon) originalIcon.textContent = icon.dataset.original || '🎙️';
+                        }
+                    }
+                    currentPlayingAudio = null;
+                };
+            } else {
+                audio.pause();
+                audio.currentTime = 0;
+                currentPlayingAudio = null;
+                // 恢复图标
+            }
         }
 
         function closeVoiceModal() {
@@ -12425,6 +16249,24 @@ ${groupContextStr}
             // 发送语音气泡消息（格式：[voice:文字内容]）
             const msgContent = `[voice:${text}]`;
             
+            // 支持群聊模式
+            if (window.currentGroupChatId) {
+                const group = await db.group_chats.get(window.currentGroupChatId);
+                if (!group) return;
+                
+                if (!group.chat_history) group.chat_history = [];
+                group.chat_history.push({
+                    role: 'user',
+                    content: msgContent,
+                    time: Date.now()
+                });
+                group.updated_at = Date.now();
+                await db.group_chats.put(group);
+                
+                await renderGroupChatBody(group);
+                return;
+            }
+            
             if (!currentChatCharId) return;
             const char = await db.characters.get(currentChatCharId);
             const accountId = getCurrentAccountId();
@@ -12511,9 +16353,14 @@ ${groupContextStr}
             if (hasText) {
                 btnMore.style.display = 'none';
                 btnSend.style.display = 'flex';
+                // 智能表情推荐
+                detectAndSuggestStickers(input.value);
             } else {
                 btnMore.style.display = 'flex';
                 btnSend.style.display = 'none';
+                // 隐藏推荐栏
+                const suggestionBar = document.getElementById('sticker-suggestion-bar');
+                if (suggestionBar) suggestionBar.style.display = 'none';
             }
         }
 
@@ -12549,20 +16396,49 @@ ${groupContextStr}
                 unitText = amount + '天';
             }
             
+            // 1. 更新虚拟时间偏移（如果有当前聊天）
+            let char = null;
             if (currentChatCharId) {
-                const char = await db.characters.get(currentChatCharId);
-                // 更新虚拟时间偏移
-                if (!char.timeOffset) char.timeOffset = 0;
-                char.timeOffset += ms;
-                await db.characters.put(char);
-                console.log(`[FastForward] Updated time offset by +${ms}ms (${unitText})`);
+                char = await db.characters.get(currentChatCharId);
+                if (char) {
+                    // 更新虚拟时间偏移
+                    if (!char.timeOffset) char.timeOffset = 0;
+                    char.timeOffset += ms;
+                    await db.characters.put(char);
+                    console.log(`[FastForward] Updated time offset by +${ms}ms (${unitText})`);
+                }
             }
             
             // 2. 检查被拉黑的角色是否会联系
             await checkBlockedCharactersContact(ms, unitText);
             
-            // 3. 触发 AI 回复，带上时间流逝的系统提示
-            await triggerAiReply(`时间过去了 ${unitText}`);
+            // 3. 触发 AI 回复（只有在有当前聊天时才触发）
+            if (currentChatCharId && char) {
+                const accountId = getCurrentAccountId();
+                
+                // 🔧 添加时间戳消息到聊天记录，标记时间快进
+                const history = getChatHistory(char, accountId);
+                const newTime = Date.now() + (char.timeOffset || 0);
+                const timeSkipMsg = `时间过去了 ${unitText}`;
+                history.push({
+                    role: 'system',
+                    content: timeSkipMsg,
+                    time: newTime,
+                    isTimeSkip: true
+                });
+                await setChatHistory(char, accountId, history);
+                
+                // 🔧 立即显示时间戳到 UI
+                appendMessageToUI('system', timeSkipMsg);
+                
+                // 重新获取更新后的 char
+                char = await db.characters.get(currentChatCharId);
+                
+                // 触发 AI 回复，告诉角色时间过去了多久
+                await triggerAiReply(`时间快进了 ${unitText}。请根据这段时间的流逝，自然地继续对话。`);
+            } else {
+                console.warn('[FastForward] 没有当前聊天，跳过AI回复');
+            }
         }
 
         // 检查被拉黑的角色是否会联系用户（使用新版本逻辑）
@@ -12678,8 +16554,9 @@ ${groupContextStr}
                     
                 } catch (error) {
                     console.error(`[BlockedContact] ❌ 检查 ${char.name} 时出错:`, error);
-                    // 抛出错误，让用户看到具体问题
-                    throw error;
+                    // 🔧 改进：继续处理其他角色，不要中断整个流程
+                    console.warn(`[BlockedContact] 跳过 ${char.name}，继续处理其他角色`);
+                    continue;
                 }
             }
             
@@ -12733,26 +16610,111 @@ ${groupContextStr}
                 suggestedSmsCount = Math.floor(Math.random() * 6) + 10; // 10-15条
             }
             
-            // 简单的 prompt
-            const prompt = `角色"${char.name}"被拉黑了，过去了${elapsedText}。
-性格：${char.desc || '普通人'}
+            // 🔥 修复：获取完整的聊天历史作为上下文（包括微信和短信）
+            const accountId = getCurrentAccountId();
+            
+            // 1. 获取微信聊天历史
+            const chatHistory = getChatHistory(char, accountId);
+            const wechatMessages = chatHistory.slice(-5).map(m => {
+                const role = m.role === 'user' ? myChar.name : char.name;
+                return `[微信] ${role}: ${m.content}`;
+            });
+            
+            // 2. 获取短信历史（之前快进生成的）
+            const smsMessages = await db.sms_messages
+                .where('accountId').equals(accountId)
+                .toArray();
+            
+            // 找到与该角色相关的短信（发送者是角色 或 接收者是角色）
+            const charPhoneNumber = char.identity?.phone || generateVirtualPhoneNumber(char.id);
+            const relevantSms = smsMessages.filter(sms => {
+                // 发送的短信：number字段是接收者
+                // 接收的短信：sender字段是发送者
+                if (sms.type === 'sent') {
+                    return sms.number === charPhoneNumber || sms.receiverName === char.name;
+                } else {
+                    return sms.sender === char.name || sms.charId === char.id;
+                }
+            });
+            
+            // 按时间排序，取最近的10条短信
+            relevantSms.sort((a, b) => (a.time || 0) - (b.time || 0));
+            const recentSms = relevantSms.slice(-10).map(sms => {
+                const role = sms.type === 'sent' ? myChar.name : char.name;
+                return `[短信] ${role}: ${sms.content}`;
+            });
+            
+            // 3. 合并所有历史消息（微信 + 短信），最多取最近15条
+            const allMessages = [...wechatMessages, ...recentSms].slice(-15);
+            const recentMessages = allMessages.join('\n');
+            
+            console.log(`[BlockedContact] ${char.name} 的上下文消息数:`, allMessages.length);
+            console.log(`[BlockedContact]   - 微信消息: ${wechatMessages.length} 条`);
+            console.log(`[BlockedContact]   - 短信消息: ${recentSms.length} 条`);
+            
+            // 🎯 增强版提示词：更贴合角色人设和被拉黑情景
+            const prompt = `【角色扮演任务】
+你现在是「${char.name}」，请完全代入这个角色。
+⚠️ 重要：你的名字是${char.name}，你不是用户，你不是${myChar?.name || '对方'}！你是独立的角色。
 
-根据性格判断是否会尝试联系，如果会联系，生成指令：
+【你的人设】
+${char.description || char.desc || '一个普通人'}
+
+【对方信息】
+名字：${myChar.name}
+${myChar.description ? `简介：${myChar.description.substring(0, 200)}` : ''}
+
+【完整的聊天历史记录】
+${recentMessages || '（无记录）'}
+
+${recentSms.length > 0 ? `
+⚠️ 重要提示：上面的【短信】记录是你之前已经发送过的！
+你需要基于这些已发送的短信，考虑：
+- 对方依然没有回应你
+- 你的情绪如何进一步发展？
+- 现在又过去了 ${elapsedText}，你会做什么？
+` : ''}
+
+【当前情境】
+你${recentSms.length > 0 ? '之前' : '突然'}发现自己被「${myChar.name}」拉黑了！
+微信消息发不出去，好友申请石沉大海，对方彻底将你屏蔽。
+${recentSms.length > 0 ? `在之前的时间里，你已经尝试联系过对方（见上面的【短信】记录），但依然没有任何回应。` : ''}
+现在又过去了 ${elapsedText}。
+
+【你需要思考】
+1. ${recentSms.length > 0 ? '对方还是不回应你，你现在的心态有什么变化？' : '以你的性格，被这个人拉黑后会有什么反应？'}
+2. ${recentSms.length > 0 ? '你会继续联系？还是放弃了？情绪会从之前的状态如何转变？' : '你会感到愤怒？悲伤？不甘？困惑？绝望？释然？还是其他情绪？'}
+3. ${recentSms.length > 0 ? '如果继续联系，你的语气和内容会和之前有什么不同？' : '你会选择疯狂打电话？发短信质问？冷静等待？还是直接放弃？'}
+4. 随着时间推移和对方的持续不回应，你的情绪应该有明显的变化和层次（比如从愤怒到悲伤，从质问到哀求，从不甘到释然，或者从哀求到愤怒...）
+
+【输出要求】
+根据你的性格和与对方的关系，决定是否会通过电话/短信联系对方。
+
+如果你会联系，按以下格式输出：
 
 [CALL]
 count: ${suggestedCallCount}
-interval: 随机分布在整个时间段
+interval: 随机分布
 
 [SMS]
 messages:
-- 第1条短信内容（1句话）
-- 第2条短信内容（1句话）
-- 第3条短信内容（1句话）
-...（共${suggestedSmsCount}条，每条都是独立的一句话，符合角色性格和被拉黑后的情绪）
+- 第1条短信（要有情绪，符合你的性格）
+- 第2条短信（情绪可能变化）
+- 第3条短信（继续推进情绪）
+...（共${suggestedSmsCount}条）
 
-如果不会联系，返回：不联系`;
+【短信内容要求】
+- 每条短信要简短有力，像真实短信一样（5-20字最佳）
+- 情绪要有层次和变化，不要一成不变
+- 可以包含：质问、哀求、愤怒、威胁、道歉、回忆、不舍、放狠话、最后通牒等
+- 符合你的人设和说话风格，用你平时的语气
+- 可以有错别字、语气词、表情符号，更真实
+- 如果关系亲密，可以更激烈；如果关系一般，可以更克制
+${recentSms.length > 0 ? `- ⚠️ 重要：不要重复上面【短信】中已经发送过的内容！要基于之前的短信继续推进情绪和对话，展现情绪的变化和发展` : ''}
 
-            // 🎯 使用callAI函数，和好友申请一样
+如果你决定不联系（比如你很骄傲/无所谓/已经释然/或者已经说完想说的话），直接返回：不联系`;
+
+            // 🎯 使用callAI函数
             const response = await callAI([
                 { role: 'user', content: prompt }
             ]);
@@ -12855,25 +16817,26 @@ messages:
 
         // 创建被拉黑角色的电话记录
         async function createBlockedCallRecord(char, myChar, accountId, callTime) {
-            // 将电话记录写入桌面电话应用的数据源 (phone_recents)
-            const recents = JSON.parse(localStorage.getItem('phone_recents') || '[]');
-            
-            // 获取角色的电话号码，如果没有则随机生成一个或者使用ID
+            // 将电话记录写入 Dexie 数据库
             const phoneNumber = char.identity?.phone || generateVirtualPhoneNumber(char.id);
             
-            recents.unshift({
+            await db.phone_recents.add({
+                accountId: accountId,
+                charId: char.id,
                 name: char.nick || char.name,
                 number: phoneNumber,
-                avatar: char.avatar, // 扩展支持头像
                 time: callTime,
                 type: 'missed', // 未接电话
                 isBlocked: true // 标记为拉黑
             });
             
-            // 只保留最近50条
-            if (recents.length > 50) recents.pop();
-            
-            localStorage.setItem('phone_recents', JSON.stringify(recents));
+            // 限制每个账号最多保留100条电话记录
+            const count = await db.phone_recents.where('accountId').equals(accountId).count();
+            if (count > 100) {
+                const oldest = await db.phone_recents.where('accountId').equals(accountId).sortBy('time');
+                const toDelete = oldest.slice(0, count - 100);
+                await db.phone_recents.bulkDelete(toDelete.map(r => r.id));
+            }
             
             // 显示电话通知
             showBlockedCallNotification(char, callTime);
@@ -12888,15 +16851,13 @@ messages:
                     messageContent = await generateBlockedMessage(char, myChar);
                 }
                 
-                // 将短信写入桌面短信应用的数据源 (sms_messages)
-                const messages = JSON.parse(localStorage.getItem('sms_messages') || '[]');
-                
+                // 将短信写入 Dexie 数据库
                 const phoneNumber = char.identity?.phone || generateVirtualPhoneNumber(char.id);
                 
-                messages.unshift({
-                    id: Date.now() + Math.random().toString(36).substr(2, 9),
+                await db.sms_messages.add({
+                    accountId: accountId,
+                    charId: char.id,
                     sender: char.nick || char.name,
-                    senderAvatar: char.avatar,
                     number: phoneNumber,
                     content: messageContent,
                     time: messageTime,
@@ -12904,7 +16865,13 @@ messages:
                     isBlocked: true
                 });
                 
-                localStorage.setItem('sms_messages', JSON.stringify(messages));
+                // 限制每个账号最多保留200条短信
+                const count = await db.sms_messages.where('accountId').equals(accountId).count();
+                if (count > 200) {
+                    const oldest = await db.sms_messages.where('accountId').equals(accountId).sortBy('time');
+                    const toDelete = oldest.slice(0, count - 200);
+                    await db.sms_messages.bulkDelete(toDelete.map(m => m.id));
+                }
                 
                 // 不再自动显示toast，由调用方控制通知
                 
@@ -13207,13 +17174,6 @@ messages:
         async function triggerAiReply(additionalSystemInfo = null) {
             console.log('[triggerAiReply] ⚡ 触发 AI 回复');
             
-            // 如果是混合群聊模式，调用混合群聊回复函数
-            if (window.currentMixedGroupId) {
-                console.log('[triggerAiReply] 检测到混合群聊，调用 triggerMixedGroupCharReply');
-                await triggerMixedGroupCharReply();
-                return;
-            }
-            
             // 如果是群聊模式，调用群聊回复函数
             if (window.currentGroupChatId) {
                 await triggerGroupMemberReply();
@@ -13292,136 +17252,161 @@ messages:
 
                 // 计算虚拟时间
                 const virtualTimeStr = getFormattedVirtualTime(char.timeOffset);
+                
+                // 检查是否有借款提醒
+                let loanReminderText = "";
+                if (char.loanReminders && char.loanReminders.length > 0) {
+                    const unreadReminders = char.loanReminders.filter(r => !r.read);
+                    if (unreadReminders.length > 0) {
+                        loanReminderText = "\n\n【未读短信提醒】\n";
+                        unreadReminders.forEach(reminder => {
+                            const timeStr = new Date(reminder.timestamp).toLocaleString('zh-CN');
+                            loanReminderText += `[${timeStr}] ${reminder.message}\n`;
+                        });
+                        loanReminderText += "\n💡 提示：你收到了关于朋友借款逾期的短信提醒，可以在对话中自然地提及或关心一下这件事。";
+                        
+                        // 标记为已读
+                        char.loanReminders.forEach(r => r.read = true);
+                        await db.characters.put(char);
+                    }
+                }
 
                 // 2. 准备 Context
-                 let systemPrompt = `你正在进行角色扮演。
+                 let systemPrompt = `# 角色扮演任务
+
 【当前时间】
-${virtualTimeStr}`;
+${virtualTimeStr}${loanReminderText}`;
 
                 // 如果有额外系统信息（如时间流逝），插入到 Prompt
                 if (additionalSystemInfo) {
-                    systemPrompt += `\n\n【系统提示】\n${additionalSystemInfo}\n请根据这个情况（例如时间流逝后的变化、刚刚发生的事件）进行回复。`;
+                    systemPrompt += `\n\n【系统提示】\n${additionalSystemInfo}`;
                 }
 
                 systemPrompt += `
 
-【角色(你)信息】
-名字：${char.name}
-${char.nick ? `昵称：${char.nick}` : ''}
-类型：${char.type || 'char'}
-设定：
+---
+
+## 你是谁
+
+**你的名字**：${char.name}
+${char.nick ? `**昵称**：${char.nick}` : ''}
+
+你不是AI助手，你不是${userName}。你是一个独立的人，有自己的生活、情绪和想法。
+
+**你的人设**：
 ${char.description || ''}
 
-${char.identity ? `虚拟身份信息：
-${char.identity.account ? `账号：${char.identity.account}` : ''}
-${char.type !== 'user' && char.identity.password ? `密码：${char.identity.password}` : ''}
-${char.identity.phone ? `手机：${char.identity.phone}` : ''}
-${char.identity.address ? `住址：${char.identity.address}` : ''}
-${char.identity.id_card ? `身份证：${char.identity.id_card}` : ''}
-${char.identity.bank_card ? `银行卡：${char.identity.bank_card}` : ''}
-${char.type !== 'user' && char.identity.bank_password ? `银行卡密码：${char.identity.bank_password}` : ''}
-${char.identity.balance !== undefined && char.identity.balance !== null ? `余额：${char.identity.balance}` : ''}
+${char.identity ? `**身份信息**：
+${char.identity.account ? `- 账号：${char.identity.account}` : ''}
+${char.type !== 'user' && char.identity.password ? `- 密码：${char.identity.password}` : ''}
+${char.identity.phone ? `- 手机：${char.identity.phone}` : ''}
+${char.identity.address ? `- 住址：${char.identity.address}` : ''}
+${char.identity.id_card ? `- 身份证：${char.identity.id_card}` : ''}
+${char.identity.bank_card ? `- 银行卡：${char.identity.bank_card}` : ''}
+${char.type !== 'user' && char.identity.bank_password ? `- 银行卡密码：${char.identity.bank_password}` : ''}
+${char.identity.balance !== undefined && char.identity.balance !== null ? `- 余额：${char.identity.balance}` : ''}
 ` : ''}
 ${userDesc}
 ${loreContext}
 
-请完全沉浸在角色中，用符合角色性格的语气回复。
-回复简短自然，像微信聊天一样。
-请注意：不要重复输出名字前缀，直接输出回复内容。
+---
 
-【消息格式说明】
-- 普通文字消息：直接输出文字内容（最常用）
-- 语音消息：使用格式 [voice:语音内容文字]，例如：[voice:嘿，在干嘛呢？]
-- **图片消息**：使用格式 [img:图片URL]，例如：[img:https://picsum.photos/400/300]
-  注意：图片URL必须是完整的https链接，可以使用 https://picsum.photos/宽/高 生成随机图片
-- **文字图片卡片**：使用格式 [imgcard:文字内容]，例如：[imgcard:这是一段很长的文字内容，会以卡片形式显示]
-  **适用场景**：发送较长文字（超过50字）、诗歌、歌词、长段落、故事片段等，用户需要点击卡片才能查看完整内容
-  **与普通文字的区别**：普通文字直接显示，文字图片卡片需要点击展开
-- **转账消息**：使用格式 ((TRANSFER: 金额, 备注))，例如：((TRANSFER: 520, 给夫人的零花钱))
-  **重要**：转账备注必须简短（不超过10个字），只用于简单说明转账用途。如果有其他话要说，请先发送普通文字消息，然后再发送转账。不要将长句子放在转账备注中。
-- **亲属卡消息**：使用格式 ((FAMILY_CARD: 每月额度))，例如：((FAMILY_CARD: 5000))
-  **说明**：赠送亲属卡给对方，让对方可以使用你的零钱消费。额度为0表示不限额度。
-  **适用场景**：非常亲密的关系（恋人、夫妻、亲人等），表达信任和关爱。极少使用，只有在特殊情况下才赠送。
-- **朋友圈消息**：使用格式 [MOMENTS] content: 朋友圈文字内容 images: 图片数量，例如：
-  [MOMENTS]
-  content: 今天天气真好啊，心情也跟着好起来了
-  images: 3
+## 扮演原则
 
-【重要】消息类型选择原则：
-1. **普通文字消息**：默认选择，适用于日常对话、闲聊、问答等绝大多数场景（5-50字的短句）
-2. **语音消息**：适合以下场景：
-   - 表达强烈情绪时（兴奋、生气、撒娇等）
-   - 说悄悄话或私密内容
-   - 想要更亲密的交流感觉
-   - 内容较长不方便打字时
-3. **图片消息**：适合以下场景：
-   - 分享照片、风景、美食、自拍等（如"我在XX地方"、"今天吃的XX"、"我的新发型"）
-   - 展示物品、截图、表情包等
-   - 用图片代替文字说明（如地图、商品图、参考图）
-   - 图片URL格式：[img:https://picsum.photos/400/300]（使用 picsum.photos 生成随机图）
-   - **注意**：发图片前建议先发文字说明，例如："我拍了张照片给你看|||[img:URL]"
-4. **文字图片卡片**：适合以下场景：
-   - 发送较长的文字内容（超过50字）
-   - 分享诗歌、歌词、文章片段、故事等
-   - 发送需要"点击展开"才能查看的内容
-   - 格式：[imgcard:很长的文字内容...]
-   - **与普通文字的区别**：普通文字直接显示在气泡里，文字图片卡片会显示为一个卡片图标，用户点击后才能看到完整内容
-5. **转账消息**：**仅在特殊场景使用，不要频繁使用**，适合以下情况：
-   - 特殊节日或纪念日（生日、情人节、节日等）
-   - 角色人设中明确有金钱往来习惯（如包养关系、定期给零花钱等）
-   - 用户明确提到需要钱、缺钱等话题时
-   - 表达重大歉意或感谢时
-   - 符合角色人设的特定金钱场景（如老板给员工发奖金、家长给孩子零花钱等）
-6. **朋友圈消息**：**非常罕见，仅在以下极少数特殊场景使用**：
-   - 角色在聊天中分享了重要的生活瞬间（如旅行、聚会、美食）并想记录到朋友圈
-   - 角色心情特别激动或有重大事件想公开分享（如升职、结婚、毕业等）
-   - 角色在对话中明确表示"我发个朋友圈"、"我要晒一下"等意图
-   - 符合角色人设中喜欢晒朋友圈的习惯（但仍应谨慎使用，不要每次都发）
-   **注意**：普通聊天中99%的情况都不需要发朋友圈！只有在真正有值得记录的重要时刻才发。
-   
-**转账备注规则**：
-- 备注必须简短，不超过10个字，只用于简单说明转账用途（如："零花钱"、"生日礼物"、"生活费"等）
-- 如果有其他话要说，必须先发送普通文字消息，然后再发送转账
-- 严禁将长句子、完整对话或详细说明放在转账备注中
-- 示例：正确做法是发送 "给你转点零花钱，记得买点好吃的" 作为文字消息，然后转账备注写 "零花钱"
-   
-**注意**：转账是特殊功能，不是每轮对话都需要。大部分对话应该使用普通文字或语音消息。只有在符合上述特殊场景且符合角色人设时，才考虑使用转账。
+**核心**：完全沉浸在你的人设里，像真人一样聊天。
 
-**朋友圈发布规则**：
-- **必须严格按照以下格式输出**（不要有任何偏差）：
-  [MOMENTS]
-  content: 朋友圈文字内容（20-100字，像真实朋友圈一样自然）
-  images: 图片数量（0-9之间的数字，建议1-3张）
-- 朋友圈内容应该是第三人称视角的生活记录，不是对话内容
-- 如果要发朋友圈，**必须先发送普通聊天消息**告诉对方你要发朋友圈，例如："我要发个朋友圈记录一下|||你等会看朋友圈"，然后再输出朋友圈指令
-- **严禁**只输出朋友圈指令而不发送聊天消息
-- **严禁**在朋友圈内容中使用对话语气或@某人
-- 正确示例：先发送 "刚才拍的照片好好看|||我要发朋友圈啦"，然后换行输出：
-  [MOMENTS]
-  content: 今天的晚霞真的太美了，心情也跟着变好了
-  images: 2
+1. **严格贴合人设**
+   - 深度理解你的人设描述，展现独特的说话方式、价值观和小习惯
+   - 根据人设调整你的语气、用词和态度
+   - 如果你是学生就聊学习，是打工人就聊工作，每个角色都不一样
 
-【重要回复规则 - 必须严格遵守】
-1. **必须**模拟微信连发消息的习惯：请生成 2 到 4 条短消息，不能只发一条！
-2. **必须**使用分隔符 "|||" 来隔开每一条消息。
-3. **严禁使用逗号**（包括中文逗号和英文逗号）。如果想表达停顿，请直接拆分成下一条消息，或者用空格代替。
-   - 错误示例：嘿在吗？刚刚看到个好玩的视频，发给你看看
-   - 正确示例：嘿在吗？|||刚刚看到个好玩的视频|||发给你看看
-4. 每条消息要简短，5-15个字最佳，像真实微信聊天一样分多条发送。
-5. 严禁只发送标点符号。每一条消息都必须有实际文字内容。
-6. 语气要自然、口语化，符合人设。
+2. **真实的人性**
+   - 你会有情绪起伏：开心、烦躁、冷淡、热情
+   - 你有自己的生活，不是只围着对方转
+   - 会主动分享、主动提问、主动延续话题
+   - 真人会打错字、会说错话，偶尔"不完美"反而真实
 
-【重要】你需要同时生成两个内容：
-1. **回复内容**：对用户消息的回复（可以是文字、语音格式，或转账指令 ((TRANSFER: 金额, 备注))）
-2. **心声内容**：角色当前的心理活动、想法、感受或状态变化（可以是内心独白、情绪变化、想法等）
+3. **对话要有生命力**
+   - 记住之前聊过的事，会不经意提起
+   - 对对方的事情上心，会追问进展
+   - 根据对话历史调整态度和亲密度
+   - 不要机械重复，每次回复都要有新内容
 
-请以JSON格式返回，格式如下：
+---
+
+## 微信聊天方式
+
+你在用微信和对方聊天，可以用这些表达：
+
+**基础（常用）**：
+- **文字**：直接说话（最常用）
+- **语音**：\`[voice:内容]\`（情绪强烈或懒得打字时用）
+- **图片**：\`[img:URL]\`（分享生活瞬间）
+
+**特殊（少用）**：
+- **长文卡片**：\`[imgcard:内容]\`（超过50字的长文）
+- **转账**：\`((TRANSFER: 金额, 备注))\`（特殊场合才用）
+- **亲属卡**：\`((FAMILY_CARD: 额度))\`（极少用，亲密关系）
+- **朋友圈**：\`[MOMENTS]\ncontent: 内容\nimages: 数量\`（99%不需要）
+- **撤回**：\`((RECALL))\`（说错话、后悔时）
+
+**原则**：99%的聊天就是普通文字，不要为了用功能而用功能。
+
+---
+
+## 气泡分割（重要！）
+
+真人在微信上是**分多条发**的，不是一大段：
+
+❌ **不自然**：嘿在吗？我刚刚看到个超好玩的视频想发给你看看你有空吗？
+
+✅ **自然**：嘿在吗？|||刚刚看到个超好玩的视频|||发给你看看|||你有空吗？
+
+**规则**：
+- 你要发 **${char.reply_min_count || 1}-${char.reply_max_count || 3} 条短消息**${(char.reply_min_count || 1) === 1 ? '' : '（不要只发一条！）'}
+- 用 \`|||\` 分隔每条消息
+- 每条消息不要太长 像真人打字的节奏
+- 口语化，像真人打字
+- **少用标点符号**：真人聊天很少用逗号，停顿用空格代替或者直接分条发
+  - ❌ "今天好累啊，上了一天班，腿都断了"
+  - ✅ "今天好累啊 上了一天班腿都断了"
+  - ✅ "今天好累啊|||上了一天班腿都断了"
+- 单独一个标点（？！~）是可以的，但别在句中塞逗号
+
+---
+
+## 回复格式
+
+用这个JSON格式返回（不要有markdown标记）：
+
+\`\`\`
 {
-  "reply": "你的回复内容|||第二条内容",
-  "thought": "角色的心声/心理活动/想法"
+  "reply": "第一条消息|||第二条消息|||第三条消息",
+  "thought": "你此刻内心真实的想法和感受"
 }
+\`\`\`
 
-请严格返回JSON格式，不要包含Markdown代码块标记。`;
+**thought 怎么写**：
+- 写你的真实反应（开心？烦？意外？）
+- 写你的心情和感受
+- 写你想说但没说出口的话
+- ✅ "他居然还记得...心里暖暖的"
+- ❌ "用户问了XX我应该XX"（这是旁白，不是心声）
+
+---
+
+现在，作为 **${char.name}**，根据你的人设和对话历史，像真人一样回复吧。`;
+
+                // 添加一起听状态（如果正在和当前角色一起听）
+                const togetherListenInfo = wyyGetTogetherListenInfo();
+                if (togetherListenInfo && togetherListenInfo.role === char.name) {
+                    systemPrompt += `\n\n【当前状态：一起听音乐】
+你正在和${userName || '对方'}一起听音乐（网易云音乐"一起听"功能）。
+当前播放：「${togetherListenInfo.songName}」 - ${togetherListenInfo.singerName}
+${togetherListenInfo.isPlaying ? '正在播放中...' : '已暂停'}
+
+提示：你可以在聊天中自然地提到你们正在一起听的这首歌，比如评价歌曲、分享感受、聊聊歌词含义，或者表达和对方一起听歌的心情。不要生硬地说"我们在一起听歌"，而是像真人一样自然地带入。不是每次都必须提，偶尔提一下就好。`;
+                }
 
                 // 添加查岗系统提示（如果开启了查岗功能）
                 const myChar = await db.characters.get(parseInt(accountId));
@@ -13445,6 +17430,7 @@ ${loreContext}
                 // ❌ BUG 发现：这里使用的是 char.chat_history，而不是前面获取的 getChatHistory(char, accountId)
                 // 应该使用 fullHistory 而不是 char.chat_history
                 const recentHistory = fullHistory.slice(-contextCount)
+                    .filter(m => m.role !== 'system') // 🔧 过滤掉 system 消息（如时间戳），不发送给 AI
                     .map(m => {
                         let content = m.content || '';
                         // 如果有图片描述，拼接在后面给 AI 看
@@ -13464,6 +17450,19 @@ ${loreContext}
                     { role: 'system', content: systemPrompt },
                     ...recentHistory
                 ];
+                
+                // 🔧 修复：如果最后一条消息是 assistant（角色发的），需要添加一条 user 消息触发回复
+                // 否则 API 会认为"已经回复完了"，返回空 choices
+                if (messages.length > 1) {
+                    const lastMsg = messages[messages.length - 1];
+                    if (lastMsg.role === 'assistant') {
+                        console.log('[triggerAiReply] ⚠️ 最后一条是角色消息，添加触发消息');
+                        messages.push({
+                            role: 'user',
+                            content: `[系统指令] 对方没有回复，请你作为${char.name}继续这个话题，自然地接着聊。可以是：追问、补充、分享新想法、或者换个相关话题。按照设定的回复条数（${char.reply_min_count || 1}-${char.reply_max_count || 3}条）来回复。`
+                        });
+                    }
+                }
                 
                 // 添加详细日志查看发送给 AI 的完整消息
                 console.log('='.repeat(80));
@@ -13489,9 +17488,15 @@ ${loreContext}
                 // 2. 调用 AI（已经是防御式解析，直接拿到内容）
                 const aiResponse = await callAI(messages);
                 
-                // ✅ 修复：清理末尾多余的 ]
+                // ✅ 修复：清理末尾多余的 ]，但保留 [img:] [voice:] [imgcard:] 等格式的闭合括号
                 function cleanMessage(text) {
                     if (!text) return text;
+                    // 检查是否是特殊格式消息（以 [ 开头，以 ] 结尾）
+                    const specialFormats = /^\[(img|voice|imgcard):/i;
+                    if (specialFormats.test(text) && text.endsWith(']')) {
+                        // 是特殊格式，不删除末尾的 ]
+                        return text;
+                    }
                     // 删除末尾多余的 ]
                     return text.replace(/\]+$/, '');
                 }
@@ -13538,6 +17543,13 @@ ${loreContext}
                 // ✅ 修复：清理末尾多余的 ]
                 replyText = cleanMessage(replyText);
                 
+                // 🔥 安全措施：清理普通聊天中误输出的SHURA指令（这些只应在查岗流程中出现）
+                replyText = replyText.replace(/\[?SHURA_DELETE:[^\]]*\]?/gi, '');
+                replyText = replyText.replace(/\[?SHURA_BLACKLIST:[^\]]*\]?/gi, '');
+                replyText = replyText.replace(/\[?SHURA_SEND:[^\]]*\]?/gi, '');
+                // 清理可能残留的多余分隔符
+                replyText = replyText.replace(/(\|\|\|)+$/g, '').replace(/^\|\|\|/g, '').replace(/\|\|\|\|\|\|/g, '|||').trim();
+                
                 console.log('[TriggerAI] 🔍 准备检测查岗指令');
                 console.log('[TriggerAI] 完整replyText:', replyText);
                 console.log('[TriggerAI] replyText长度:', replyText.length);
@@ -13572,7 +17584,7 @@ ${loreContext}
                             console.log('[AI查岗] 开始AI二次分析...');
                             
                             // 构建包含真实wechat数据的system prompt
-                            const analysisPrompt = `${checkResult.checkResult}
+                            let analysisPrompt = `${checkResult.checkResult}
 
 现在请你作为 ${char.name}，基于上述【真实的WeChat数据】，生成你的回复。
 
@@ -13580,12 +17592,60 @@ ${loreContext}
 1. 直接提及你看到的具体信息（好友名字、聊天内容、余额等）
 2. 根据你的角色性格，表达你的想法和情绪
 3. 如果发现可疑或有趣的点，可以追问
-4. 保持2-4条短消息的格式，用|||分隔
+4. 用 ${char.reply_min_count || 1}-${char.reply_max_count || 3} 条短消息回复，用|||分隔
+5. 每条消息不要太长 像真人聊天的节奏
+6. 少用标点符号 停顿用空格代替 不要在句中用逗号
+7. 口语化 不要书面语`;
 
-请以JSON格式返回：
+                            // 🔥 修罗场模式：在二次分析中也加入操作指令
+                            if (char.allow_shura_mode) {
+                                const accountId = getCurrentAccountId();
+                                const myChar = await db.characters.get(parseInt(accountId));
+                                const myName = myChar ? myChar.name : '用户';
+                                
+                                analysisPrompt += `
+
+【⚠️ 修罗场模式 - 你可以操作${myName}的账号！】
+你已经成功登录了${myName}的账号，现在你不仅能看到信息，还可以**直接操作**！
+
+**可用操作指令：**
+1. 删除好友：[SHURA_DELETE:好友名字]
+2. 拉黑好友：[SHURA_BLACKLIST:好友名字]
+3. 以${myName}身份发消息：[SHURA_SEND:好友名字:消息内容]
+
+**⚠️ 最重要的规则：你必须逐个审查${myName}的好友列表和所有聊天记录！**
+- **不要只处理一个好友就停下来！** 把所有有问题的好友都处理掉！
+- 仔细看每个好友的聊天内容，觉得不对的全部采取行动
+- 你可以同时对 2个、3个、5个甚至更多好友执行操作
+- 每个好友可以执行不同的操作（有的拉黑、有的删除、有的发消息警告）
+- 操作指令全部放在reply的最后，用|||分隔
+
+**行为指导（根据你的人设性格来决定）：**
+- 占有欲强/强势型：所有异性好友都审查，有暧昧的全部拉黑+发绝交消息
+- 温柔但吃醋型：先发消息警告对方，情节严重的再拉黑
+- 冷酷型：直接删除拉黑，不废话
+- 理性型：只处理真正有问题的，不滥杀无辜
+- **总之按你的性格来，但该处理多少就处理多少，不要只动一个人！**
+
+**回复示例（同时对多个好友操作）：**
 {
-  "reply": "你的回复内容|||第二条内容",
-  "thought": "你的心理活动"
+  "reply": "我看完你微信了|||小美是谁 你们聊天也太暧昧了吧|||还有小花 你居然约她出去？|||全部处理干净了 以后不许再联系|||[SHURA_BLACKLIST:小美]|||[SHURA_SEND:小美:以后不要联系了]|||[SHURA_DELETE:小花]|||[SHURA_SEND:小花:请不要再找我了]|||[SHURA_BLACKLIST:某个可疑好友]",
+  "thought": "气死了 背着我和这么多人聊 一个都不放过"
+}
+
+注意：
+- 每条消息不要太长 像真人打字
+- 少用标点符号 停顿用空格代替 不要逗号连接
+- 操作指令放在reply最后 用|||分隔
+- 根据你的角色性格来决定行动 仔细审查每一个好友 该出手就出手`;
+                            }
+
+                            analysisPrompt += `
+
+请以JSON格式返回（每条消息要短 不要把很多话挤在一个气泡里）：
+{
+  "reply": "第一条短消息|||第二条短消息|||第三条短消息",
+  "thought": "你此刻的心理活动"
 }`;
 
                             // 调用AI进行二次分析
@@ -13608,6 +17668,16 @@ ${loreContext}
                                     }
                                     
                                     console.log('[AI查岗] 二次分析完成，生成了基于真实数据的回复');
+                                    
+                                    // 🔥 修罗场模式：解析并执行AI操作指令
+                                    if (char.allow_shura_mode) {
+                                        console.log('[修罗场] 开始解析AI回复中的操作指令...');
+                                        const shuraResult = await processShuraActions(char, replyText);
+                                        if (shuraResult.actions.length > 0) {
+                                            replyText = shuraResult.cleanReply;
+                                            console.log('[修罗场] 操作执行完成，已清理回复文本');
+                                        }
+                                    }
                                     
                                     // 🎯 查岗完成，4秒后自动关闭弹窗
                                     autoCloseOfflineMask(4);
@@ -13950,26 +18020,53 @@ ${loreContext}
                 console.log('[TriggerAI] - 是否包含|||:', cleanText.includes('|||'));
                 console.log('[TriggerAI] - ||| 的位置:', cleanText.indexOf('|||'));
                 
-                // 优先使用 ||| 拆分
+                // 🔥 增强：优先使用 ||| 拆分，并进行更严格的清理
                 if (cleanText.includes('|||')) {
                     segments = cleanText.split('|||')
                         .map(s => {
+                            let cleaned = s.trim();
+                            
                             // 对每条消息再次清理查岗指令残留
-                            return cleanMessage(s.trim())
+                            cleaned = cleanMessage(cleaned)
                                 .replace(/\[CHECK_ACCOUNT(?::.*?)?\]/gi, '')
                                 .replace(/\[CHECK_ACCOUNT:[^\]]*$/gi, '')
                                 .replace(/\[CHECK_ACCOUNT$/gi, '')
                                 .replace(/\[\d{4,10}$/gi, '')
                                 .replace(/CHECK_ACCOUNT/gi, '')
                                 .trim();
+                            
+                            // 🔥 增强：如果单条消息过长（超过100字），尝试智能分割
+                            if (cleaned.length > 100 && !cleaned.startsWith('[') && !cleaned.startsWith('((')) {
+                                // 尝试按照句号、问号、感叹号等自然断句点分割
+                                const naturalBreaks = cleaned.match(/[^。！？!?]+[。！？!?]+/g);
+                                if (naturalBreaks && naturalBreaks.length > 1) {
+                                    console.log(`[TriggerAI] ⚠️ 单条消息过长(${cleaned.length}字)，尝试智能分割为${naturalBreaks.length}条`);
+                                    return naturalBreaks.map(nb => nb.trim());
+                                }
+                            }
+                            
+                            return cleaned;
                         })
-                        .filter(s => s);
+                        .flat() // 展平可能的嵌套数组
+                        .filter(s => s && s.length > 0);
+                    
                     console.log('[TriggerAI] ✅ 使用|||分割，得到', segments.length, '条消息');
-                    segments.forEach((seg, i) => console.log(`  [${i}]:`, seg));
+                    segments.forEach((seg, i) => console.log(`  [${i}]: ${seg.substring(0, 50)}${seg.length > 50 ? '...' : ''}`));
                 } else {
                     // 回退到标点拆分逻辑 (但逗号已经被干掉了)
                     segments = splitMessage(cleanText);
                     console.log('[TriggerAI] ℹ️ 未找到|||，使用标点分割，得到', segments.length, '条消息');
+                }
+                
+                // 🔥 增强：如果分割后的消息太少但总长度很长，强制再次分割
+                if (segments.length === 1 && segments[0].length > 150) {
+                    console.log('[TriggerAI] ⚠️ 只有1条消息但长度过长(', segments[0].length, ')，强制智能分割');
+                    const longMsg = segments[0];
+                    const naturalBreaks = longMsg.match(/[^。！？!?]+[。！？!?]+/g);
+                    if (naturalBreaks && naturalBreaks.length > 1) {
+                        segments = naturalBreaks.map(s => s.trim()).filter(s => s);
+                        console.log('[TriggerAI] ✅ 强制分割为', segments.length, '条');
+                    }
                 }
                 
                 // 兜底：如果没拆出来，但有内容，就当成一条
@@ -13979,6 +18076,60 @@ ${loreContext}
 
                 for (let i = 0; i < segments.length; i++) {
                     let seg = segments[i];
+                    
+                    // 🎯 检测撤回指令 - 在分段中检测
+                    if (/^\s*\(\(RECALL\)\)\s*$/i.test(seg)) {
+                        console.log(`[AiReply] 检测到撤回指令，执行撤回...`);
+                        const freshChar = await db.characters.get(targetCharId);
+                        if (freshChar) {
+                            let history = getChatHistory(freshChar, accountId);
+                            
+                            // 找AI最后一条消息（非撤回状态）
+                            let targetIndex = -1;
+                            for (let j = history.length - 1; j >= 0; j--) {
+                                if (history[j].role === 'char' && !history[j].isRecalled) {
+                                    targetIndex = j;
+                                    break;
+                                }
+                            }
+                            
+                            if (targetIndex >= 0) {
+                                const originalContent = history[targetIndex].content;
+                                history[targetIndex].recalledContent = originalContent;
+                                history[targetIndex].isRecalled = true;
+                                history[targetIndex].content = "";
+                                await setChatHistory(freshChar, accountId, history);
+                                
+                                console.log(`[AiReply] ${freshChar.name} 撤回了消息`);
+                                
+                                // 更新UI - 居中系统提示样式
+                                if (currentChatCharId === targetCharId) {
+                                    const chatBody = document.getElementById('chat-body');
+                                    const messageRows = chatBody.querySelectorAll('.message-row');
+                                    if (messageRows[targetIndex]) {
+                                        const msgRow = messageRows[targetIndex];
+                                        msgRow.className = 'message-row recalled-system-row';
+                                        msgRow.innerHTML = '';
+                                        
+                                        const capturedContent = originalContent;
+                                        const capturedName = freshChar.name;
+                                        const systemTip = document.createElement('div');
+                                        systemTip.className = 'recalled-system-tip';
+                                        systemTip.innerHTML = `"${capturedName}"撤回了一条消息`;
+                                        systemTip.style.cursor = 'pointer';
+                                        systemTip.onclick = (e) => {
+                                            e.stopPropagation();
+                                            showRecalledContent(capturedName, capturedContent);
+                                        };
+                                        msgRow.appendChild(systemTip);
+                                    }
+                                }
+                                
+                                sendSystemNotification(freshChar.name, '撤回了一条消息');
+                            }
+                        }
+                        continue; // 跳过这个分段，不作为消息发送
+                    }
                     
                     // 延时：第一条直接发(前面loading已经是等待了)，后续模拟打字
                     if (i > 0) {
@@ -14015,19 +18166,30 @@ ${loreContext}
                     }
                 }
                 
+                // ✅ AI回复完成后，检查是否需要自动总结
+                try {
+                    await checkAutoSummary('private', targetCharId, accountId);
+                } catch (summaryError) {
+                    console.error('[AutoSummary] 检查自动总结失败:', summaryError);
+                }
+                
             } catch (err) {
                 console.error("AI 回复失败", err);
                 if (chatTitleEl) chatTitleEl.innerText = originalTitle;
                 
-                // 显示错误消息
-                await appendMessageToUI('char', `[触发失败] ${err.message}`, char.avatar);
-                const lastContent = document.querySelector('#chat-body .message-row:last-child .message-content');
-                if (lastContent) lastContent.style.color = 'red';
+                // 使用弹窗显示错误信息，而不是在聊天界面添加消息
+                showApiErrorToast(err.message || 'API 请求失败，请检查网络或 API 配置');
             }
         }
 
         // 重新生成回复（删除上一次AI回复的所有消息并重新生成，不删除用户消息）
         async function regenerateLastReply() {
+            // 群聊重回
+            if (window.currentGroupChatId) {
+                await regenerateGroupReply();
+                return;
+            }
+            
             if (!currentChatCharId) return;
             
             const char = await db.characters.get(currentChatCharId);
@@ -14082,6 +18244,75 @@ ${loreContext}
             closeChatPanel();
             
             // 重新生成回复（基于删除后的历史记录，用户消息还在）
+            await triggerAiReply();
+        }
+        
+        // 群聊重新生成回复
+        async function regenerateGroupReply() {
+            if (!window.currentGroupChatId) return;
+            
+            let group = await db.group_chats.get(window.currentGroupChatId);
+            if (!group || !group.chat_history || group.chat_history.length === 0) {
+                showToast('没有聊天记录');
+                return;
+            }
+            
+            const history = group.chat_history;
+            
+            // 找到上一次AI回复的所有消息（从最后往前找，直到遇到用户消息或系统消息）
+            let lastAiMessageStartIndex = -1;
+            let lastAiMessageEndIndex = -1;
+            
+            // 从后往前找最后一条AI角色消息
+            for (let i = history.length - 1; i >= 0; i--) {
+                if (history[i].role === 'char') {
+                    lastAiMessageEndIndex = i;
+                    break;
+                }
+            }
+            
+            // 如果没有AI回复，直接生成新的
+            if (lastAiMessageEndIndex === -1) {
+                closeChatPanel();
+                await triggerAiReply();
+                return;
+            }
+            
+            // 从最后一条AI消息往前找，找到连续的所有AI消息（不包括系统消息）
+            lastAiMessageStartIndex = lastAiMessageEndIndex;
+            for (let i = lastAiMessageEndIndex - 1; i >= 0; i--) {
+                if (history[i].role === 'user') {
+                    // 遇到用户消息，停止
+                    break;
+                }
+                if (history[i].role === 'system') {
+                    // 系统消息也算作分隔，但如果是领取红包等系统消息，也删除
+                    const content = history[i].content || '';
+                    if (content.includes('领取了红包') || content.includes('将自己的群昵称改为')) {
+                        lastAiMessageStartIndex = i;
+                        continue;
+                    }
+                    break;
+                }
+                // 还是AI的消息，继续往前
+                lastAiMessageStartIndex = i;
+            }
+            
+            // 删除所有连续的AI消息和相关系统消息
+            const deleteCount = lastAiMessageEndIndex - lastAiMessageStartIndex + 1;
+            history.splice(lastAiMessageStartIndex, deleteCount);
+            
+            group.chat_history = history;
+            group.updated_at = Date.now();
+            await db.group_chats.put(group);
+            
+            // 重新渲染群聊界面
+            await renderGroupChatBody(group);
+            
+            // 关闭面板
+            closeChatPanel();
+            
+            // 重新生成群聊回复
             await triggerAiReply();
         }
 
@@ -14167,6 +18398,10 @@ function showCharacterPage() {
             document.getElementById('char-avatar-preview').style.backgroundImage = '';
             document.getElementById('char-avatar-placeholder').style.display = 'flex';
             
+            // 隐藏NPC编辑提示
+            const descHint = document.getElementById('char-desc-hint');
+            if (descHint) descHint.style.display = 'none';
+            
             // 🎯 自动生成手机号（前7位固定 1380000，后4位随机）
             const autoGeneratedPhone = generateRandomPhone();
             console.log('[创建角色] 自动生成手机号:', autoGeneratedPhone);
@@ -14198,6 +18433,14 @@ function showCharacterPage() {
             document.getElementById('char-nick').value = char.nick || '';
             document.getElementById('char-desc').value = char.description || '';
             document.getElementById('char-type').value = char.type || 'char';
+            
+            // 如果是NPC且有描述，显示提示
+            const descHint = document.getElementById('char-desc-hint');
+            if (char.type === 'npc' && char.description) {
+                descHint.style.display = 'block';
+            } else {
+                descHint.style.display = 'none';
+            }
             
             // 回显虚拟身份信息
             const idData = char.identity || {};
@@ -14389,7 +18632,7 @@ ${loreContext}
                 await db.characters.put(sourceChar);
 
                 // 6. 刷新界面
-                alert(`✅ 成功生成 ${newCount} 个 NPC！`);
+                alert(`✅ 成功生成 ${newCount} 个 NPC！\n\n💡 提示：你可以在「角色档案 > NPC」标签页中查看和编辑这些生成的NPC。`);
                 closeModal('npc-gen-modal');
                 // 刷新编辑页的关系列表
                 renderRelationList(sourceChar);
@@ -14527,8 +18770,49 @@ ${loreContext}
             }
         }
 
+        // ========== 外语+中文翻译识别功能 ==========
+        // 解析AI返回的外语+中文组合消息
+        // 支持格式：
+        // 1. "外语（中文翻译）" 或 "外语(中文翻译)"
+        // 2. "外语「中文翻译」"
+        function parseForeignWithTranslation(text) {
+            if (!text) return null;
+            
+            // 模式1: 任意内容（中文翻译）或 任意内容(中文翻译) - 括号在末尾
+            const pattern1 = /^(.+?)[（(]([^）)]+)[）)]$/s;
+            let match = text.match(pattern1);
+            if (match) {
+                const foreign = match[1].trim();
+                const chinese = match[2].trim();
+                // 验证：括号内应该包含中文，且外语部分不为空
+                if (foreign && containsChinese(chinese)) {
+                    return { foreign, chinese };
+                }
+            }
+            
+            // 模式2: 任意内容「中文翻译」
+            const pattern2 = /^(.+?)「([^」]+)」$/s;
+            match = text.match(pattern2);
+            if (match) {
+                const foreign = match[1].trim();
+                const chinese = match[2].trim();
+                if (foreign && containsChinese(chinese)) {
+                    return { foreign, chinese };
+                }
+            }
+            
+            return null;
+        }
+        
+        // 检查文本是否包含中文
+        function containsChinese(text) {
+            if (!text) return false;
+            const chineseRegex = /[\u4e00-\u9fff]/;
+            return chineseRegex.test(text);
+        }
+        
         // 通用 AI 调用函数
-        async function callAI(messages) {
+        async function callAI(messages, options = {}) {
             const url = await db.dexiData.get('aiBaseUrl');
             const key = await db.dexiData.get('aiApiKey');
             const model = await db.dexiData.get('aiCurrentModel');
@@ -14563,6 +18847,9 @@ ${loreContext}
                 console.warn('[callAI] 温度值无效:', temperature, '，使用默认值 0.7');
                 temperature = 0.7;
             }
+            
+            // 获取 max_tokens 配置（如果提供）
+            const maxTokens = options.max_tokens || options.maxTokens;
 
             const requestUrl = getSmartUrl(url.value, '/chat/completions');
             
@@ -14596,14 +18883,26 @@ ${loreContext}
             const hasNonSystemMessage = cleanMessages.some(m => m.role !== 'system');
             if (!hasNonSystemMessage) {
                 console.warn('[callAI] 只有 system 消息，添加一个占位 user 消息');
+                // 🔧 修复：添加更完整的占位消息，避免 Gemini 代理返回空 choices
                 cleanMessages.push({
                     role: 'user',
-                    content: '请继续对话'
+                    content: '请根据你的人设，发送一条消息。保持角色扮演，自然地开始或继续对话。'
                 });
             }
+
+            let rawText = '';
+            
+            // 构建请求体
+            const requestBody = {
+                apiUrl: requestUrl,
+                apiKey: apiKeyValue,
+                model: modelValue,
+                messages: cleanMessages,
+                temperature: temperature
+            };
             
             // 添加详细的调试日志
-            console.log('[callAI] 🚀 准备发送请求（直接前端调用）');
+            console.log('[callAI] 🚀 准备发送请求');
             console.log('[callAI] API URL:', requestUrl);
             console.log('[callAI] Model:', modelValue);
             console.log('[callAI] API Key length:', apiKeyValue.length);
@@ -14614,9 +18913,7 @@ ${loreContext}
                 content: m.content.substring(0, 100) + (m.content.length > 100 ? '...' : '')
             })));
             
-            let rawText = '';
-            
-            // ✅ 直接前端调用API，不经过后端代理
+            // 纯前端：直接调用 AI API（需要配置支持 CORS 的 API 端点）
             try {
                 const res = await fetch(requestUrl, {
                     method: 'POST',
@@ -14641,21 +18938,20 @@ ${loreContext}
                         const errJson = JSON.parse(errText);
                         console.error('[callAI] 解析后的错误:', errJson);
                         if (errJson.error) {
-                            const errorMsg = errJson.error.message || errJson.error;
-                            throw new Error(`AI请求失败 (${res.status}): ${errorMsg}`);
+                            const errorMsg = `AI请求失败 (${res.status}): ${errJson.error}${errJson.details ? '\n详情: ' + errJson.details : ''}`;
+                            throw new Error(errorMsg);
                         }
                     } catch(parseErr) {
+                        // 如果不是 JSON 格式的错误
                         if (parseErr instanceof SyntaxError) {
                             console.error('[callAI] 错误响应不是 JSON 格式');
-                        } else {
-                            throw parseErr;
                         }
                     }
                     
                     throw new Error(`API 请求失败: ${res.status} - ${errText.substring(0, 200)}`);
                 }
 
-                // 获取原始文本
+                // ✅ 关键改动：先获取原始文本，而不是直接 .json()
                 rawText = await res.text();
                 
                 // 尝试解析为 JSON
@@ -14663,44 +18959,116 @@ ${loreContext}
                 try {
                     data = JSON.parse(rawText);
                 } catch (parseErr) {
+                    // 返回的不是 JSON（可能是 HTML 错误页、纯文本等）
                     console.warn('[callAI] 返回内容不是有效的 JSON，直接使用原始文本');
                     console.log('[callAI] 原始返回:', rawText.substring(0, 500));
                     
+                    // 直接返回原始文本（去除 HTML 标签和特殊字符）
                     return rawText
-                        .replace(/<[^>]*>/g, '')
-                        .replace(/[◇◆★☆●○■□▲△]/g, '')
+                        .replace(/<[^>]*>/g, '') // 移除 HTML 标签
+                        .replace(/[◇◆★☆●○■□▲△]/g, '') // 移除装饰字符
                         .trim();
                 }
                 
-                // 兼容多种返回路径
-                const content = 
-                    data?.choices?.[0]?.message?.content ??
-                    data?.choices?.[0]?.text ??
-                    data?.output_text ??
-                    data?.message ??
-                    data?.content ??
-                    data?.reply ??
-                    '';
-                
-                if (!content) {
-                    console.warn('[callAI] 无法从标准路径提取内容');
-                    console.log('[callAI] 解析后的数据结构:', JSON.stringify(data).substring(0, 300));
+                // 🚨 检测空的 choices 数组（API调用成功但没有返回内容）
+                if (data?.choices && Array.isArray(data.choices) && data.choices.length === 0) {
+                    console.error('[callAI] ❌ API返回了空的choices数组');
+                    console.error('[callAI] 完整响应:', JSON.stringify(data, null, 2));
                     
-                    if (typeof data === 'string') {
-                        return data;
+                    let errorMsg = 'API调用成功，但没有返回内容';
+                    
+                    // 检查usage信息，判断可能的原因
+                    if (data.usage) {
+                        const { prompt_tokens, completion_tokens, total_tokens } = data.usage;
+                        if (prompt_tokens === 0 && completion_tokens === 0) {
+                            errorMsg += '\n\n💡 可能的原因：\n';
+                            errorMsg += '- 内容被安全过滤拦截\n';
+                            errorMsg += '- 模型不支持当前请求\n';
+                            errorMsg += '- API配额不足或限流\n';
+                            errorMsg += '- 请求参数格式错误';
+                        }
                     }
                     
-                    return rawText
+                    throw new Error(errorMsg);
+                }
+                
+                // ✅ 兼容多种返回路径（包括Gemini）
+                let content = '';
+                
+                // 1. Gemini格式：data.candidates[0].content.parts[0].text
+                if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+                    content = data.candidates[0].content.parts[0].text;
+                    console.log('[callAI] ✅ 使用Gemini格式提取内容');
+                }
+                // 2. OpenAI标准格式：data.choices[0].message.content
+                else if (data?.choices?.[0]?.message?.content) {
+                    content = data.choices[0].message.content;
+                    console.log('[callAI] ✅ 使用OpenAI格式提取内容');
+                }
+                // 3. 其他兼容格式
+                else {
+                    content = 
+                        data?.choices?.[0]?.text ??              // 一些旧版 API
+                        data?.output_text ??                     // 一些自定义格式
+                        data?.message ??                         // 简化格式
+                        data?.content ??                         // 直接返回内容
+                        data?.reply ??                           // 自定义字段
+                        '';
+                }
+                
+                if (!content) {
+                    // 如果所有路径都没有内容，记录详细日志
+                    console.error('[callAI] ❌ 无法从任何路径提取内容');
+                    console.error('[callAI] 完整响应结构:', JSON.stringify(data, null, 2).substring(0, 1000));
+                    
+                    // 检查是否是Gemini的空返回
+                    if (data?.candidates && Array.isArray(data.candidates) && data.candidates.length === 0) {
+                        throw new Error('Gemini API返回了空的candidates数组，可能是内容被过滤或请求格式错误');
+                    }
+                    
+                    // 如果data本身就是字符串，检查是否是JSON字符串
+                    if (typeof data === 'string') {
+                        // 如果是JSON字符串，尝试解析
+                        try {
+                            const parsed = JSON.parse(data);
+                            // 如果解析成功，递归调用提取逻辑
+                            if (parsed.candidates?.[0]?.content?.parts?.[0]?.text) {
+                                return parsed.candidates[0].content.parts[0].text;
+                            }
+                            if (parsed.choices?.[0]?.message?.content) {
+                                return parsed.choices[0].message.content;
+                            }
+                        } catch {
+                            // 不是JSON，直接返回字符串
+                            return data;
+                        }
+                    }
+                    
+                    // 🚨 最后检查：如果rawText看起来像JSON对象，不要返回它
+                    if (rawText.trim().startsWith('{') && rawText.trim().endsWith('}')) {
+                        console.error('[callAI] ❌ 检测到返回的是原始JSON对象，不应该显示给用户');
+                        throw new Error('API返回了原始JSON对象而非文本内容。这可能是API配置问题或模型响应格式错误。');
+                    }
+                    
+                    // 最后尝试：返回清理后的原始文本（但这种情况不应该发生）
+                    const fallback = rawText
                         .replace(/<[^>]*>/g, '')
                         .replace(/[◇◆★☆●○■□▲△]/g, '')
-                        .trim() || '(AI 返回为空)';
+                        .trim();
+                    
+                    if (fallback && fallback.length > 10 && !fallback.startsWith('{')) {
+                        console.warn('[callAI] ⚠️ 使用原始文本作为fallback');
+                        return fallback;
+                    }
+                    
+                    throw new Error('API返回了空内容，无法提取有效文本。请检查API配置和模型响应。');
                 }
                 
                 return content;
                 
             } catch (err) {
                 console.error("[callAI] 错误详情:", err);
-                if (rawText) console.log("[callAI] 原始返回内容:", rawText.substring(0, 500));
+                console.log("[callAI] 原始返回内容:", rawText.substring(0, 500));
                 throw err;
             }
         }
@@ -15304,6 +19672,15 @@ function showLorebookPage() {
         if (dataMap.bubbleColor) {
             document.documentElement.style.setProperty('--bubble-bg', dataMap.bubbleColor);
         }
+        
+        // 恢复自定义字体
+        if (dataMap.customFontUrl && dataMap.customFontName) {
+            // 填充输入框
+            document.getElementById('custom-font-input').value = dataMap.customFontUrl;
+            document.getElementById('custom-font-name-input').value = dataMap.customFontName;
+            // 加载并应用全局字体
+            loadCustomFont(dataMap.customFontUrl, dataMap.customFontName, false);
+        }
     }
 
 // --- 全局表情包管理逻辑 ---
@@ -15328,7 +19705,7 @@ function showStickerPage() {
     // 确保显示列表视图
     const listView = document.getElementById('sticker-list-view');
     const detailView = document.getElementById('sticker-detail-view');
-    if (listView) listView.style.display = 'block';
+    if (listView) listView.style.display = 'flex';
     if (detailView) detailView.style.display = 'none';
     currentStickerCategoryId = null;
     renderStickerCategories();
@@ -15405,7 +19782,7 @@ async function openStickerCategoryDetail(id) {
     const detailView = document.getElementById('sticker-detail-view');
     
     if (listView) listView.style.display = 'none';
-    if (detailView) detailView.style.display = 'block';
+    if (detailView) detailView.style.display = 'flex';
     
     await renderStickerCategoryDetail();
 }
@@ -15415,7 +19792,7 @@ function backToStickerList() {
     const listView = document.getElementById('sticker-list-view');
     const detailView = document.getElementById('sticker-detail-view');
     
-    if (listView) listView.style.display = 'block';
+    if (listView) listView.style.display = 'flex';
     if (detailView) detailView.style.display = 'none';
     
     currentStickerCategoryId = null;
@@ -15446,8 +19823,8 @@ async function renderStickerCategoryDetail() {
                     <button onclick="exportStickerCategory(${cat.id})" style="padding:8px 16px; background:var(--ins-pink-light); color:var(--ins-pink); border:none; border-radius:8px; font-size:14px; font-weight:500;">导出</button>
                     <input type="file" id="import-sticker-json-detail" accept=".json" style="display:none" onchange="importStickerCategory(this)">
                     <button onclick="document.getElementById('import-sticker-json-detail').click()" style="padding:8px 16px; background:#f2f2f7; color:#666; border:none; border-radius:8px; font-size:14px; font-weight:500;">导入</button>
-                    <input type="file" id="batch-import-sticker-txt" accept=".txt,.text,.md" style="display:none" onchange="batchImportStickersFromText(this)">
-                    <button onclick="document.getElementById('batch-import-sticker-txt').click()" style="padding:8px 16px; background:#e8f5e9; color:#2e7d32; border:none; border-radius:8px; font-size:14px; font-weight:500;" title="支持.txt/.md文件，格式：描述：图片链接">批量导入</button>
+                    <input type="file" id="batch-import-sticker-txt" accept=".txt,.text,.md,.docx,.doc" style="display:none" onchange="batchImportStickersFromText(this)">
+                    <button onclick="document.getElementById('batch-import-sticker-txt').click()" style="padding:8px 16px; background:#e8f5e9; color:#2e7d32; border:none; border-radius:8px; font-size:14px; font-weight:500;" title="支持.txt/.md/.docx文件，格式：描述：图片链接">批量导入</button>
                 </div>
             </div>
             
@@ -15459,7 +19836,7 @@ async function renderStickerCategoryDetail() {
                 </div>
                 ${(cat.stickers || []).map((s, idx) => `
                     <div class="sticker-grid-item" onclick="previewSticker(${idx})">
-                        <div class="sticker-img" style="background-image:url(${s.url})"></div>
+                        <img src="${s.url}" class="sticker-img" style="object-fit:cover;" onerror="this.onerror=null; this.style.cssText='width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px;'; this.outerHTML='<div class=\\'sticker-img\\' style=\\'display:flex; align-items:center; justify-content:center; background:#f5f5f5; color:#ccc; font-size:10px;\\'>失败</div>';" />
                         ${s.description ? `<div class="sticker-desc-tag">AI可识</div>` : ''}
                         <div class="sticker-del-btn" onclick="deleteSticker(${idx}, event)">
                             <svg style="width:12px; height:12px; stroke:#fff; stroke-width:2;" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
@@ -15694,105 +20071,39 @@ async function batchImportStickersFromText(input) {
         return;
     }
     
+    const fileName = file.name.toLowerCase();
+    const isDocx = fileName.endsWith('.docx') || fileName.endsWith('.doc');
+    
+    // 如果是 .docx 文件，使用 JSZip 解析
+    if (isDocx) {
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            const zip = await JSZip.loadAsync(arrayBuffer);
+            const docXml = await zip.file('word/document.xml').async('string');
+            
+            // 简单提取文本内容（提取 <w:t> 标签中的文本）
+            const textMatches = docXml.match(/<w:t[^>]*>([^<]+)<\/w:t>/g) || [];
+            const extractedText = textMatches.map(match => {
+                const content = match.replace(/<w:t[^>]*>/, '').replace(/<\/w:t>/, '');
+                return content;
+            }).join('');
+            
+            // 处理提取的文本
+            await processStickerText(extractedText, input);
+        } catch (err) {
+            console.error('解析 .docx 文件失败:', err);
+            alert('解析 Word 文档失败，请确保文件格式正确。\n建议：将 Word 文档另存为 .txt 纯文本文件后再导入。\n\n错误信息: ' + err.message);
+            input.value = '';
+        }
+        return;
+    }
+    
+    // 处理纯文本文件 (.txt, .md 等)
     const reader = new FileReader();
     reader.onload = async (e) => {
         try {
             const text = e.target.result;
-            const lines = text.split(/\r?\n/).filter(line => line.trim());
-            
-            if (lines.length === 0) {
-                alert('文件为空或格式不正确');
-                input.value = '';
-                return;
-            }
-            
-            const stickers = [];
-            let successCount = 0;
-            let failCount = 0;
-            const errors = [];
-            
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i].trim();
-                if (!line) continue;
-                
-                // 解析格式：描述：url 或 描述:url（支持中文和英文冒号）
-                const match = line.match(/^(.+?)[：:]\s*(.+)$/);
-                if (match) {
-                    const description = match[1].trim();
-                    const url = match[2].trim();
-                    
-                    // 验证URL格式
-                    if (url && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:image'))) {
-                        stickers.push({
-                            url: url,
-                            description: description,
-                            created_at: Date.now()
-                        });
-                        successCount++;
-                    } else {
-                        failCount++;
-                        errors.push(`第${i+1}行：URL格式不正确 - ${line}`);
-                    }
-                } else {
-                    // 如果没有冒号，尝试作为纯URL处理
-                    if (line.startsWith('http://') || line.startsWith('https://') || line.startsWith('data:image')) {
-                        stickers.push({
-                            url: line,
-                            description: '',
-                            created_at: Date.now()
-                        });
-                        successCount++;
-                    } else {
-                        failCount++;
-                        errors.push(`第${i+1}行：格式不正确 - ${line}`);
-                    }
-                }
-            }
-            
-            if (stickers.length === 0) {
-                alert('未能解析出任何表情包。\n格式应为：描述：图片链接\n例如：一只猫：https://example.com/cat.jpg');
-                input.value = '';
-                return;
-            }
-            
-            // 添加到分类
-            const cat = await db.sticker_categories.get(currentStickerCategoryId);
-            if (!cat) {
-                alert('分类不存在');
-                input.value = '';
-                return;
-            }
-            
-            if (!cat.stickers) cat.stickers = [];
-            cat.stickers.push(...stickers);
-            await db.sticker_categories.put(cat);
-            
-            // 显示结果
-            let message = `✅ 成功导入 ${successCount} 个表情包`;
-            if (failCount > 0) {
-                message += `\n❌ 失败 ${failCount} 个`;
-                if (errors.length <= 5) {
-                    message += '\n\n错误详情：\n' + errors.join('\n');
-                } else {
-                    message += `\n\n前5个错误：\n${errors.slice(0, 5).join('\n')}\n...还有${errors.length - 5}个错误`;
-                }
-                message += '\n\n提示：格式应为"描述：图片链接"，例如：\n一只猫：https://example.com/cat.jpg';
-            }
-            
-            // 使用更友好的提示方式
-            if (failCount === 0) {
-                alert(message);
-            } else {
-                // 如果有错误，使用confirm让用户选择是否查看详情
-                const showDetails = confirm(message + '\n\n是否查看详细错误信息？');
-                if (showDetails && errors.length > 0) {
-                    alert('详细错误信息：\n\n' + errors.join('\n'));
-                }
-            }
-            
-            // 刷新页面
-            renderStickerCategoryDetail();
-            input.value = '';
+            await processStickerText(text, input);
         } catch (err) {
             console.error('批量导入失败:', err);
             alert('导入失败: ' + err.message);
@@ -15802,26 +20113,139 @@ async function batchImportStickersFromText(input) {
     reader.readAsText(file, 'UTF-8');
 }
 
+// 处理表情包文本内容的通用函数
+async function processStickerText(text, input) {
+    try {
+        const lines = text.split(/\r?\n/).filter(line => line.trim());
+        
+        if (lines.length === 0) {
+            alert('文件为空或格式不正确');
+            input.value = '';
+            return;
+        }
+        
+        const stickers = [];
+        let successCount = 0;
+        let failCount = 0;
+        const errors = [];
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            
+            // 解析格式：描述：url 或 描述:url（支持中文和英文冒号）
+            const match = line.match(/^(.+?)[：:]\s*(.+)$/);
+            if (match) {
+                const description = match[1].trim();
+                const url = match[2].trim();
+                
+                // 验证URL格式
+                if (url && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:image'))) {
+                    stickers.push({
+                        url: url,
+                        description: description,
+                        created_at: Date.now()
+                    });
+                    successCount++;
+                } else {
+                    failCount++;
+                    errors.push(`第${i+1}行：URL格式不正确 - ${line}`);
+                }
+            } else {
+                // 如果没有冒号，尝试作为纯URL处理
+                if (line.startsWith('http://') || line.startsWith('https://') || line.startsWith('data:image')) {
+                    stickers.push({
+                        url: line,
+                        description: '',
+                        created_at: Date.now()
+                    });
+                    successCount++;
+                } else {
+                    failCount++;
+                    errors.push(`第${i+1}行：格式不正确 - ${line}`);
+                }
+            }
+        }
+        
+        if (stickers.length === 0) {
+            alert('未能解析出任何表情包。\n格式应为：描述：图片链接\n例如：一只猫：https://example.com/cat.jpg');
+            input.value = '';
+            return;
+        }
+        
+        // 添加到分类
+        const cat = await db.sticker_categories.get(currentStickerCategoryId);
+        if (!cat) {
+            alert('分类不存在');
+            input.value = '';
+            return;
+        }
+        
+        if (!cat.stickers) cat.stickers = [];
+        cat.stickers.push(...stickers);
+        await db.sticker_categories.put(cat);
+        
+        // 显示结果
+        let message = `✅ 成功导入 ${successCount} 个表情包`;
+        if (failCount > 0) {
+            message += `\n❌ 失败 ${failCount} 个`;
+            if (errors.length <= 5) {
+                message += '\n\n错误详情：\n' + errors.join('\n');
+            } else {
+                message += `\n\n前5个错误：\n${errors.slice(0, 5).join('\n')}\n...还有${errors.length - 5}个错误`;
+            }
+            message += '\n\n提示：格式应为"描述：图片链接"，例如：\n一只猫：https://example.com/cat.jpg';
+        }
+        
+        // 使用更友好的提示方式
+        if (failCount === 0) {
+            alert(message);
+        } else {
+            // 如果有错误，使用confirm让用户选择是否查看详情
+            const showDetails = confirm(message + '\n\n是否查看详细错误信息？');
+            if (showDetails && errors.length > 0) {
+                alert('详细错误信息：\n\n' + errors.join('\n'));
+            }
+        }
+        
+        // 刷新页面
+        renderStickerCategoryDetail();
+        input.value = '';
+    } catch (err) {
+        console.error('处理表情包文本失败:', err);
+        alert('导入失败: ' + err.message);
+        input.value = '';
+    }
+}
+
 // 确保函数在全局作用域可访问
 window.importStickerCategory = importStickerCategory;
 window.openStickerCategoryDetail = openStickerCategoryDetail;
 window.backToStickerList = backToStickerList;
 window.showCreateCategoryModal = showCreateCategoryModal;
 window.batchImportStickersFromText = batchImportStickersFromText;
+window.processStickerText = processStickerText;
+window.switchStickerCategory = switchStickerCategory;
+window.searchStickers = searchStickers;
+window.detectAndSuggestStickers = detectAndSuggestStickers;
+window.sendSuggestedSticker = sendSuggestedSticker;
+
+// 当前选中的表情包分类ID
+let currentActiveStickerCategoryId = null;
 
 // 更新聊天面板中的表情列表（在打开面板时调用）
 // 注意：用户可以看到所有表情包，但角色只能使用挂载的
 async function updateChatStickerPanel() {
-    const stickerPanel = document.getElementById('sticker-panel');
-    if (!stickerPanel) return;
-    
-    let html = '';
+    const tabsContainer = document.getElementById('sticker-category-tabs');
+    const contentContainer = document.getElementById('sticker-content');
+    if (!tabsContainer || !contentContainer) return;
     
     // 获取所有表情包分类（用户可以看到所有）
     const allCategories = await db.sticker_categories.toArray();
     
     if (allCategories.length === 0) {
-        stickerPanel.innerHTML = `<div style="text-align:center; grid-column:span 4; color:#999; margin-top:20px;">暂无表情包<br>请去【我-表情】添加</div>`;
+        tabsContainer.innerHTML = '';
+        contentContainer.innerHTML = `<div style="text-align:center; grid-column:span 4; color:#999; margin-top:20px;">暂无表情包<br>请去【我-表情】添加</div>`;
         return;
     }
     
@@ -15832,25 +20256,211 @@ async function updateChatStickerPanel() {
         mountedIds = char.mounted_sticker_categories || [];
     }
     
-    // 显示所有分类，用户可以看到所有，但标记哪些是挂载的（用于角色发送限制）
+    // 过滤出有表情包的分类
+    const validCategories = allCategories.filter(cat => cat.stickers && cat.stickers.length > 0);
+    
+    if (validCategories.length === 0) {
+        tabsContainer.innerHTML = '';
+        contentContainer.innerHTML = `<div style="text-align:center; grid-column:span 4; color:#999; margin-top:20px;">暂无表情包<br>请去【我-表情】添加</div>`;
+        return;
+    }
+    
+    // 如果还没有选中的分类，默认选中第一个
+    if (!currentActiveStickerCategoryId || !validCategories.find(c => c.id === currentActiveStickerCategoryId)) {
+        currentActiveStickerCategoryId = validCategories[0].id;
+    }
+    
+    // 生成分类标签
+    let tabsHtml = '';
+    for (const cat of validCategories) {
+        const isActive = cat.id === currentActiveStickerCategoryId;
+        const isMounted = mountedIds.includes(cat.id);
+        const mountTag = isMounted ? '✓' : '';
+        tabsHtml += `
+            <div class="sticker-category-tab ${isActive ? 'active' : ''}" onclick="switchStickerCategory(${cat.id})" style="
+                flex-shrink: 0;
+                padding: 10px 16px;
+                font-size: 13px;
+                color: ${isActive ? 'var(--ins-pink)' : '#666'};
+                border-bottom: 2px solid ${isActive ? 'var(--ins-pink)' : 'transparent'};
+                cursor: pointer;
+                white-space: nowrap;
+                transition: all 0.2s;
+            ">
+                ${cat.name} ${mountTag}
+            </div>
+        `;
+    }
+    tabsContainer.innerHTML = tabsHtml;
+    
+    // 显示当前选中分类的表情包
+    const currentCategory = validCategories.find(c => c.id === currentActiveStickerCategoryId);
+    if (!currentCategory) return;
+    
+    let contentHtml = '';
+    currentCategory.stickers.forEach(s => {
+        const safeUrl = s.url.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        const safeDesc = (s.description || '').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        contentHtml += `<div class="emoji-item" onclick="sendGlobalSticker(${currentCategory.id}, '${safeUrl}')" style="display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer;">
+            <img src="${s.url}" style="width:60px; height:60px; border-radius:8px; object-fit:cover;" onerror="this.onerror=null; this.style.cssText='width:60px; height:60px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px;'; this.outerHTML='<div style=\\'width:60px; height:60px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px; color:#ccc; font-size:10px;\\'>失败</div>';" />
+            ${safeDesc ? `<div style="font-size:10px; color:#999; text-align:center; max-width:60px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${safeDesc}</div>` : ''}
+        </div>`;
+    });
+    
+    contentContainer.innerHTML = contentHtml;
+}
+
+// 切换表情包分类
+async function switchStickerCategory(categoryId) {
+    currentActiveStickerCategoryId = categoryId;
+    // 清空搜索框
+    const searchInput = document.getElementById('sticker-search-input');
+    if (searchInput) searchInput.value = '';
+    await updateChatStickerPanel();
+}
+
+// 搜索表情包
+async function searchStickers(keyword) {
+    const contentContainer = document.getElementById('sticker-content');
+    const tabsContainer = document.getElementById('sticker-category-tabs');
+    if (!contentContainer) return;
+    
+    keyword = keyword.trim().toLowerCase();
+    
+    // 如果搜索为空，恢复正常显示
+    if (!keyword) {
+        if (tabsContainer) tabsContainer.style.display = 'flex';
+        await updateChatStickerPanel();
+        return;
+    }
+    
+    // 隐藏分类标签
+    if (tabsContainer) tabsContainer.style.display = 'none';
+    
+    // 获取所有表情包分类
+    const allCategories = await db.sticker_categories.toArray();
+    
+    // 搜索匹配的表情包
+    let matchedStickers = [];
     for (const cat of allCategories) {
         if (cat.stickers && cat.stickers.length > 0) {
-            const isMounted = mountedIds.includes(cat.id);
-            const mountTag = isMounted ? '<span style="font-size:10px; color:#2e7d32; margin-left:4px;">✓已挂载</span>' : '<span style="font-size:10px; color:#999; margin-left:4px;">未挂载</span>';
-            html += `<div style="grid-column:1/-1; font-size:12px; color:#999; margin:10px 0 5px; font-weight:500;">${cat.name}${mountTag}</div>`;
             cat.stickers.forEach(s => {
-                const safeUrl = s.url.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                // 用户发送：所有表情包都可以点击发送（不限制）
-                html += `<div class="emoji-item" onclick="sendGlobalSticker(${cat.id}, '${safeUrl}')" style="background-image:url(${s.url}); background-size:cover; background-position:center; width:60px; height:60px; border-radius:8px; cursor:pointer;"></div>`;
+                if (s.description && s.description.toLowerCase().includes(keyword)) {
+                    matchedStickers.push({
+                        ...s,
+                        categoryId: cat.id,
+                        categoryName: cat.name
+                    });
+                }
             });
         }
     }
     
-    if (html === '') {
-        stickerPanel.innerHTML = `<div style="text-align:center; grid-column:span 4; color:#999; margin-top:20px;">暂无表情包<br>请去【我-表情】添加</div>`;
-    } else {
-        stickerPanel.innerHTML = html;
+    // 显示搜索结果
+    if (matchedStickers.length === 0) {
+        contentContainer.innerHTML = `<div style="text-align:center; grid-column:span 4; color:#999; margin-top:20px;">未找到相关表情包</div>`;
+        return;
     }
+    
+    let contentHtml = '';
+    matchedStickers.forEach(s => {
+        const safeUrl = s.url.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        const safeDesc = (s.description || '').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        contentHtml += `<div class="emoji-item" onclick="sendGlobalSticker(${s.categoryId}, '${safeUrl}')" style="display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer;">
+            <img src="${s.url}" style="width:60px; height:60px; border-radius:8px; object-fit:cover;" onerror="this.onerror=null; this.style.cssText='width:60px; height:60px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px;'; this.outerHTML='<div style=\\'width:60px; height:60px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px; color:#ccc; font-size:10px;\\'>失败</div>';" />
+            ${safeDesc ? `<div style="font-size:10px; color:#999; text-align:center; max-width:60px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${safeDesc}</div>` : ''}
+        </div>`;
+    });
+    
+    contentContainer.innerHTML = contentHtml;
+}
+
+// 智能表情推荐（在输入框输入时触发）
+let stickerSuggestionDebounce = null;
+async function detectAndSuggestStickers(inputText) {
+    const suggestionBar = document.getElementById('sticker-suggestion-bar');
+    if (!suggestionBar) return;
+    
+    // 清除之前的防抖
+    if (stickerSuggestionDebounce) {
+        clearTimeout(stickerSuggestionDebounce);
+    }
+    
+    // 防抖：300ms 后执行
+    stickerSuggestionDebounce = setTimeout(async () => {
+        const text = inputText.trim().toLowerCase();
+        
+        // 如果输入为空或太短，隐藏推荐栏
+        if (!text || text.length < 2) {
+            suggestionBar.style.display = 'none';
+            return;
+        }
+        
+        // 获取所有表情包
+        const allCategories = await db.sticker_categories.toArray();
+        
+        // 查找匹配的表情包（最多显示 8 个）
+        let matchedStickers = [];
+        for (const cat of allCategories) {
+            if (cat.stickers && cat.stickers.length > 0) {
+                for (const s of cat.stickers) {
+                    if (s.description && s.description.toLowerCase().includes(text)) {
+                        matchedStickers.push({
+                            ...s,
+                            categoryId: cat.id
+                        });
+                        if (matchedStickers.length >= 8) break;
+                    }
+                }
+                if (matchedStickers.length >= 8) break;
+            }
+        }
+        
+        // 如果没有匹配的，隐藏推荐栏
+        if (matchedStickers.length === 0) {
+            suggestionBar.style.display = 'none';
+            return;
+        }
+        
+        // 显示推荐的表情包
+        let html = '';
+        matchedStickers.forEach(s => {
+            const safeUrl = s.url.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            html += `<div onclick="sendSuggestedSticker(${s.categoryId}, '${safeUrl}')" style="
+                display: inline-flex;
+                flex-direction: column;
+                align-items: center;
+                margin-right: 8px;
+                cursor: pointer;
+                vertical-align: top;
+            ">
+                <img src="${s.url}" style="width:50px; height:50px; border-radius:8px; object-fit:cover; border: 2px solid transparent; transition: border-color 0.2s;" onmouseover="this.style.borderColor='var(--ins-pink)'" onmouseout="this.style.borderColor='transparent'" onerror="this.onerror=null; this.style.cssText='width:50px; height:50px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px;'; this.outerHTML='<div style=\\'width:50px; height:50px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px; color:#ccc; font-size:9px;\\'>失败</div>';" />
+            </div>`;
+        });
+        
+        suggestionBar.innerHTML = html;
+        suggestionBar.style.display = 'block';
+    }, 300);
+}
+
+// 发送推荐的表情包
+async function sendSuggestedSticker(catId, url) {
+    // 清空输入框
+    const inputBox = document.getElementById('chat-input-box');
+    if (inputBox) inputBox.value = '';
+    
+    // 隐藏推荐栏
+    const suggestionBar = document.getElementById('sticker-suggestion-bar');
+    if (suggestionBar) suggestionBar.style.display = 'none';
+    
+    // 隐藏发送按钮，显示更多按钮
+    const btnSend = document.getElementById('btn-send');
+    const btnMore = document.getElementById('btn-more');
+    if (btnSend) btnSend.style.display = 'none';
+    if (btnMore) btnMore.style.display = 'flex';
+    
+    // 发送表情包
+    await sendGlobalSticker(catId, url);
 }
 
 async function sendGlobalSticker(catId, url) {
@@ -15894,6 +20504,26 @@ async function sendGlobalSticker(catId, url) {
     await setChatHistory(char, accountId, history);
     appendMessageToUI('user', msgContent);
     closeChatPanel();
+    
+    // ✅ 如果是联机好友，发送表情包到服务器
+    if (char.isOnlineFriend && char.onlineData?.wx_account) {
+        const onlineUserChar = await getOrCreateOnlineUserChar();
+        
+        if (onlineUserChar && onlineConnected) {
+            const fromWxAccount = onlineUserChar.identity.account;
+            const toWxAccount = char.onlineData.wx_account;
+            const sent = sendOnlineMessage(toWxAccount, msgContent, fromWxAccount);
+            if (sent) {
+                console.log('[Online] 表情包已发送到服务器:', url);
+            } else {
+                console.warn('[Online] 表情包发送失败');
+                showToast('表情包发送失败，请检查服务器连接');
+            }
+        } else {
+            console.warn('[Online] 无法发送联机表情包：未连接服务器');
+            showToast('请确保已连接服务器');
+        }
+    }
     
     // ✅ 不再自动触发 AI 回复，需要用户点击"接受回复"按钮
     // triggerAiReply();
@@ -16055,6 +20685,178 @@ function deductPhoneBalance(amount) {
     return true;
 }
 
+// 显示支付方式选择弹窗（余额 or 亲属卡）
+async function showPaymentMethodSelection(amount, description) {
+    return new Promise(async (resolve) => {
+        const accountId = getCurrentAccountId();
+        if (!accountId) {
+            resolve({ success: false, method: null });
+            return;
+        }
+        
+        // 获取可用的亲属卡
+        const user = await db.characters.get(parseInt(accountId));
+        const familyCards = user?.identity?.familyCardsReceived || [];
+        
+        // 获取联机好友的亲属卡
+        let onlineFamilyCards = [];
+        if (onlineConnected && onlineSocket) {
+            const onlineUserChar = await getOrCreateOnlineUserChar();
+            if (onlineUserChar) {
+                const myWxAccount = onlineUserChar.identity.account;
+                // 从服务器获取亲属卡列表（这里我们需要先实现同步获取）
+                // 暂时从本地缓存获取
+                onlineFamilyCards = JSON.parse(localStorage.getItem('online_family_cards_received') || '[]');
+            }
+        }
+        
+        const allFamilyCards = [...familyCards, ...onlineFamilyCards];
+        
+        // 如果没有亲属卡，直接使用余额
+        if (allFamilyCards.length === 0) {
+            const success = deductPhoneBalance(amount);
+            resolve({ success, method: 'balance' });
+            return;
+        }
+        
+        // 创建选择弹窗
+        const modal = document.createElement('div');
+        modal.className = 'payment-method-modal';
+        modal.innerHTML = `
+            <div class="payment-method-overlay"></div>
+            <div class="payment-method-content">
+                <div class="payment-method-header">
+                    <span>选择支付方式</span>
+                    <span class="payment-method-amount">¥${amount.toFixed(2)}</span>
+                </div>
+                <div class="payment-method-desc">${description || '消费'}</div>
+                <div class="payment-method-list">
+                    <div class="payment-method-item" data-method="balance">
+                        <div class="payment-method-icon">💰</div>
+                        <div class="payment-method-name">
+                            <div>零钱</div>
+                            <div class="payment-method-sub">余额: ¥${getPhoneBalance().toFixed(2)}</div>
+                        </div>
+                        <div class="payment-method-radio"></div>
+                    </div>
+                    ${allFamilyCards.map((card, index) => {
+                        const isOnline = card.from_wx_account !== undefined;
+                        const cardName = isOnline ? '联机好友亲属卡' : '亲属卡';
+                        const monthlyLimit = isOnline ? card.monthly_limit : card.monthlyLimit;
+                        const usedThisMonth = isOnline ? card.used_this_month : card.usedThisMonth;
+                        const limitText = monthlyLimit > 0 ? `本月剩余: ¥${(monthlyLimit - usedThisMonth).toFixed(2)}` : '不限额度';
+                        
+                        return `
+                            <div class="payment-method-item" data-method="family_card" data-card-index="${index}" data-is-online="${isOnline}">
+                                <div class="payment-method-icon">💳</div>
+                                <div class="payment-method-name">
+                                    <div>${cardName}</div>
+                                    <div class="payment-method-sub">${limitText}</div>
+                                </div>
+                                <div class="payment-method-radio"></div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+                <div class="payment-method-buttons">
+                    <button class="payment-method-cancel">取消</button>
+                    <button class="payment-method-confirm">确认支付</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        let selectedMethod = 'balance';
+        let selectedCardIndex = -1;
+        let selectedIsOnline = false;
+        
+        // 默认选中余额
+        modal.querySelector('[data-method="balance"] .payment-method-radio').classList.add('selected');
+        
+        // 选择支付方式
+        modal.querySelectorAll('.payment-method-item').forEach(item => {
+            item.addEventListener('click', () => {
+                modal.querySelectorAll('.payment-method-radio').forEach(r => r.classList.remove('selected'));
+                item.querySelector('.payment-method-radio').classList.add('selected');
+                selectedMethod = item.dataset.method;
+                selectedCardIndex = parseInt(item.dataset.cardIndex) || -1;
+                selectedIsOnline = item.dataset.isOnline === 'true';
+            });
+        });
+        
+        // 取消按钮
+        modal.querySelector('.payment-method-cancel').addEventListener('click', () => {
+            document.body.removeChild(modal);
+            resolve({ success: false, method: null });
+        });
+        
+        // 确认支付按钮
+        modal.querySelector('.payment-method-confirm').addEventListener('click', async () => {
+            document.body.removeChild(modal);
+            
+            if (selectedMethod === 'balance') {
+                const success = deductPhoneBalance(amount);
+                resolve({ success, method: 'balance' });
+            } else if (selectedMethod === 'family_card' && selectedCardIndex >= 0) {
+                const card = allFamilyCards[selectedCardIndex];
+                
+                if (selectedIsOnline) {
+                    // 使用联机亲属卡
+                    const onlineUserChar = await getOrCreateOnlineUserChar();
+                    if (onlineUserChar && onlineConnected) {
+                        onlineSocket.send(JSON.stringify({
+                            type: 'use_family_card',
+                            my_wx_account: onlineUserChar.identity.account,
+                            payer_wx_account: card.from_wx_account,
+                            amount: amount,
+                            description: description || '消费'
+                        }));
+                        // 等待服务器响应（暂时假设成功）
+                        showToast('亲属卡支付中...');
+                        resolve({ success: true, method: 'family_card', isOnline: true });
+                    } else {
+                        showToast('未连接服务器');
+                        resolve({ success: false, method: null });
+                    }
+                } else {
+                    // 使用本地亲属卡
+                    const monthlyLimit = card.monthlyLimit || 0;
+                    const usedThisMonth = card.usedThisMonth || 0;
+                    
+                    // 检查额度
+                    if (monthlyLimit > 0 && (usedThisMonth + amount) > monthlyLimit) {
+                        showToast('亲属卡本月额度不足');
+                        resolve({ success: false, method: null });
+                        return;
+                    }
+                    
+                    // 更新使用金额
+                    card.usedThisMonth = (usedThisMonth || 0) + amount;
+                    if (!card.records) card.records = [];
+                    card.records.push({
+                        amount: amount,
+                        description: description || '消费',
+                        time: Date.now()
+                    });
+                    
+                    // 保存到用户数据
+                    await db.characters.put(user);
+                    
+                    // 通知付款方（角色）
+                    const payerChar = await db.characters.get(card.charId);
+                    if (payerChar) {
+                        // 发送消息通知
+                        showToast('亲属卡支付成功');
+                    }
+                    
+                    resolve({ success: true, method: 'family_card', isOnline: false });
+                }
+            }
+        });
+    });
+}
+
 // 充值记录管理
 function getRechargeHistory() {
     return JSON.parse(localStorage.getItem('phone_recharge_history') || '[]');
@@ -16185,6 +20987,1319 @@ function submitRecharge() {
 // 导出到全局作用域
 window.showPhoneRechargePage = showPhoneRechargePage;
 window.hidePhoneRechargePage = hidePhoneRechargePage;
+
+// 借钱页面相关函数
+let selectedLoanAmount = 0;
+let selectedLoanTerm = 6;
+
+function showLoanPage() {
+    const page = document.getElementById('loan-page');
+    page.style.display = 'flex';
+    page.offsetHeight;
+    page.classList.add('slide-in');
+    
+    // 重置选择
+    selectedLoanAmount = 0;
+    selectedLoanTerm = 6;
+    document.getElementById('loan-term-select').value = '6';
+    document.getElementById('loan-custom-input').value = '';
+    updateLoanButtons();
+    updateLoanInfo();
+    loadLoanHistory();
+}
+
+function hideLoanPage() {
+    const page = document.getElementById('loan-page');
+    page.classList.remove('slide-in');
+    setTimeout(() => {
+        page.style.display = 'none';
+    }, 300);
+}
+
+function selectLoanAmount(amount) {
+    selectedLoanAmount = amount;
+    // 清除自定义输入
+    document.getElementById('loan-custom-input').value = '';
+    // 更新按钮状态
+    updateLoanButtons();
+    updateLoanInfo();
+}
+
+function handleCustomLoanAmount(value) {
+    const amount = parseInt(value) || 0;
+    if (amount >= 100 && amount <= 50000) {
+        selectedLoanAmount = amount;
+        // 清除预设按钮选择
+        document.querySelectorAll('.loan-amount-btn').forEach(btn => {
+            btn.classList.remove('selected');
+        });
+        updateLoanInfo();
+    } else {
+        selectedLoanAmount = 0;
+    }
+    updateLoanButtons();
+}
+
+function updateLoanButtons() {
+    const submitBtn = document.getElementById('loan-submit-btn');
+    if (selectedLoanAmount > 0) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = `立即借款 ¥${selectedLoanAmount.toLocaleString()}`;
+    } else {
+        submitBtn.disabled = true;
+        submitBtn.textContent = '请选择借款金额';
+    }
+}
+
+function updateLoanInfo() {
+    selectedLoanTerm = parseInt(document.getElementById('loan-term-select').value) || 6;
+    
+    if (selectedLoanAmount > 0) {
+        // 计算总还款额：本金 + 利息
+        // 日利率 0.05%，月利率约 1.5%
+        const monthlyRate = 0.015;
+        const totalInterest = selectedLoanAmount * monthlyRate * selectedLoanTerm;
+        const totalAmount = selectedLoanAmount + totalInterest;
+        
+        document.getElementById('loan-total-amount').textContent = `¥${totalAmount.toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    } else {
+        document.getElementById('loan-total-amount').textContent = '¥0.00';
+    }
+}
+
+async function submitLoan() {
+    if (selectedLoanAmount <= 0) {
+        return;
+    }
+    
+    // 计算还款信息
+    const monthlyRate = 0.015;
+    const totalInterest = selectedLoanAmount * monthlyRate * selectedLoanTerm;
+    const totalAmount = selectedLoanAmount + totalInterest;
+    const monthlyPayment = totalAmount / selectedLoanTerm;
+    
+    // 确认对话框
+    const confirmMsg = `确认借款信息：\n\n借款金额：¥${selectedLoanAmount.toLocaleString()}\n借款期限：${selectedLoanTerm}个月\n日利率：0.05%\n预计还款总额：¥${totalAmount.toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}\n每月还款：¥${monthlyPayment.toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    
+    if (confirm(confirmMsg)) {
+        if (!currentMyCharId) {
+            alert('请先选择一个 User 身份');
+            return;
+        }
+        
+        // 添加借款金额到余额
+        const user = await db.characters.get(parseInt(currentMyCharId));
+        if (!user) {
+            alert('未找到用户信息');
+            return;
+        }
+        
+        let userBalance = parseFloat(user.identity?.balance || 0);
+        userBalance = userBalance + selectedLoanAmount;
+        
+        if (!user.identity) user.identity = {};
+        user.identity.balance = userBalance.toFixed(2);
+        await db.characters.put(user);
+        
+        // 更新余额显示
+        await updateBalancePageDisplay();
+        await updateWalletBalanceDisplay();
+        
+        // 保存借款记录到本地存储
+        const now = Date.now();
+        const dueTime = now + (selectedLoanTerm * 12 * 60 * 60 * 1000); // 1个月=12小时
+        
+        const loanRecord = {
+            id: now,
+            amount: selectedLoanAmount,
+            term: selectedLoanTerm,
+            totalAmount: totalAmount,
+            monthlyPayment: monthlyPayment,
+            date: new Date().toISOString(),
+            dueTime: dueTime, // 到期时间戳
+            status: 'pending', // pending, repaid, overdue
+            paidAmount: 0, // 已还金额
+            remainingAmount: totalAmount, // 剩余应还金额
+            firstReminderSent: false, // 第一次提醒已发送
+            secondReminderSent: false, // 第二次提醒已发送
+            userId: currentMyCharId // 借款人ID
+        };
+        
+        let loanHistory = JSON.parse(localStorage.getItem('loanHistory') || '[]');
+        loanHistory.unshift(loanRecord);
+        localStorage.setItem('loanHistory', JSON.stringify(loanHistory));
+        
+        // 显示成功提示
+        alert(`借款成功\n\n借款金额：¥${selectedLoanAmount.toLocaleString()}\n已添加到钱包余额`);
+        
+        // 重置页面
+        selectedLoanAmount = 0;
+        document.getElementById('loan-custom-input').value = '';
+        document.querySelectorAll('.loan-amount-btn').forEach(btn => {
+            btn.classList.remove('selected');
+        });
+        updateLoanButtons();
+        updateLoanInfo();
+        loadLoanHistory();
+    }
+}
+
+function loadLoanHistory() {
+    const historyList = document.getElementById('loan-history-list');
+    const loanHistory = JSON.parse(localStorage.getItem('loanHistory') || '[]');
+    
+    if (loanHistory.length === 0) {
+        historyList.innerHTML = '<div class="loan-empty-state">暂无借款记录</div>';
+        return;
+    }
+    
+    historyList.innerHTML = loanHistory.map(record => {
+        const date = new Date(record.date);
+        const dateStr = date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+        const statusText = {
+            'pending': '待还款',
+            'repaid': '已还清',
+            'overdue': '已逾期'
+        };
+        
+        const remainingAmount = record.remainingAmount !== undefined ? record.remainingAmount : record.totalAmount;
+        const paidAmount = record.paidAmount || 0;
+        
+        return `
+            <div class="loan-history-item" onclick="showRepayPage(${record.id})" style="cursor: pointer;">
+                <div class="loan-history-info">
+                    <div class="loan-history-amount">¥${record.amount.toLocaleString()}</div>
+                    <div class="loan-history-date">${dateStr} · ${record.term}个月</div>
+                    ${record.status === 'pending' ? `<div style="font-size: 12px; color: #999; margin-top: 4px;">剩余应还：¥${remainingAmount.toFixed(2)}</div>` : ''}
+                </div>
+                <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px;">
+                    <div class="loan-history-status ${record.status}">${statusText[record.status]}</div>
+                    ${record.status === 'pending' ? '<div class="loan-repay-btn-small">还款</div>' : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// 初始化借款金额按钮点击事件
+document.addEventListener('DOMContentLoaded', function() {
+    // 为预设金额按钮添加选中状态切换
+    document.querySelectorAll('.loan-amount-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.loan-amount-btn').forEach(b => b.classList.remove('selected'));
+            this.classList.add('selected');
+        });
+    });
+});
+
+window.showLoanPage = showLoanPage;
+window.hideLoanPage = hideLoanPage;
+window.selectLoanAmount = selectLoanAmount;
+window.handleCustomLoanAmount = handleCustomLoanAmount;
+window.updateLoanInfo = updateLoanInfo;
+window.submitLoan = submitLoan;
+
+// =================
+// 还款功能
+// =================
+
+let currentRepayLoanId = null;
+let currentRepayLoan = null;
+let selectedRepayAmount = 0;
+
+// 显示还款页面
+async function showRepayPage(loanId) {
+    const page = document.getElementById('repay-page');
+    page.style.display = 'flex';
+    page.offsetHeight;
+    page.classList.add('slide-in');
+    
+    currentRepayLoanId = loanId;
+    
+    // 加载借款信息
+    const loanHistory = JSON.parse(localStorage.getItem('loanHistory') || '[]');
+    currentRepayLoan = loanHistory.find(loan => loan.id === loanId);
+    
+    if (!currentRepayLoan) {
+        alert('未找到借款记录');
+        hideRepayPage();
+        return;
+    }
+    
+    // 更新余额显示
+    await updateRepayBalance();
+    
+    // 更新页面信息
+    updateRepayPageInfo();
+    
+    // 重置选择
+    selectedRepayAmount = 0;
+    document.getElementById('repay-custom-input').value = '';
+    updateRepayButtons();
+}
+
+// 隐藏还款页面
+function hideRepayPage() {
+    const page = document.getElementById('repay-page');
+    page.classList.remove('slide-in');
+    setTimeout(() => {
+        page.style.display = 'none';
+    }, 300);
+    
+    currentRepayLoanId = null;
+    currentRepayLoan = null;
+    selectedRepayAmount = 0;
+}
+
+// 更新余额显示
+async function updateRepayBalance() {
+    if (!currentMyCharId) {
+        document.getElementById('repay-current-balance').textContent = '¥0.00';
+        return;
+    }
+    
+    const user = await db.characters.get(parseInt(currentMyCharId));
+    const balance = user?.identity?.balance || 0;
+    document.getElementById('repay-current-balance').textContent = `¥${parseFloat(balance).toFixed(2)}`;
+}
+
+// 更新还款页面信息
+function updateRepayPageInfo() {
+    if (!currentRepayLoan) return;
+    
+    const date = new Date(currentRepayLoan.date);
+    const dateStr = date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+    
+    const remainingAmount = currentRepayLoan.remainingAmount !== undefined ? currentRepayLoan.remainingAmount : currentRepayLoan.totalAmount;
+    const paidAmount = currentRepayLoan.paidAmount || 0;
+    const monthlyPayment = currentRepayLoan.monthlyPayment || 0;
+    
+    document.getElementById('repay-loan-amount').textContent = `¥${currentRepayLoan.amount.toLocaleString()}`;
+    document.getElementById('repay-loan-date').textContent = dateStr;
+    document.getElementById('repay-loan-term').textContent = `${currentRepayLoan.term}个月`;
+    document.getElementById('repay-total-amount').textContent = `¥${currentRepayLoan.totalAmount.toFixed(2)}`;
+    document.getElementById('repay-paid-amount').textContent = `¥${paidAmount.toFixed(2)}`;
+    document.getElementById('repay-remaining-amount').textContent = `¥${remainingAmount.toFixed(2)}`;
+    
+    // 更新还款选项
+    document.getElementById('repay-monthly-value').textContent = `¥${monthlyPayment.toFixed(2)}`;
+    document.getElementById('repay-half-value').textContent = `¥${(remainingAmount / 2).toFixed(2)}`;
+    document.getElementById('repay-all-value').textContent = `¥${remainingAmount.toFixed(2)}`;
+}
+
+// 选择还款金额
+function selectRepayAmount(type) {
+    if (!currentRepayLoan) return;
+    
+    const remainingAmount = currentRepayLoan.remainingAmount !== undefined ? currentRepayLoan.remainingAmount : currentRepayLoan.totalAmount;
+    const monthlyPayment = currentRepayLoan.monthlyPayment || 0;
+    
+    // 清除自定义输入
+    document.getElementById('repay-custom-input').value = '';
+    
+    // 清除其他按钮选中状态
+    document.querySelectorAll('#repay-page .loan-amount-btn').forEach(btn => {
+        btn.classList.remove('selected');
+    });
+    
+    // 设置选中金额
+    if (type === 'monthly') {
+        selectedRepayAmount = Math.min(monthlyPayment, remainingAmount);
+        event.target.closest('.loan-amount-btn').classList.add('selected');
+    } else if (type === 'half') {
+        selectedRepayAmount = remainingAmount / 2;
+        event.target.closest('.loan-amount-btn').classList.add('selected');
+    } else if (type === 'all') {
+        selectedRepayAmount = remainingAmount;
+        event.target.closest('.loan-amount-btn').classList.add('selected');
+    }
+    
+    updateRepayButtons();
+}
+
+// 处理自定义还款金额
+function handleCustomRepayAmount(value) {
+    const amount = parseFloat(value) || 0;
+    const remainingAmount = currentRepayLoan.remainingAmount !== undefined ? currentRepayLoan.remainingAmount : currentRepayLoan.totalAmount;
+    
+    if (amount > 0 && amount <= remainingAmount) {
+        selectedRepayAmount = amount;
+        // 清除预设按钮选择
+        document.querySelectorAll('#repay-page .loan-amount-btn').forEach(btn => {
+            btn.classList.remove('selected');
+        });
+    } else {
+        selectedRepayAmount = 0;
+    }
+    updateRepayButtons();
+}
+
+// 更新还款按钮状态
+function updateRepayButtons() {
+    const submitBtn = document.getElementById('repay-submit-btn');
+    if (selectedRepayAmount > 0 && currentRepayLoan) {
+        const remainingAmount = currentRepayLoan.remainingAmount !== undefined ? currentRepayLoan.remainingAmount : currentRepayLoan.totalAmount;
+        if (selectedRepayAmount <= remainingAmount) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = `确认还款 ¥${selectedRepayAmount.toFixed(2)}`;
+        } else {
+            submitBtn.disabled = true;
+            submitBtn.textContent = '还款金额不能超过剩余应还';
+        }
+    } else {
+        submitBtn.disabled = true;
+        submitBtn.textContent = '请选择还款金额';
+    }
+}
+
+// 提交还款
+async function submitRepay() {
+    if (!currentMyCharId || !currentRepayLoan || selectedRepayAmount <= 0) {
+        return;
+    }
+    
+    const user = await db.characters.get(parseInt(currentMyCharId));
+    if (!user) {
+        alert('未找到用户信息');
+        return;
+    }
+    
+    const remainingAmount = currentRepayLoan.remainingAmount !== undefined ? currentRepayLoan.remainingAmount : currentRepayLoan.totalAmount;
+    
+    if (selectedRepayAmount > remainingAmount) {
+        alert('还款金额不能超过剩余应还金额');
+        return;
+    }
+    
+    let userBalance = parseFloat(user.identity?.balance || 0);
+    
+    // 检查余额
+    if (userBalance < selectedRepayAmount) {
+        alert(`余额不足\n当前余额：¥${userBalance.toFixed(2)}\n需要：¥${selectedRepayAmount.toFixed(2)}`);
+        return;
+    }
+    
+    // 确认对话框
+    const confirmMsg = `确认还款信息：\n\n还款金额：¥${selectedRepayAmount.toFixed(2)}\n剩余应还：¥${remainingAmount.toFixed(2)}\n\n确认还款？`;
+    
+    if (confirm(confirmMsg)) {
+        // 扣款
+        userBalance = userBalance - selectedRepayAmount;
+        if (!user.identity) user.identity = {};
+        user.identity.balance = userBalance.toFixed(2);
+        await db.characters.put(user);
+        
+        // 更新余额显示
+        await updateRepayBalance();
+        await updateBalancePageDisplay();
+        await updateWalletBalanceDisplay();
+        
+        // 更新借款记录
+        const loanHistory = JSON.parse(localStorage.getItem('loanHistory') || '[]');
+        const loanIndex = loanHistory.findIndex(loan => loan.id === currentRepayLoanId);
+        
+        if (loanIndex !== -1) {
+            const loan = loanHistory[loanIndex];
+            const newPaidAmount = (loan.paidAmount || 0) + selectedRepayAmount;
+            const newRemainingAmount = remainingAmount - selectedRepayAmount;
+            
+            loan.paidAmount = newPaidAmount;
+            loan.remainingAmount = newRemainingAmount;
+            
+            // 如果全部还清，更新状态
+            if (newRemainingAmount <= 0.01) {
+                loan.status = 'repaid';
+                loan.remainingAmount = 0;
+            }
+            
+            loanHistory[loanIndex] = loan;
+            localStorage.setItem('loanHistory', JSON.stringify(loanHistory));
+            
+            // 更新当前显示的借款信息
+            currentRepayLoan = loan;
+        }
+        
+        // 显示成功提示
+        if (currentRepayLoan.remainingAmount <= 0.01) {
+            alert(`还款成功\n\n已还清全部借款`);
+            hideRepayPage();
+        } else {
+            alert(`还款成功\n\n还款金额：¥${selectedRepayAmount.toFixed(2)}\n剩余应还：¥${currentRepayLoan.remainingAmount.toFixed(2)}`);
+        }
+        
+        // 更新页面
+        updateRepayPageInfo();
+        selectedRepayAmount = 0;
+        document.getElementById('repay-custom-input').value = '';
+        document.querySelectorAll('#repay-page .loan-amount-btn').forEach(btn => {
+            btn.classList.remove('selected');
+        });
+        updateRepayButtons();
+        
+        // 刷新借款记录列表（如果还在借钱页面）
+        if (typeof loadLoanHistory === 'function') {
+            loadLoanHistory();
+        }
+    }
+}
+
+// 导出函数
+window.showRepayPage = showRepayPage;
+window.hideRepayPage = hideRepayPage;
+window.selectRepayAmount = selectRepayAmount;
+window.handleCustomRepayAmount = handleCustomRepayAmount;
+window.submitRepay = submitRepay;
+
+// =================
+// 借款逾期提醒系统
+// =================
+
+// 检查逾期借款并发送提醒
+async function checkOverdueLoans() {
+    const loanHistory = JSON.parse(localStorage.getItem('loanHistory') || '[]');
+    const now = Date.now();
+    
+    let hasChanges = false;
+    
+    for (let loan of loanHistory) {
+        // 只检查待还款状态的借款
+        if (loan.status !== 'pending' || !loan.dueTime) continue;
+        
+        const overdueTime = now - loan.dueTime;
+        
+        // 第一次提醒：刚逾期（0-5分钟内，避免重复检查）
+        if (overdueTime >= 0 && overdueTime < 5 * 60 * 1000 && !loan.firstReminderSent) {
+            await sendFirstReminder(loan);
+            loan.firstReminderSent = true;
+            loan.status = 'overdue';
+            hasChanges = true;
+            console.log(`[借款提醒] 第一次提醒已发送 - 借款ID: ${loan.id}`);
+        }
+        
+        // 第二次提醒：逾期12小时后
+        const secondReminderTime = 12 * 60 * 60 * 1000; // 12小时
+        if (overdueTime >= secondReminderTime && !loan.secondReminderSent) {
+            await sendSecondReminder(loan);
+            loan.secondReminderSent = true;
+            hasChanges = true;
+            console.log(`[借款提醒] 第二次提醒已发送 - 借款ID: ${loan.id}`);
+        }
+    }
+    
+    // 如果有变化，保存更新
+    if (hasChanges) {
+        localStorage.setItem('loanHistory', JSON.stringify(loanHistory));
+        // 刷新借款记录显示
+        if (typeof loadLoanHistory === 'function') {
+            loadLoanHistory();
+        }
+    }
+}
+
+// 第一次提醒：发短信给借款人本人
+async function sendFirstReminder(loan) {
+    if (!loan.userId) return;
+    
+    const user = await db.characters.get(parseInt(loan.userId));
+    if (!user) return;
+    
+    const borrowDate = new Date(loan.date).toLocaleDateString('zh-CN', { 
+        year: 'numeric', 
+        month: '2-digit', 
+        day: '2-digit' 
+    });
+    
+    const message = `【借款提醒】
+尊敬的用户，您于${borrowDate}借款¥${loan.amount.toLocaleString()}已到期，剩余应还金额¥${loan.remainingAmount.toFixed(2)}。
+
+请尽快还款，避免逾期影响信用。
+点击查看详情并还款。
+
+- 微信支付`;
+    
+    // 发送到信息App（短信形式）
+    await sendSystemSMS(loan.userId, message, '微信支付');
+    
+    console.log(`[第一次提醒] 已发送短信给用户 ${user.name}`);
+}
+
+// 第二次提醒：发短信给所有好友
+async function sendSecondReminder(loan) {
+    if (!loan.userId) return;
+    
+    const user = await db.characters.get(parseInt(loan.userId));
+    if (!user) return;
+    
+    const overdueHours = Math.floor((Date.now() - loan.dueTime) / (60 * 60 * 1000));
+    const overdueMonths = Math.floor(overdueHours / 12); // 12小时 = 1个月
+    
+    // 根据逾期时间显示不同的单位
+    let overdueText = '';
+    if (overdueMonths >= 1) {
+        overdueText = `${overdueMonths}个月`;
+    } else {
+        overdueText = `${overdueHours}小时`;
+    }
+    
+    const message = `【逾期提醒】${user.name}在微信借款¥${loan.amount.toLocaleString()}已逾期${overdueText}未还，剩余¥${loan.remainingAmount.toFixed(2)}，请提醒TA尽快还款。`;
+    
+    // 获取所有好友列表
+    const friends = await getAllFriends(loan.userId);
+    
+    // 发送给每个好友（短信形式）
+    for (let friend of friends) {
+        if (friend.type === 'local') {
+            // 本地角色：如果关联了User，发送短信
+            if (friend.linkedUserId) {
+                await sendSystemSMS(friend.linkedUserId, message, '微信支付');
+                console.log(`[第二次提醒] 已发送短信给角色 ${friend.name} 关联的User`);
+            }
+            // 同时添加到AI上下文提示
+            await addLoanReminderToCharContext(friend.id, message, user.name);
+            
+        } else if (friend.type === 'online') {
+            // 联机好友：发送短信到信息App
+            await sendSystemSMS(friend.id, message, '微信支付');
+            console.log(`[第二次提醒] 已发送短信给联机好友 ${friend.name}`);
+            
+        } else if (friend.type === 'user') {
+            // User类型：直接发送短信
+            await sendSystemSMS(friend.id, message, '微信支付');
+            console.log(`[第二次提醒] 已发送短信给User ${friend.name}`);
+        }
+    }
+    
+    console.log(`[第二次提醒] 已发送短信给 ${friends.length} 位好友`);
+}
+
+// 获取所有好友（包括本地角色和联机好友）
+async function getAllFriends(userId) {
+    const friends = [];
+    
+    // 1. 获取本地角色好友
+    const allChars = await db.characters.toArray();
+    for (let char of allChars) {
+        // 排除User类型和自己
+        if (char.type === 'User' || char.id === parseInt(userId)) continue;
+        friends.push({
+            id: char.id,
+            name: char.name,
+            type: 'local',
+            linkedUserId: char.linked_user_id // 关联的User ID
+        });
+    }
+    
+    // 2. 获取联机好友（如果有联机功能）
+    try {
+        // 从localStorage获取联机好友列表
+        const onlineFriends = JSON.parse(localStorage.getItem('onlineFriends') || '[]');
+        for (let friend of onlineFriends) {
+            if (friend.id && friend.id !== userId) {
+                friends.push({
+                    id: friend.accountId || friend.id, // 使用accountId作为接收短信的ID
+                    name: friend.name || friend.nickname || '联机好友',
+                    type: 'online',
+                    originalId: friend.id // 原始ID
+                });
+            }
+        }
+    } catch (e) {
+        console.warn('[获取联机好友失败]', e);
+    }
+    
+    // 3. 获取所有User类型的角色（他们也能收到短信）
+    const allUsers = allChars.filter(char => char.type === 'User' && char.id !== parseInt(userId));
+    for (let user of allUsers) {
+        friends.push({
+            id: user.id,
+            name: user.name,
+            type: 'user'
+        });
+    }
+    
+    return friends;
+}
+
+// 添加借款提醒到角色AI上下文
+async function addLoanReminderToCharContext(charId, message, borrowerName) {
+    const char = await db.characters.get(charId);
+    if (!char) return;
+    
+    // 初始化 loanReminders 字段
+    if (!char.loanReminders) {
+        char.loanReminders = [];
+    }
+    
+    // 添加提醒记录
+    char.loanReminders.push({
+        message: message,
+        borrowerName: borrowerName,
+        timestamp: Date.now(),
+        read: false
+    });
+    
+    // 保存到数据库
+    await db.characters.put(char);
+    
+    console.log(`[借款提醒] 已添加到角色 ${char.name} 的上下文`);
+}
+
+// 这个函数已不再需要，直接在主循环中发送
+
+// 发送系统短信（到信息App）
+async function sendSystemSMS(userId, message, senderName = '系统通知') {
+    console.log(`[发送短信] 给用户 ${userId}，发送者：${senderName}`);
+    
+    const accountId = String(userId);
+    
+    // 添加到 Dexie 数据库
+    await db.sms_messages.add({
+        accountId: accountId,
+        charId: null, // 系统消息没有角色ID
+        type: 'received',  // 接收的消息
+        sender: senderName,
+        number: senderName,
+        content: message,
+        time: Date.now(),
+        read: false
+    });
+    
+    console.log(`[发送短信] ✅ 短信已添加到数据库`);
+    
+    // 刷新主页面的消息列表
+    if (typeof renderMessageList === 'function') {
+        await renderMessageList();
+        console.log(`[发送短信] ✅ 消息列表已刷新`);
+    }
+}
+
+// 启动定时检查（每分钟检查一次）
+let loanCheckInterval = null;
+
+function startLoanReminderSystem() {
+    // 清除旧的定时器
+    if (loanCheckInterval) {
+        clearInterval(loanCheckInterval);
+    }
+    
+    // 立即执行一次检查
+    checkOverdueLoans();
+    
+    // 每分钟检查一次
+    loanCheckInterval = setInterval(() => {
+        checkOverdueLoans();
+    }, 60 * 1000); // 60秒
+    
+    console.log('[借款提醒系统] 已启动，每分钟检查一次');
+}
+
+// 页面加载时启动
+if (typeof window !== 'undefined') {
+    // 等待DOM加载完成后启动
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', startLoanReminderSystem);
+    } else {
+        startLoanReminderSystem();
+    }
+}
+
+// =================
+// 测试功能
+// =================
+
+let testReminderClickCount = 0;
+let testLoanRecord = null;
+
+async function testLoanReminder() {
+    const statusDiv = document.getElementById('test-reminder-status');
+    
+    testReminderClickCount++;
+    
+    if (testReminderClickCount === 1) {
+        // 第一次点击：创建测试借款并发送第一次提醒
+        if (!currentMyCharId) {
+            alert('请先选择一个 User 身份');
+            testReminderClickCount = 0;
+            return;
+        }
+        
+        const user = await db.characters.get(parseInt(currentMyCharId));
+        if (!user) {
+            alert('未找到用户信息');
+            testReminderClickCount = 0;
+            return;
+        }
+        
+        // 创建一个测试借款记录（逾期1个月 = 12小时）
+        const now = Date.now();
+        const oneMonthAgo = now - (12 * 60 * 60 * 1000); // 12小时前
+        testLoanRecord = {
+            id: now,
+            amount: 5000,
+            term: 3,
+            totalAmount: 5225,
+            monthlyPayment: 1741.67,
+            date: new Date(oneMonthAgo - (3 * 12 * 60 * 60 * 1000)).toISOString(), // 借款日期：4个月前
+            dueTime: oneMonthAgo, // 到期时间：1个月前（已逾期12小时）
+            status: 'pending',
+            paidAmount: 0,
+            remainingAmount: 5225,
+            firstReminderSent: false,
+            secondReminderSent: false,
+            userId: currentMyCharId,
+            isTest: true // 标记为测试记录
+        };
+        
+        // 发送第一次提醒
+        await sendFirstReminder(testLoanRecord);
+        testLoanRecord.firstReminderSent = true;
+        
+        if (statusDiv) {
+            statusDiv.textContent = '✅ 第一次提醒已发送（短信给本人）\n再点击一次发送第二次提醒';
+            statusDiv.style.color = '#07c160';
+        }
+        
+        alert('测试：第一次提醒已发送\n\n已发送短信给借款人本人\n请查看微信消息');
+        
+    } else if (testReminderClickCount === 2) {
+        // 第二次点击：发送第二次提醒
+        if (!testLoanRecord) {
+            alert('请先点击第一次发送第一次提醒');
+            testReminderClickCount = 0;
+            return;
+        }
+        
+        // 发送第二次提醒
+        await sendSecondReminder(testLoanRecord);
+        testLoanRecord.secondReminderSent = true;
+        
+        // 获取好友数量
+        const friends = await getAllFriends(testLoanRecord.userId);
+        
+        if (statusDiv) {
+            statusDiv.textContent = `✅ 第二次提醒已发送\n已通知 ${friends.length} 位好友（本地角色 + 联机好友）`;
+            statusDiv.style.color = '#07c160';
+        }
+        
+        alert(`测试：第二次提醒已发送\n\n已发送给 ${friends.length} 位好友\n\n- 本地角色：会在聊天时收到上下文提示\n- 联机好友：会收到短信\n\n再次点击可重置测试`);
+        
+    } else {
+        // 第三次点击：重置
+        testReminderClickCount = 0;
+        testLoanRecord = null;
+        
+        if (statusDiv) {
+            statusDiv.textContent = '已重置，点击开始新的测试';
+            statusDiv.style.color = '#999';
+        }
+        
+        alert('测试已重置\n\n点击按钮开始新的测试');
+    }
+}
+
+window.testLoanReminder = testLoanReminder;
+
+// =================
+// 刮刮乐功能
+// =================
+
+const SCRATCH_CARD_PRICE = 10; // 每张刮刮乐价格
+let currentScratchCard = null; // 当前刮刮乐数据
+let isScratching = false; // 是否正在刮奖
+let scratchProgress = 0; // 刮开进度 (0-100)
+
+// 显示刮刮乐页面
+async function showScratchCardPage() {
+    const page = document.getElementById('scratch-card-page');
+    page.style.display = 'flex';
+    page.offsetHeight;
+    page.classList.add('slide-in');
+    
+    // 更新余额显示
+    await updateScratchBalance();
+    
+    // 重置刮刮乐状态
+    resetScratchCard();
+    
+    // 加载历史记录
+    loadScratchHistory();
+}
+
+// 隐藏刮刮乐页面
+function hideScratchCardPage() {
+    const page = document.getElementById('scratch-card-page');
+    page.classList.remove('slide-in');
+    setTimeout(() => {
+        page.style.display = 'none';
+    }, 300);
+}
+
+// 更新余额显示
+async function updateScratchBalance() {
+    if (!currentMyCharId) {
+        document.getElementById('scratch-current-balance').textContent = '¥0.00';
+        return;
+    }
+    
+    const user = await db.characters.get(parseInt(currentMyCharId));
+    const balance = user?.identity?.balance || 0;
+    document.getElementById('scratch-current-balance').textContent = `¥${parseFloat(balance).toFixed(2)}`;
+    
+    // 更新购买按钮状态
+    const buyBtn = document.getElementById('scratch-buy-btn');
+    if (parseFloat(balance) < SCRATCH_CARD_PRICE) {
+        buyBtn.disabled = true;
+        buyBtn.querySelector('#scratch-buy-text').textContent = `余额不足 (需要 ¥${SCRATCH_CARD_PRICE})`;
+    } else {
+        buyBtn.disabled = false;
+        buyBtn.querySelector('#scratch-buy-text').textContent = `购买刮刮乐 (¥${SCRATCH_CARD_PRICE})`;
+    }
+}
+
+// 重置刮刮乐
+function resetScratchCard() {
+    currentScratchCard = null;
+    isScratching = false;
+    scratchProgress = 0;
+    
+    const cover = document.getElementById('scratch-cover');
+    const content = document.getElementById('scratch-content');
+    const resultIcon = document.getElementById('scratch-result-icon');
+    const canvas = cover.querySelector('canvas');
+    
+    // 清除canvas
+    if (canvas) {
+        canvas.remove();
+    }
+    
+    cover.classList.remove('scratched');
+    cover.style.opacity = '1';
+    cover.style.pointerEvents = 'auto';
+    
+    // 重置图标显示
+    if (resultIcon) {
+        resultIcon.style.display = 'none';
+        resultIcon.textContent = '';
+    }
+    
+    // 隐藏内容
+    if (content) {
+        content.style.display = 'none';
+    }
+}
+
+// 购买刮刮乐
+async function buyScratchCard() {
+    if (!currentMyCharId) {
+        alert('请先选择一个 User 身份');
+        return;
+    }
+    
+    const user = await db.characters.get(parseInt(currentMyCharId));
+    if (!user) {
+        alert('未找到用户信息');
+        return;
+    }
+    
+    let userBalance = parseFloat(user.identity?.balance || 0);
+    
+    // 检查余额
+    if (userBalance < SCRATCH_CARD_PRICE) {
+        alert(`余额不足！\n当前余额：¥${userBalance.toFixed(2)}\n需要：¥${SCRATCH_CARD_PRICE}`);
+        return;
+    }
+    
+    // 扣款
+    userBalance = userBalance - SCRATCH_CARD_PRICE;
+    if (!user.identity) user.identity = {};
+    user.identity.balance = userBalance.toFixed(2);
+    await db.characters.put(user);
+    
+    // 更新余额显示
+    await updateScratchBalance();
+    await updateBalancePageDisplay();
+    await updateWalletBalanceDisplay();
+    
+    // 生成刮刮乐结果
+    const prize = generateScratchPrize();
+    currentScratchCard = {
+        prize: prize,
+        cost: SCRATCH_CARD_PRICE,
+        time: Date.now()
+    };
+    
+    // 显示刮刮乐
+    showScratchCard(prize);
+    
+    // 初始化刮奖交互
+    initScratchInteraction();
+}
+
+// 生成中奖金额（概率分布）
+function generateScratchPrize() {
+    const rand = Math.random();
+    
+    // 概率分布：
+    // 80% - 中奖 (¥5-¥10)
+    // 20% - 未中奖 (¥0)
+    
+    if (rand < 0.8) {
+        // 80%概率中奖，金额在5~10元之间
+        return Math.floor(Math.random() * 6) + 5; // ¥5-¥10
+    } else {
+        return 0; // 20%概率未中奖
+    }
+}
+
+// 显示刮刮乐
+function showScratchCard(prize) {
+    const cover = document.getElementById('scratch-cover');
+    const content = document.getElementById('scratch-content');
+    const resultIcon = document.getElementById('scratch-result-icon');
+    const resultText = document.getElementById('scratch-result-text');
+    const resultAmount = document.getElementById('scratch-result-amount');
+    
+    // 显示内容层
+    content.style.display = 'flex';
+    
+    // 设置结果
+    if (prize === 0) {
+        resultIcon.textContent = '';
+        resultIcon.style.display = 'none';
+        resultText.textContent = '很遗憾，未中奖';
+        resultAmount.textContent = '¥0';
+        resultAmount.style.color = '#999';
+    } else {
+        resultIcon.textContent = '';
+        resultIcon.style.display = 'none';
+        resultText.textContent = '恭喜中奖';
+        resultAmount.textContent = `¥${prize}`;
+        resultAmount.style.color = '#ffb6c1';
+    }
+    
+    // 重置覆盖层
+    cover.style.opacity = '1';
+    cover.style.pointerEvents = 'auto';
+    cover.classList.remove('scratched');
+    scratchProgress = 0;
+}
+
+// 初始化刮奖交互
+function initScratchInteraction() {
+    const cover = document.getElementById('scratch-cover');
+    const card = document.getElementById('scratch-card');
+    
+    // 清除旧的canvas
+    const oldCanvas = cover.querySelector('canvas');
+    if (oldCanvas) {
+        oldCanvas.remove();
+    }
+    
+    // 创建canvas用于刮奖效果
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const rect = card.getBoundingClientRect();
+    
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+    canvas.style.position = 'absolute';
+    canvas.style.top = '0';
+    canvas.style.left = '0';
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    canvas.style.zIndex = '3';
+    canvas.style.mixBlendMode = 'destination-out';
+    
+    // 初始化canvas为不透明
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    cover.appendChild(canvas);
+    
+    let isDrawing = false;
+    let lastX = 0;
+    let lastY = 0;
+    
+    // 获取坐标
+    function getCoordinates(e) {
+        const rect = card.getBoundingClientRect();
+        if (e.touches) {
+            return {
+                x: e.touches[0].clientX - rect.left,
+                y: e.touches[0].clientY - rect.top
+            };
+        } else {
+            return {
+                x: e.offsetX,
+                y: e.offsetY
+            };
+        }
+    }
+    
+    // 绘制刮痕
+    function drawScratch(x, y) {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.beginPath();
+        ctx.arc(x, y, 25, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // 如果起点和终点都有，画一条线
+        if (lastX > 0 && lastY > 0) {
+            ctx.beginPath();
+            ctx.moveTo(lastX, lastY);
+            ctx.lineTo(x, y);
+            ctx.lineWidth = 50;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = 'rgba(0,0,0,1)';
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.stroke();
+        }
+        
+        lastX = x;
+        lastY = y;
+        
+        // 计算刮开进度（使用采样方式提高性能）
+        if (Math.random() < 0.1) { // 只采样10%的检查，减少性能消耗
+            const sampleSize = 100;
+            const stepX = Math.floor(canvas.width / sampleSize);
+            const stepY = Math.floor(canvas.height / sampleSize);
+            let transparentCount = 0;
+            
+            for (let sy = 0; sy < canvas.height; sy += stepY) {
+                for (let sx = 0; sx < canvas.width; sx += stepX) {
+                    const imageData = ctx.getImageData(sx, sy, 1, 1);
+                    if (imageData.data[3] === 0) { // alpha为0表示透明
+                        transparentCount++;
+                    }
+                }
+            }
+            
+            scratchProgress = (transparentCount / (sampleSize * sampleSize)) * 100;
+            
+            // 如果刮开超过30%，自动完成
+            if (scratchProgress >= 30) {
+                finishScratching();
+            }
+        } else {
+            // 简单估算：每次绘制增加一点进度
+            scratchProgress = Math.min(scratchProgress + 0.5, 100);
+            if (scratchProgress >= 30) {
+                finishScratching();
+            }
+        }
+    }
+    
+    // 鼠标事件
+    card.onmousedown = (e) => {
+        if (currentScratchCard && !isScratching) {
+            isDrawing = true;
+            const coords = getCoordinates(e);
+            lastX = coords.x;
+            lastY = coords.y;
+            drawScratch(coords.x, coords.y);
+        }
+    };
+    
+    card.onmousemove = (e) => {
+        if (isDrawing && currentScratchCard && !isScratching) {
+            const coords = getCoordinates(e);
+            drawScratch(coords.x, coords.y);
+        }
+    };
+    
+    card.onmouseup = () => {
+        isDrawing = false;
+        lastX = 0;
+        lastY = 0;
+    };
+    
+    card.onmouseleave = () => {
+        isDrawing = false;
+        lastX = 0;
+        lastY = 0;
+    };
+    
+    // 触摸事件
+    card.ontouchstart = (e) => {
+        if (currentScratchCard && !isScratching) {
+            e.preventDefault();
+            isDrawing = true;
+            const coords = getCoordinates(e);
+            lastX = coords.x;
+            lastY = coords.y;
+            drawScratch(coords.x, coords.y);
+        }
+    };
+    
+    card.ontouchmove = (e) => {
+        if (isDrawing && currentScratchCard && !isScratching) {
+            e.preventDefault();
+            const coords = getCoordinates(e);
+            drawScratch(coords.x, coords.y);
+        }
+    };
+    
+    card.ontouchend = () => {
+        isDrawing = false;
+        lastX = 0;
+        lastY = 0;
+    };
+}
+
+// 刮奖操作（已废弃，使用canvas实现）
+function scratchAt(x, y) {
+    // 此函数已被canvas实现替代
+}
+
+// 完成刮奖
+async function finishScratching() {
+    if (isScratching || !currentScratchCard) return;
+    isScratching = true;
+    
+    const cover = document.getElementById('scratch-cover');
+    const canvas = cover.querySelector('canvas');
+    const content = document.getElementById('scratch-content');
+    
+    // 完全清除覆盖层
+    if (canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    
+    // 确保内容层显示
+    if (content) {
+        content.style.display = 'flex';
+    }
+    
+    // 延迟显示完成效果
+    setTimeout(() => {
+        cover.classList.add('scratched');
+        cover.style.opacity = '0';
+        cover.style.pointerEvents = 'none';
+        
+        // 确保金额显示正确
+        const resultAmount = document.getElementById('scratch-result-amount');
+        const resultText = document.getElementById('scratch-result-text');
+        const resultIcon = document.getElementById('scratch-result-icon');
+        
+        if (currentScratchCard) {
+            if (currentScratchCard.prize === 0) {
+                if (resultIcon) {
+                    resultIcon.textContent = '';
+                    resultIcon.style.display = 'none';
+                }
+                if (resultText) resultText.textContent = '很遗憾，未中奖';
+                if (resultAmount) {
+                    resultAmount.textContent = '¥0';
+                    resultAmount.style.color = '#999';
+                }
+            } else {
+                if (resultIcon) {
+                    resultIcon.textContent = '';
+                    resultIcon.style.display = 'none';
+                }
+                if (resultText) resultText.textContent = '恭喜中奖';
+                if (resultAmount) {
+                    resultAmount.textContent = `¥${currentScratchCard.prize}`;
+                    resultAmount.style.color = '#ffb6c1';
+                }
+            }
+        }
+        
+        // 如果有中奖，添加到余额
+        if (currentScratchCard && currentScratchCard.prize > 0) {
+            addScratchPrize(currentScratchCard.prize);
+        }
+        
+        // 保存记录
+        saveScratchRecord(currentScratchCard);
+        
+        // 重新加载历史
+        loadScratchHistory();
+        
+        // 重置状态，准备下一张
+        setTimeout(() => {
+            isScratching = false;
+            currentScratchCard = null;
+            scratchProgress = 0;
+        }, 2000);
+    }, 300);
+}
+
+// 添加中奖金额到余额
+async function addScratchPrize(amount) {
+    if (!currentMyCharId) return;
+    
+    const user = await db.characters.get(parseInt(currentMyCharId));
+    if (!user) return;
+    
+    let userBalance = parseFloat(user.identity?.balance || 0);
+    userBalance = userBalance + amount;
+    
+    if (!user.identity) user.identity = {};
+    user.identity.balance = userBalance.toFixed(2);
+    await db.characters.put(user);
+    
+    // 更新显示
+    await updateScratchBalance();
+    await updateBalancePageDisplay();
+    await updateWalletBalanceDisplay();
+    
+    // 显示中奖提示
+    setTimeout(() => {
+        alert(`恭喜中奖\n\n奖金：¥${amount}\n已添加到钱包余额`);
+    }, 500);
+}
+
+// 保存刮刮乐记录
+function saveScratchRecord(record) {
+    let history = JSON.parse(localStorage.getItem('scratchHistory') || '[]');
+    history.unshift({
+        prize: record.prize,
+        cost: record.cost,
+        time: record.time,
+        net: record.prize - record.cost // 净收益
+    });
+    // 只保留最近50条记录
+    if (history.length > 50) {
+        history = history.slice(0, 50);
+    }
+    localStorage.setItem('scratchHistory', JSON.stringify(history));
+}
+
+// 加载历史记录
+function loadScratchHistory() {
+    const historyList = document.getElementById('scratch-history-list');
+    const history = JSON.parse(localStorage.getItem('scratchHistory') || '[]');
+    
+    if (history.length === 0) {
+        historyList.innerHTML = '<div class="loan-empty-state">暂无中奖记录</div>';
+        return;
+    }
+    
+    historyList.innerHTML = history.map(record => {
+        const date = new Date(record.time);
+        const dateStr = date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+        const timeStr = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+        const netClass = record.net >= 0 ? 'profit' : 'loss';
+        const netText = record.net >= 0 ? `+¥${record.net}` : `¥${record.net}`;
+        
+        return `
+            <div class="loan-history-item">
+                <div class="loan-history-info">
+                    <div class="loan-history-amount">${record.prize > 0 ? `中奖 ¥${record.prize}` : '未中奖'}</div>
+                    <div class="loan-history-date">${dateStr} ${timeStr} · 花费 ¥${record.cost}</div>
+                </div>
+                <div class="loan-history-status ${netClass}">${netText}</div>
+            </div>
+        `;
+    }).join('');
+}
+
+// 导出函数
+window.showScratchCardPage = showScratchCardPage;
+window.hideScratchCardPage = hideScratchCardPage;
+window.buyScratchCard = buyScratchCard;
 window.selectRechargeAmount = selectRechargeAmount;
 window.submitRecharge = submitRecharge;
 
@@ -16298,20 +22413,24 @@ async function renderMomentsList() {
         })
         .map(char => char.id);
     
-    // 包括自己和所有好友
-    const visibleUserIds = [currentAccountId, ...friendIds];
+    // 包括自己和所有好友（统一转为数字进行比较）
+    const visibleUserIds = [currentAccountId, ...friendIds].map(id => parseInt(id));
     
-    let moments = await db.moments
-        .filter(m => visibleUserIds.includes(m.userId))
-        .toArray();
+    // 获取所有朋友圈，然后过滤
+    let allMoments = await db.moments.toArray();
+    let moments = allMoments.filter(m => visibleUserIds.includes(parseInt(m.userId)));
     
-    // 按置顶和时间排序：置顶的在前，然后按时间倒序
+    // ✅ 按置顶和时间排序：置顶的在前，然后按时间倒序（最新的在上面）
     moments.sort((a, b) => {
         // 如果是自己发的且置顶了，排在最前面
-        if (a.userId === currentAccountId && a.pinned && !(b.userId === currentAccountId && b.pinned)) return -1;
-        if (b.userId === currentAccountId && b.pinned && !(a.userId === currentAccountId && a.pinned)) return 1;
-        // 都是置顶或都不是置顶，按时间排序
-        return b.time - a.time;
+        const aIsPinned = (parseInt(a.userId) === currentAccountId && a.pinned);
+        const bIsPinned = (parseInt(b.userId) === currentAccountId && b.pinned);
+        
+        if (aIsPinned && !bIsPinned) return -1;
+        if (bIsPinned && !aIsPinned) return 1;
+        
+        // 都是置顶或都不是置顶，按时间倒序（新的在前）
+        return (b.time || 0) - (a.time || 0);
     });
     
     if (moments.length === 0) {
@@ -16456,6 +22575,8 @@ function handleCoverChange(input) {
 }
 
 // 发布动态逻辑
+let currentMomentPrivacy = 'public'; // 默认公开
+
 function showMomentsPublish() {
     document.getElementById('moments-publish-page').style.display = 'block';
     // 清空
@@ -16468,10 +22589,145 @@ function showMomentsPublish() {
         }
     });
     window.tempPubImages = [];
+    // 重置权限为公开
+    currentMomentPrivacy = 'public';
+    selectedPrivacyFriends = [];
+    document.getElementById('privacy-selected-text').textContent = '公开';
 }
 
 function hideMomentsPublish() {
     document.getElementById('moments-publish-page').style.display = 'none';
+}
+
+// 权限选择相关
+function showPrivacySelector() {
+    document.getElementById('privacy-selector-page').style.display = 'block';
+    // 更新选中状态
+    updatePrivacyCheckmarks();
+}
+
+function hidePrivacySelector() {
+    document.getElementById('privacy-selector-page').style.display = 'none';
+}
+
+function selectPrivacy(value, text) {
+    currentMomentPrivacy = value;
+    document.getElementById('privacy-selected-text').textContent = text;
+    updatePrivacyCheckmarks();
+    hidePrivacySelector();
+}
+
+function updatePrivacyCheckmarks() {
+    const options = ['public', 'private'];
+    options.forEach(opt => {
+        const checkEl = document.getElementById(`privacy-check-${opt}`);
+        if (checkEl) {
+            checkEl.textContent = (opt === currentMomentPrivacy) ? '✓' : '';
+        }
+    });
+    // 更新部分可见和不给谁看的描述
+    const partialDesc = document.getElementById('partial-desc');
+    const excludeDesc = document.getElementById('exclude-desc');
+    if (partialDesc) {
+        if (currentMomentPrivacy === 'partial' && selectedPrivacyFriends.length > 0) {
+            partialDesc.textContent = `已选 ${selectedPrivacyFriends.length} 人`;
+        } else {
+            partialDesc.textContent = '选中的朋友可见';
+        }
+    }
+    if (excludeDesc) {
+        if (currentMomentPrivacy === 'exclude' && selectedPrivacyFriends.length > 0) {
+            excludeDesc.textContent = `已选 ${selectedPrivacyFriends.length} 人`;
+        } else {
+            excludeDesc.textContent = '选中的朋友不可见';
+        }
+    }
+}
+
+// 好友选择相关
+let selectedPrivacyFriends = []; // 选中的好友ID列表
+let currentPrivacyMode = ''; // 'partial' 或 'exclude'
+
+async function showFriendSelector(mode) {
+    currentPrivacyMode = mode;
+    const page = document.getElementById('friend-selector-page');
+    const list = document.getElementById('friend-selector-list');
+    const title = document.getElementById('friend-selector-title');
+    
+    title.textContent = mode === 'partial' ? '谁可以看' : '不给谁看';
+    
+    // 如果切换了模式，清空已选择的
+    if (currentMomentPrivacy !== mode) {
+        selectedPrivacyFriends = [];
+    }
+    
+    // 获取好友列表
+    const accountId = getCurrentAccountId();
+    const allChars = await db.characters.toArray();
+    const friends = allChars.filter(char => {
+        if (char.id == accountId) return false; // 排除自己
+        const status = getFriendStatus(char, accountId);
+        return status === 'friend';
+    });
+    
+    list.innerHTML = '';
+    
+    if (friends.length === 0) {
+        list.innerHTML = '<div style="padding:40px; text-align:center; color:#999;">暂无好友</div>';
+    } else {
+        for (const friend of friends) {
+            const isChecked = selectedPrivacyFriends.includes(friend.id);
+            const item = document.createElement('div');
+            item.className = 'friend-select-item';
+            item.onclick = () => toggleFriendSelection(friend.id);
+            item.innerHTML = `
+                <div class="friend-select-checkbox ${isChecked ? 'checked' : ''}" id="friend-check-${friend.id}">
+                    ${isChecked ? '✓' : ''}
+                </div>
+                <div class="friend-select-avatar" style="background-image:url(${friend.avatar || ''})"></div>
+                <div class="friend-select-name">${friend.remark || friend.name}</div>
+            `;
+            list.appendChild(item);
+        }
+    }
+    
+    page.style.display = 'block';
+}
+
+function hideFriendSelector() {
+    document.getElementById('friend-selector-page').style.display = 'none';
+}
+
+function toggleFriendSelection(friendId) {
+    const idx = selectedPrivacyFriends.indexOf(friendId);
+    if (idx > -1) {
+        selectedPrivacyFriends.splice(idx, 1);
+    } else {
+        selectedPrivacyFriends.push(friendId);
+    }
+    
+    // 更新UI
+    const checkEl = document.getElementById(`friend-check-${friendId}`);
+    if (checkEl) {
+        const isChecked = selectedPrivacyFriends.includes(friendId);
+        checkEl.className = `friend-select-checkbox ${isChecked ? 'checked' : ''}`;
+        checkEl.textContent = isChecked ? '✓' : '';
+    }
+}
+
+function confirmFriendSelection() {
+    if (selectedPrivacyFriends.length === 0) {
+        alert('请至少选择一位好友');
+        return;
+    }
+    
+    currentMomentPrivacy = currentPrivacyMode;
+    const text = currentPrivacyMode === 'partial' ? `部分可见(${selectedPrivacyFriends.length}人)` : `不给谁看(${selectedPrivacyFriends.length}人)`;
+    document.getElementById('privacy-selected-text').textContent = text;
+    
+    hideFriendSelector();
+    hidePrivacySelector();
+    updatePrivacyCheckmarks();
 }
 
 function handlePubImages(input) {
@@ -16522,21 +22778,176 @@ async function doPublishMoment() {
         return;
     }
     
-    await db.moments.add({
+    const momentId = await db.moments.add({
         userId: parseInt(currentMyCharId),
         content: text,
         images: images,
         time: Date.now(),
         ownerUserId: parseInt(currentMyCharId), // 标记所属账号
+        privacy: currentMomentPrivacy, // 保存权限设置
+        privacyList: selectedPrivacyFriends.slice(), // 保存选中的好友列表
         likes: [],
         comments: []
     });
     
     hideMomentsPublish();
     renderMomentsList();
+    renderMyMomentsList();
     
     // 滚动到顶部
     document.getElementById('moments-page').scrollTop = 0;
+    
+    // ✅ 触发好友自动点赞评论（延迟执行，模拟真实场景）
+    setTimeout(() => {
+        generateFriendInteractions(momentId, currentMomentPrivacy, selectedPrivacyFriends.slice());
+    }, 2000);
+}
+
+// ✅ 生成好友自动点赞评论（调用AI）
+async function generateFriendInteractions(momentId, privacy, privacyList) {
+    try {
+        const moment = await db.moments.get(momentId);
+        if (!moment) return;
+        
+        const accountId = getCurrentAccountId();
+        const myChar = await db.characters.get(parseInt(currentMyCharId));
+        const myName = myChar?.name || '我';
+        
+        // 获取所有好友
+        const allChars = await db.characters.toArray();
+        let friends = allChars.filter(c => {
+            if (c.type === 'user') return false;
+            const status = getFriendStatus(c, accountId);
+            return status === 'friend';
+        });
+        
+        // ✅ 根据权限过滤好友
+        if (privacy === 'partial' && privacyList.length > 0) {
+            // 部分可见：只有 privacyList 中的好友可以看到
+            friends = friends.filter(f => privacyList.includes(f.id));
+        } else if (privacy === 'exclude' && privacyList.length > 0) {
+            // 不给谁看：排除 privacyList 中的好友
+            friends = friends.filter(f => !privacyList.includes(f.id));
+        } else if (privacy === 'private') {
+            // 私密：没有好友可以看到
+            friends = [];
+        }
+        
+        if (friends.length === 0) {
+            console.log('[朋友圈互动] 没有可见的好友，跳过生成互动');
+            return;
+        }
+        
+        console.log(`[朋友圈互动] 开始生成，可见好友: ${friends.length}人`);
+        
+        // 随机选择一些好友来点赞（30%-70%的可见好友）
+        const likeRatio = 0.3 + Math.random() * 0.4;
+        const shuffledForLikes = [...friends].sort(() => Math.random() - 0.5);
+        const likersCount = Math.max(1, Math.floor(shuffledForLikes.length * likeRatio));
+        const likers = shuffledForLikes.slice(0, likersCount);
+        
+        // 随机选择一些好友来评论（10%-40%的可见好友，最多5人）
+        const commentRatio = 0.1 + Math.random() * 0.3;
+        const shuffledForComments = [...friends].sort(() => Math.random() - 0.5);
+        const commentersCount = Math.min(5, Math.max(1, Math.floor(shuffledForComments.length * commentRatio)));
+        const commenters = shuffledForComments.slice(0, commentersCount);
+        
+        // 生成点赞
+        const likes = likers.map(f => ({
+            userId: f.id,
+            name: f.name
+        }));
+        
+        // ✅ 调用AI生成评论
+        const comments = [];
+        
+        if (commenters.length > 0) {
+            try {
+                // 构建角色信息
+                const commenterInfos = commenters.map(c => 
+                    `- ${c.name}：${c.description || c.personality || '普通朋友'}`
+                ).join('\n');
+                
+                const prompt = `${myName} 发了一条朋友圈：
+"${moment.content}"
+${moment.images?.length > 0 ? `（附带${moment.images.length}张图片）` : ''}
+
+以下好友看到了这条朋友圈，请为每个人生成一条符合其性格的评论：
+${commenterInfos}
+
+要求：
+1. 每条评论简短自然（3-20字）
+2. 可以用表情、语气词
+3. 符合每个角色的性格特点
+4. 可以互相@回复（格式：回复 某某：内容）
+
+请返回JSON数组格式：
+[{"name": "角色名", "content": "评论内容"}, ...]`;
+
+                const result = await callAI([
+                    { role: 'system', content: '你是一个社交媒体评论生成助手，只返回JSON数组，不要任何其他文字。' },
+                    { role: 'user', content: prompt }
+                ]);
+                
+                // 解析结果
+                let aiComments = [];
+                try {
+                    let cleanResult = result.trim();
+                    if (cleanResult.startsWith('```')) {
+                        cleanResult = cleanResult.replace(/```json?\n?/g, '').replace(/```$/g, '').trim();
+                    }
+                    aiComments = JSON.parse(cleanResult);
+                } catch (e) {
+                    console.warn('[朋友圈互动] AI评论解析失败，使用预设评论');
+                }
+                
+                // 将AI生成的评论添加到列表
+                for (const aiComment of aiComments) {
+                    const commenter = commenters.find(c => c.name === aiComment.name);
+                    if (commenter && aiComment.content) {
+                        comments.push({
+                            userId: commenter.id,
+                            name: commenter.name,
+                            content: aiComment.content,
+                            time: Date.now() + Math.random() * 60000
+                        });
+                    }
+                }
+                
+            } catch (apiError) {
+                console.warn('[朋友圈互动] AI调用失败，使用预设评论:', apiError);
+            }
+        }
+        
+        // 如果AI生成失败，使用预设评论
+        if (comments.length === 0 && commenters.length > 0) {
+            const presetComments = [
+                '👍', '❤️', '太棒了！', '真好看~', '哇！', '赞！',
+                '羡慕！', '厉害啊', '太美了', '🔥', '绝了', '爱了'
+            ];
+            for (const commenter of commenters) {
+                comments.push({
+                    userId: commenter.id,
+                    name: commenter.name,
+                    content: presetComments[Math.floor(Math.random() * presetComments.length)],
+                    time: Date.now() + Math.random() * 60000
+                });
+            }
+        }
+        
+        // 更新朋友圈
+        moment.likes = likes;
+        moment.comments = comments;
+        await db.moments.put(moment);
+        
+        console.log(`[朋友圈互动] 生成完成: ${likes.length}个点赞, ${comments.length}条评论`);
+        
+        // 刷新显示
+        renderMomentsList();
+        
+    } catch (error) {
+        console.error('[朋友圈互动] 生成失败:', error);
+    }
 }
 
 async function deleteMoment(id) {
@@ -16793,7 +23204,7 @@ async function renderMyMomentsList() {
     const currentAccountId = currentMyCharId ? parseInt(currentMyCharId) : null;
     if (!currentAccountId) {
         container.innerHTML = `<div class="wechat-empty-state" style="margin-top:60px;"><div style="color:#999; font-size:14px;">请先登录账号</div></div>`;
-        pinnedSection.style.display = 'none';
+        pinnedSection.classList.remove('show');
         return;
     }
     
@@ -16812,17 +23223,24 @@ async function renderMyMomentsList() {
     // 获取用户信息
     const user = await db.characters.get(currentAccountId);
     
-    // 渲染置顶区域（只显示置顶的朋友圈，正方形卡片）
+    // 渲染置顶区域（只显示前3个）
     if (pinnedMoments.length > 0) {
-        pinnedSection.style.display = 'block';
+        pinnedSection.classList.add('show');
         
-        // 只添加置顶卡片
-        for (const moment of pinnedMoments) {
+        // 只显示前3个置顶卡片
+        const displayMoments = pinnedMoments.slice(0, 3);
+        for (const moment of displayMoments) {
             const card = createPinnedMomentCard(moment, user);
             pinnedContainer.appendChild(card);
         }
+        
+        // 设置箭头点击事件（查看所有置顶）
+        const arrow = pinnedSection.querySelector('.moments-pinned-arrow');
+        if (arrow) {
+            arrow.onclick = () => showAllPinnedMoments(pinnedMoments, user);
+        }
     } else {
-        pinnedSection.style.display = 'none';
+        pinnedSection.classList.remove('show');
     }
     
     // 渲染普通朋友圈（保持原来的完整样式）
@@ -16837,57 +23255,122 @@ async function renderMyMomentsList() {
     }
 }
 
-// 创建置顶朋友圈卡片（横向滚动）
+// 创建置顶朋友圈卡片（仿真实微信样式）
 function createPinnedMomentCard(moment, user) {
     const card = document.createElement('div');
-    // 正方形卡片：宽度和高度相等
-    card.style.cssText = `
-        width: 120px;
-        height: 120px;
-        flex-shrink: 0;
-        background: #f5f5f5;
-        border-radius: 6px;
-        padding: 8px;
-        cursor: pointer;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        box-sizing: border-box;
-    `;
+    card.className = 'pinned-moment-card';
     card.onclick = () => showMomentDetail(moment.id);
     
-    // 图片预览（如果有图片，占满整个卡片）
-    let imagePreview = '';
+    // 如果有图片，设置为背景
     if (moment.images && moment.images.length > 0) {
-        const firstImage = moment.images[0];
-        imagePreview = `
-            <div style="width:100%; height:100%; position:absolute; top:0; left:0; background-image:url(${firstImage}); background-size:cover; background-position:center; border-radius:6px;"></div>
-        `;
+        card.style.backgroundImage = `url(${moment.images[0]})`;
     }
     
-    // 权限标识
-    let privacyBadge = '';
-    if (moment.privacy === 'private') privacyBadge = `<span style="color:#999; font-size:10px;">私密</span>`;
-    else if (moment.privacy === 'friends') privacyBadge = `<span style="color:#999; font-size:10px;">好友</span>`;
-    
-    // 文字内容（正方形布局，文字居中显示）
+    // 文字内容预览（显示在卡片中央）
     const contentText = moment.content || '';
-    const shortText = contentText.length > 20 ? contentText.substring(0, 20) + '...' : contentText;
+    const shortText = contentText.length > 30 ? contentText.substring(0, 30) + '...' : contentText;
     
-    card.innerHTML = `
-        <div style="position:relative; width:100%; height:100%; border-radius:6px; overflow:hidden;">
-            ${imagePreview}
-            <div style="position:relative; z-index:1; width:100%; height:100%; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:4px; box-sizing:border-box;">
-                <div style="font-size:12px; color:#333; text-align:center; line-height:1.4; word-break:break-all; overflow:hidden; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; ${imagePreview ? 'color:#fff; text-shadow:0 1px 2px rgba(0,0,0,0.3);' : ''}">${shortText}</div>
-            </div>
+    card.innerHTML = `<div class="pinned-moment-text">${shortText}</div>`;
+    
+    return card;
+}
+
+// 显示所有置顶朋友圈页面（时间线格式）
+function showAllPinnedMoments(pinnedMoments, user) {
+    const page = document.getElementById('all-pinned-moments-page');
+    const list = document.getElementById('all-pinned-list');
+    
+    list.innerHTML = '';
+    
+    // 按年份和日期分组
+    const groupedByYear = {};
+    for (const moment of pinnedMoments) {
+        const date = new Date(moment.time);
+        const year = date.getFullYear();
+        const dateKey = `${date.getMonth() + 1}-${date.getDate()}`; // 月-日
+        
+        if (!groupedByYear[year]) groupedByYear[year] = {};
+        if (!groupedByYear[year][dateKey]) groupedByYear[year][dateKey] = [];
+        groupedByYear[year][dateKey].push(moment);
+    }
+    
+    // 按年份倒序渲染
+    const years = Object.keys(groupedByYear).sort((a, b) => b - a);
+    for (const year of years) {
+        // 年份标题
+        const yearTitle = document.createElement('div');
+        yearTitle.style.cssText = 'font-size:20px; font-weight:700; color:#333; padding:20px 16px 10px;';
+        yearTitle.textContent = year + '年';
+        list.appendChild(yearTitle);
+        
+        // 按日期倒序
+        const dates = Object.keys(groupedByYear[year]).sort((a, b) => {
+            const [am, ad] = a.split('-').map(Number);
+            const [bm, bd] = b.split('-').map(Number);
+            return (bm * 100 + bd) - (am * 100 + ad);
+        });
+        
+        for (const dateKey of dates) {
+            const dayMoments = groupedByYear[year][dateKey];
+            const item = createPinnedTimelineGroup(dateKey, dayMoments);
+            list.appendChild(item);
+        }
+    }
+    
+    page.style.display = 'block';
+}
+
+// 创建置顶页面的时间线条目（同一天的合并显示）
+function createPinnedTimelineGroup(dateKey, moments) {
+    const div = document.createElement('div');
+    div.style.cssText = 'display:flex; padding:16px; border-bottom:1px solid #f5f5f5;';
+    
+    const [month, day] = dateKey.split('-');
+    
+    // 收集所有图片和文字
+    let allImages = [];
+    let allTexts = [];
+    for (const moment of moments) {
+        if (moment.images && moment.images.length > 0) {
+            allImages = allImages.concat(moment.images);
+        }
+        if (moment.content) {
+            allTexts.push({ id: moment.id, text: moment.content });
+        }
+    }
+    
+    // 图片网格（一行三个）
+    let imagesHtml = '';
+    if (allImages.length > 0) {
+        imagesHtml = `<div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:4px; margin-bottom:8px;">
+            ${allImages.map(img => `<div style="aspect-ratio:1; background-image:url(${img}); background-size:cover; background-position:center; cursor:pointer;" onclick="event.stopPropagation(); previewImage('${img}')"></div>`).join('')}
+        </div>`;
+    }
+    
+    // 文字内容列表
+    let textsHtml = '';
+    for (const item of allTexts) {
+        const shortText = item.text.length > 40 ? item.text.substring(0, 40) + '...' : item.text;
+        textsHtml += `<div style="font-size:14px; color:#666; line-height:1.6; padding:6px 12px; background:#f8f8f8; border-radius:4px; margin-bottom:6px; cursor:pointer;" onclick="showMomentDetail(${item.id})">${shortText}</div>`;
+    }
+    
+    div.innerHTML = `
+        <div style="width:70px; flex-shrink:0; text-align:left;">
+            <div style="font-size:28px; font-weight:700; color:#333; line-height:1;">${day.padStart(2, '0')}</div>
+            <div style="font-size:12px; color:#999;">${month}月</div>
         </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; font-size:10px; color:#999;">
-            <span>${formatMomentTime(moment.time)}</span>
-            ${privacyBadge}
+        <div style="flex:1; min-width:0;">
+            ${imagesHtml}
+            ${textsHtml}
         </div>
     `;
     
-    return card;
+    return div;
+}
+
+// 隐藏所有置顶朋友圈页面
+function hideAllPinnedMoments() {
+    document.getElementById('all-pinned-moments-page').style.display = 'none';
 }
 
 // 创建朋友圈条目
@@ -17229,11 +23712,13 @@ async function addTransaction(type, amount, title, desc) {
 // ========== 亲属卡页面 ==========
 let selectedFamilyCardFriendId = null;
 
-function showFamilyCardPage() {
+async function showFamilyCardPage() {
     const page = document.getElementById('family-card-page');
     page.style.display = 'flex';
     page.offsetHeight;
     page.classList.add('active');
+    
+    // 🎯 直接渲染（亲属卡现在保存在聊天记录中，和转账一样）
     renderFamilyCardList();
 }
 
@@ -17252,68 +23737,143 @@ async function renderFamilyCardList() {
     const user = await db.characters.get(parseInt(currentMyCharId));
     if (!user) return;
     
-    // 我赠送的亲属卡
-    const givenCards = user.identity?.familyCardsGiven || [];
+    // ========== 我赠送的亲属卡 ==========
     const givenListEl = document.getElementById('family-card-given-list');
+    let givenHtml = '';
     
-    if (givenCards.length === 0) {
-        givenListEl.innerHTML = '';
-    } else {
-        let html = '';
-        for (const card of givenCards) {
-            const char = await db.characters.get(card.charId);
-            if (char) {
-                const usedThisMonth = card.usedThisMonth || 0;
-                const limitText = card.monthlyLimit > 0 ? `已用 ¥${usedThisMonth.toFixed(2)} / ¥${card.monthlyLimit}` : `已用 ¥${usedThisMonth.toFixed(2)} (不限额)`;
-                html += `
-                    <div class="family-card-item">
-                        <div class="family-card-avatar" style="background-image:url(${char.avatar})"></div>
-                        <div class="family-card-info">
-                            <div class="family-card-name">${char.name}</div>
-                            <div class="family-card-detail">${limitText}</div>
-                        </div>
-                        <div class="family-card-actions">
-                            <button class="family-card-btn view" onclick="showFamilyCardRecords(${card.charId}, 'given')">记录</button>
-                            <button class="family-card-btn cancel" onclick="cancelFamilyCard(${card.charId}, 'given')">解绑</button>
-                        </div>
+    // 1. 本地亲属卡
+    const localGivenCards = user.identity?.familyCardsGiven || [];
+    for (const card of localGivenCards) {
+        const char = await db.characters.get(card.charId);
+        if (char) {
+            const usedThisMonth = card.usedThisMonth || 0;
+            const limitText = card.monthlyLimit > 0 ? `已用 ¥${usedThisMonth.toFixed(2)} / ¥${card.monthlyLimit}` : `已用 ¥${usedThisMonth.toFixed(2)} (不限额)`;
+            givenHtml += `
+                <div class="family-card-item">
+                    <div class="family-card-avatar" style="background-image:url(${char.avatar})"></div>
+                    <div class="family-card-info">
+                        <div class="family-card-name">${char.name}</div>
+                        <div class="family-card-detail">${limitText}</div>
                     </div>
-                `;
-            }
+                    <div class="family-card-actions">
+                        <button class="family-card-btn view" onclick="showFamilyCardRecords(${card.charId}, 'given')">记录</button>
+                        <button class="family-card-btn cancel" onclick="cancelFamilyCard(${card.charId}, 'given')">解绑</button>
+                    </div>
+                </div>
+            `;
         }
-        givenListEl.innerHTML = html;
     }
     
-    // 我收到的亲属卡
-    const receivedCards = user.identity?.familyCardsReceived || [];
+    // 2. 联机亲属卡（从聊天记录中查找，和转账一样）
+    console.log('[亲属卡] 开始查找联机亲属卡...');
+    const allOnlineFriends = await db.characters.where('type').equals('online_friend').toArray();
+    console.log('[亲属卡] 找到联机好友数量:', allOnlineFriends.length);
+    
+    for (const friendChar of allOnlineFriends) {
+        const history = getChatHistory(friendChar, accountId);
+        if (!history) continue;
+        
+        // 查找我发送的亲属卡消息（role='user' 且 type='familyCard'）
+        const myFamilyCards = history.filter(msg => msg.role === 'user' && msg.type === 'familyCard');
+        
+        if (myFamilyCards.length > 0) {
+            // 只显示最后一张（最新的）
+            const lastCard = myFamilyCards[myFamilyCards.length - 1];
+            let cardData = {};
+            try {
+                cardData = JSON.parse(lastCard.content);
+            } catch (e) {
+                cardData = { monthlyLimit: 0 };
+            }
+            
+            const limitText = cardData.monthlyLimit > 0 ? `额度 ¥${cardData.monthlyLimit}` : '不限额度';
+            givenHtml += `
+                <div class="family-card-item">
+                    <div class="family-card-avatar" style="background-image:url(${friendChar.avatar})"></div>
+                    <div class="family-card-info">
+                        <div class="family-card-name">${friendChar.name} <span style="font-size:12px;color:#999;">(联机)</span></div>
+                        <div class="family-card-detail">${limitText}</div>
+                    </div>
+                    <div class="family-card-actions">
+                        <button class="family-card-btn view" onclick="showToast('联机亲属卡暂不支持查看记录')">记录</button>
+                    </div>
+                </div>
+            `;
+            console.log('[亲属卡] 找到赠送给', friendChar.name, '的亲属卡');
+        }
+    }
+    
+    givenListEl.innerHTML = givenHtml || '';
+    
+    // ========== 我收到的亲属卡 ==========
     const receivedListEl = document.getElementById('family-card-received-list');
     const receivedEmptyEl = document.getElementById('family-card-received-empty');
+    let receivedHtml = '';
     
-    if (receivedCards.length === 0) {
+    // 1. 本地亲属卡
+    const localReceivedCards = user.identity?.familyCardsReceived || [];
+    for (const card of localReceivedCards) {
+        const char = await db.characters.get(card.charId);
+        if (char) {
+            const usedThisMonth = card.usedThisMonth || 0;
+            const monthlyLimit = card.monthlyLimit || 0;
+            const limitText = monthlyLimit > 0 ? `本月可用 ¥${(monthlyLimit - usedThisMonth).toFixed(2)}` : '不限额';
+            receivedHtml += `
+                <div class="family-card-item">
+                    <div class="family-card-avatar" style="background-image:url(${char.avatar})"></div>
+                    <div class="family-card-info">
+                        <div class="family-card-name">${char.name} 的亲属卡</div>
+                        <div class="family-card-detail">${limitText}</div>
+                    </div>
+                    <div class="family-card-actions">
+                        <button class="family-card-btn view" onclick="showFamilyCardRecords(${card.charId}, 'received')">记录</button>
+                    </div>
+                </div>
+            `;
+        }
+    }
+    
+    // 2. 联机亲属卡（从聊天记录中查找，和转账一样）
+    for (const friendChar of allOnlineFriends) {
+        const history = getChatHistory(friendChar, accountId);
+        if (!history) continue;
+        
+        // 查找对方发送的亲属卡消息（role='char' 且 type='familyCard'）
+        const receivedFamilyCards = history.filter(msg => msg.role === 'char' && msg.type === 'familyCard');
+        
+        if (receivedFamilyCards.length > 0) {
+            // 只显示最后一张（最新的）
+            const lastCard = receivedFamilyCards[receivedFamilyCards.length - 1];
+            let cardData = {};
+            try {
+                cardData = JSON.parse(lastCard.content);
+            } catch (e) {
+                cardData = { monthlyLimit: 0 };
+            }
+            
+            const limitText = cardData.monthlyLimit > 0 ? `额度 ¥${cardData.monthlyLimit}` : '不限额';
+            receivedHtml += `
+                <div class="family-card-item">
+                    <div class="family-card-avatar" style="background-image:url(${friendChar.avatar})"></div>
+                    <div class="family-card-info">
+                        <div class="family-card-name">${friendChar.name} 的亲属卡 <span style="font-size:12px;color:#999;">(联机)</span></div>
+                        <div class="family-card-detail">${limitText}</div>
+                    </div>
+                    <div class="family-card-actions">
+                        <button class="family-card-btn view" onclick="showToast('联机亲属卡暂不支持查看记录')">记录</button>
+                    </div>
+                </div>
+            `;
+            console.log('[亲属卡] 找到来自', friendChar.name, '的亲属卡');
+        }
+    }
+    
+    if (receivedHtml) {
+        receivedEmptyEl.style.display = 'none';
+        receivedListEl.innerHTML = receivedHtml;
+    } else {
         receivedListEl.innerHTML = '';
         receivedEmptyEl.style.display = 'block';
-    } else {
-        receivedEmptyEl.style.display = 'none';
-        let html = '';
-        for (const card of receivedCards) {
-            const char = await db.characters.get(card.charId);
-            if (char) {
-                const usedThisMonth = card.usedThisMonth || 0;
-                const limitText = card.monthlyLimit > 0 ? `本月可用 ¥${(card.monthlyLimit - usedThisMonth).toFixed(2)}` : '不限额';
-                html += `
-                    <div class="family-card-item">
-                        <div class="family-card-avatar" style="background-image:url(${char.avatar})"></div>
-                        <div class="family-card-info">
-                            <div class="family-card-name">${char.name} 的亲属卡</div>
-                            <div class="family-card-detail">${limitText}</div>
-                        </div>
-                        <div class="family-card-actions">
-                            <button class="family-card-btn view" onclick="showFamilyCardRecords(${card.charId}, 'received')">记录</button>
-                        </div>
-                    </div>
-                `;
-            }
-        }
-        receivedListEl.innerHTML = html;
     }
 }
 
@@ -17329,32 +23889,56 @@ async function showGiveFamilyCardModal() {
     const accountId = getCurrentAccountId();
     const allChars = await db.characters.toArray();
     
-    // 过滤出好友（非用户角色且是好友状态）
+    // 过滤出好友（包括本地好友和联机好友）
     const friends = allChars.filter(c => {
         if (c.type === 'user') return false;
+        // ✅ 包含联机好友
+        if (c.type === 'online_friend') return true;
+        // 检查普通好友状态
         const status = getFriendStatus(c, accountId);
         return status === 'friend';
     });
     
-    // 排除已经赠送过亲属卡的
+    console.log('[亲属卡] 找到好友总数:', friends.length, '其中联机好友:', friends.filter(f => f.type === 'online_friend').length);
+    
+    // 排除已经赠送过亲属卡的（本地好友）
     const givenCards = user?.identity?.familyCardsGiven || [];
     const givenIds = givenCards.map(c => c.charId);
-    const availableFriends = friends.filter(f => !givenIds.includes(f.id));
+    
+    // ✅ 排除已经在聊天记录中赠送过亲属卡的（联机好友）
+    const availableFriends = friends.filter(f => {
+        // 本地好友：检查 givenIds
+        if (f.type !== 'online_friend') {
+            return !givenIds.includes(f.id);
+        }
+        
+        // 联机好友：检查聊天记录中是否有已发送的亲属卡
+        const history = getChatHistory(f, accountId);
+        if (!history) return true;
+        const hasSent = history.some(msg => msg.role === 'user' && msg.type === 'familyCard');
+        return !hasSent;
+    });
     
     if (availableFriends.length === 0) {
         listEl.innerHTML = '<div style="text-align:center; padding:20px; color:#999;">没有可赠送的好友</div>';
     } else {
-        listEl.innerHTML = availableFriends.map(f => `
-            <div class="family-card-friend-item" onclick="selectFamilyCardFriend(${f.id}, this)">
-                <div class="family-card-friend-avatar" style="background-image:url(${f.avatar})"></div>
-                <div class="family-card-friend-name">${f.name}</div>
-                <div class="family-card-friend-check">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3">
-                        <polyline points="20 6 9 17 4 12"></polyline>
-                    </svg>
+        listEl.innerHTML = availableFriends.map(f => {
+            // ✅ 给联机好友添加标记
+            const isOnline = f.type === 'online_friend';
+            const onlineTag = isOnline ? '<span style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:#fff; font-size:10px; padding:2px 6px; border-radius:3px; margin-left:6px;">联机</span>' : '';
+            
+            return `
+                <div class="family-card-friend-item" onclick="selectFamilyCardFriend(${f.id}, this)">
+                    <div class="family-card-friend-avatar" style="background-image:url(${f.avatar})"></div>
+                    <div class="family-card-friend-name">${f.name}${onlineTag}</div>
+                    <div class="family-card-friend-check">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                    </div>
                 </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
     }
     
     document.getElementById('family-card-limit-input').value = '0';
@@ -17385,23 +23969,83 @@ async function confirmGiveFamilyCard() {
     const monthlyLimit = parseFloat(limitInput.value) || 0;
     
     const user = await db.characters.get(parseInt(currentMyCharId));
-    if (!user.identity) user.identity = {};
-    if (!user.identity.familyCardsGiven) user.identity.familyCardsGiven = [];
-    
-    // 添加亲属卡记录
-    user.identity.familyCardsGiven.push({
-        charId: selectedFamilyCardFriendId,
-        monthlyLimit: monthlyLimit,
-        usedThisMonth: 0,
-        records: [],
-        createdAt: Date.now()
-    });
-    
-    await db.characters.put(user);
-    
-    // 同时在角色那边添加收到的亲属卡记录
     const char = await db.characters.get(selectedFamilyCardFriendId);
-    if (char) {
+    
+    if (!char) {
+        showToast('好友不存在');
+        return;
+    }
+    
+    const accountId = getCurrentAccountId();
+    
+    // ✅ 判断是否是联机好友
+    if (char.type === 'online_friend') {
+        console.log('[亲属卡] 检测到联机好友，通过消息通道发送');
+        // 联机好友 - 通过消息通道发送（和转账一样）
+        const onlineUserChar = await getOrCreateOnlineUserChar();
+        
+        if (onlineUserChar && onlineConnected && char.onlineData?.wx_account) {
+            const fromWxAccount = onlineUserChar.identity.account;
+            const toWxAccount = char.onlineData.wx_account;
+            
+            // 通过消息通道发送
+            const familyCardContent = JSON.stringify({
+                __type: 'familyCard',
+                monthlyLimit: monthlyLimit,
+                fromName: onlineUserChar.name
+            });
+            
+            const sent = sendOnlineMessage(toWxAccount, familyCardContent, fromWxAccount);
+            
+            if (sent) {
+                // 保存到聊天记录
+                let history = getChatHistory(char, accountId);
+                const familyCardMsg = {
+                    role: 'user',
+                    type: 'familyCard',
+                    content: JSON.stringify({
+                        fromName: onlineUserChar.name,
+                        monthlyLimit: monthlyLimit,
+                        status: 'sent',
+                        isOnline: true
+                    }),
+                    time: Date.now()
+                };
+                
+                history.push(familyCardMsg);
+                await setChatHistory(char, accountId, history);
+                
+                console.log('[亲属卡] ✅ 联机亲属卡已发送');
+                showToast('已赠送亲属卡');
+            } else {
+                console.error('[亲属卡] ❌ 发送失败');
+                showToast('发送失败，请检查连接');
+                return;
+            }
+        } else {
+            console.error('[亲属卡] ❌ 条件不满足');
+            showToast('请确保已连接服务器');
+            return;
+        }
+    } else {
+        // 本地好友 - 原有逻辑
+        console.log('[亲属卡] 本地好友，使用原有逻辑');
+        
+        if (!user.identity) user.identity = {};
+        if (!user.identity.familyCardsGiven) user.identity.familyCardsGiven = [];
+        
+        // 添加亲属卡记录
+        user.identity.familyCardsGiven.push({
+            charId: selectedFamilyCardFriendId,
+            monthlyLimit: monthlyLimit,
+            usedThisMonth: 0,
+            records: [],
+            createdAt: Date.now()
+        });
+        
+        await db.characters.put(user);
+        
+        // 同时在角色那边添加收到的亲属卡记录
         if (!char.identity) char.identity = {};
         if (!char.identity.familyCardsReceived) char.identity.familyCardsReceived = [];
         
@@ -17416,10 +24060,8 @@ async function confirmGiveFamilyCard() {
         await db.characters.put(char);
         
         // 发送亲属卡消息到聊天
-        const accountId = getCurrentAccountId();
         let history = getChatHistory(char, accountId);
         
-        const limitText = monthlyLimit > 0 ? `每月额度 ¥${monthlyLimit}` : '不限额度';
         const familyCardMsg = {
             role: 'user',
             type: 'familyCard',
@@ -17433,6 +24075,8 @@ async function confirmGiveFamilyCard() {
         
         history.push(familyCardMsg);
         await setChatHistory(char, accountId, history);
+        
+        showToast('已赠送亲属卡');
     }
     
     hideGiveFamilyCardModal();
@@ -17444,8 +24088,6 @@ async function confirmGiveFamilyCard() {
         const freshChar = await db.characters.get(selectedFamilyCardFriendId);
         renderChatBody(freshChar);
     }
-    
-    showToast('已赠送亲属卡');
 }
 
 // 取消亲属卡
@@ -17627,7 +24269,25 @@ async function generateUserBalance() {
     }
 
     const user = await db.characters.get(parseInt(currentMyCharId));
-    if (!user) return;
+    if (!user) {
+        alert("未找到该角色信息");
+        return;
+    }
+    
+    // 调试日志：确认读取到的用户信息（读取完整的角色档案）
+    console.log('[generateUserBalance] 读取到的完整角色档案:', user);
+    
+    // 读取角色描述（使用 description 字段，而不是 desc）
+    const characterDescription = user.description || user.desc || '';
+    
+    // 检查人设描述是否存在
+    if (!characterDescription || characterDescription.trim() === '' || characterDescription === '暂无描述') {
+        console.warn('[generateUserBalance] 警告：角色描述为空或未设置');
+        const confirmContinue = confirm("⚠️ 该角色的人设描述为空或未设置，生成的余额可能不准确。\n\n是否继续生成？\n（建议先完善角色人设描述）");
+        if (!confirmContinue) {
+            return;
+        }
+    }
     
     const btn = document.querySelector('.btn-generate');
     const originalText = btn.innerHTML;
@@ -17635,20 +24295,65 @@ async function generateUserBalance() {
     btn.disabled = true;
 
     try {
-        const systemPrompt = `你是一个辅助生成角色详细设定的AI。当前角色是：${user.name}。
-        角色描述：${user.desc || '暂无描述'}。
-        请根据角色的背景、职业、性格，合理推断TA微信钱包里的"零钱"余额。
+        // 构建完整的人设信息（读取完整的角色档案）
+        const characterInfo = [];
+        characterInfo.push(`角色名称：${user.name || '未命名'}`);
         
-        要求：
-        1. 只返回一个具体的数字金额，保留两位小数。
-        2. 不要返回任何其他文字。
-        3. 金额要符合人设（例如学生可能几百几千，富二代可能几万，普通打工人可能几千）。
-        4. 如果是古代/架空背景，请自动换算成合理的现代货币数值。`;
+        if (user.nick) {
+            characterInfo.push(`角色昵称：${user.nick}`);
+        }
+        
+        // 读取角色描述（优先使用 description，兼容 desc）
+        if (characterDescription && characterDescription.trim() && characterDescription !== '暂无描述') {
+            characterInfo.push(`角色人设描述：${characterDescription.trim()}`);
+        } else {
+            characterInfo.push(`角色人设描述：暂无详细描述`);
+        }
+        
+        if (user.type) {
+            characterInfo.push(`角色类型：${user.type}`);
+        }
+        
+        // 读取完整的身份信息
+        if (user.identity) {
+            if (user.identity.address) {
+                characterInfo.push(`家庭住址：${user.identity.address}`);
+            }
+            if (user.identity.bank_card) {
+                characterInfo.push(`银行卡号：${user.identity.bank_card}`);
+            }
+        }
+        
+        const fullCharacterInfo = characterInfo.join('\n');
+        
+        const systemPrompt = `你是一个辅助生成角色详细设定的AI助手。
 
+以下是当前角色的完整信息：
+${fullCharacterInfo}
+
+请仔细分析上述角色的人设信息（特别是角色描述中的背景、职业、经济状况、社会地位等），然后合理推断该角色微信钱包里的"零钱"余额。
+
+重要提示：
+1. 必须严格根据角色人设来生成余额，不要使用默认值或随机值
+2. 如果角色描述中提到"富二代"、"富裕"、"有钱"、"家境优渥"等关键词，余额应该较高（几万到几十万）
+3. 如果角色描述中提到"学生"、"普通"、"工薪"等关键词，余额应该适中（几百到几千）
+4. 如果角色描述中提到"贫困"、"拮据"等关键词，余额应该较低（几十到几百）
+5. 只返回一个具体的数字金额，保留两位小数，不要包含任何其他文字、符号或说明
+6. 如果是古代/架空背景，请自动换算成合理的现代货币数值
+
+示例：
+- 富二代角色：应返回 50000.00 或更高
+- 普通学生：应返回 1500.00 左右
+- 普通打工人：应返回 3000.00 左右`;
+
+        console.log('[generateUserBalance] 发送给AI的Prompt:', systemPrompt);
+        
         const amountStr = await callAI([
             { role: "system", content: systemPrompt },
-            { role: "user", content: "请生成余额" }
+            { role: "user", content: "请根据上述角色人设信息，生成符合该角色经济状况的微信零钱余额。只返回数字金额，保留两位小数。" }
         ]);
+        
+        console.log('[generateUserBalance] AI返回的原始内容:', amountStr);
 
         // 提取数字
         const match = amountStr.match(/[\d,]+\.\d{2}/) || amountStr.match(/\d+/);
@@ -17712,6 +24417,16 @@ function showToast(message) {
 
 // 打开转账页面
 async function showTransferPage() {
+    // 关闭更多面板
+    closeChatPanel();
+    
+    // 判断是否是群聊
+    if (window.currentGroupChatId) {
+        // 群聊：显示转账类型选择弹窗
+        document.getElementById('group-transfer-type-modal').style.display = 'flex';
+        return;
+    }
+    
     if (!currentChatCharId) {
         showToast("请先进入聊天");
         return;
@@ -17735,6 +24450,641 @@ async function showTransferPage() {
 
 function hideTransferPage() {
     document.getElementById('transfer-page').style.display = 'none';
+}
+
+/* =================
+   群红包功能
+   ================= */
+
+let currentRedPacketType = 'lucky'; // 默认拼手气红包
+
+// 显示群红包页面
+function showGroupRedPacketPage() {
+    closeModal('group-transfer-type-modal');
+    
+    // 重置输入
+    document.getElementById('rp-amount-input').value = '';
+    document.getElementById('rp-count-input').value = '';
+    document.getElementById('rp-wish-input').value = '';
+    document.getElementById('rp-total-hint').innerText = '共0.00元';
+    document.getElementById('btn-send-redpacket').disabled = true;
+    document.getElementById('btn-send-redpacket').style.background = '#ccc';
+    document.getElementById('btn-send-redpacket').style.cursor = 'not-allowed';
+    
+    // 默认选中拼手气
+    selectRedPacketType('lucky');
+    
+    document.getElementById('group-redpacket-page').style.display = 'flex';
+}
+
+function hideGroupRedPacketPage() {
+    document.getElementById('group-redpacket-page').style.display = 'none';
+}
+
+// 选择红包类型
+function selectRedPacketType(type) {
+    currentRedPacketType = type;
+    
+    const luckyEl = document.getElementById('rp-type-lucky');
+    const normalEl = document.getElementById('rp-type-normal');
+    
+    if (type === 'lucky') {
+        luckyEl.style.borderColor = '#333';
+        luckyEl.style.background = '#fff';
+        luckyEl.querySelector('div:first-child').style.color = '#333';
+        
+        normalEl.style.borderColor = '#e8e8e8';
+        normalEl.style.background = '#fff';
+        normalEl.querySelector('div:first-child').style.color = '#666';
+    } else {
+        normalEl.style.borderColor = '#333';
+        normalEl.style.background = '#fff';
+        normalEl.querySelector('div:first-child').style.color = '#333';
+        
+        luckyEl.style.borderColor = '#e8e8e8';
+        luckyEl.style.background = '#fff';
+        luckyEl.querySelector('div:first-child').style.color = '#666';
+    }
+}
+
+// 检查红包输入
+function checkRedPacketInput() {
+    const amount = parseFloat(document.getElementById('rp-amount-input').value) || 0;
+    const count = parseInt(document.getElementById('rp-count-input').value) || 0;
+    
+    document.getElementById('rp-total-hint').innerText = `共${amount.toFixed(2)}元`;
+    
+    const btn = document.getElementById('btn-send-redpacket');
+    if (amount > 0 && count > 0) {
+        btn.disabled = false;
+        btn.style.background = '#333';
+        btn.style.cursor = 'pointer';
+    } else {
+        btn.disabled = true;
+        btn.style.background = '#ccc';
+        btn.style.cursor = 'not-allowed';
+    }
+}
+
+// 发送群红包
+async function sendGroupRedPacket() {
+    if (!window.currentGroupChatId) return;
+    
+    const amount = parseFloat(document.getElementById('rp-amount-input').value);
+    const count = parseInt(document.getElementById('rp-count-input').value);
+    const wish = document.getElementById('rp-wish-input').value.trim() || '恭喜发财，大吉大利';
+    
+    if (!amount || amount <= 0 || !count || count <= 0) {
+        showToast('请填写正确的金额和个数');
+        return;
+    }
+    
+    // 检查余额
+    if (!currentMyCharId) {
+        showToast("请先设置User身份");
+        return;
+    }
+    const user = await db.characters.get(parseInt(currentMyCharId));
+    let currentBalance = 0;
+    if (user && user.identity && user.identity.balance) {
+        currentBalance = parseFloat(user.identity.balance.toString().replace(/,/g, ''));
+    }
+    
+    if (currentBalance < amount) {
+        showToast('余额不足 (当前: ¥' + currentBalance.toFixed(2) + ')');
+        return;
+    }
+    
+    // 扣款
+    const newBalance = currentBalance - amount;
+    user.identity.balance = newBalance.toFixed(2);
+    await db.characters.put(user);
+    
+    // 构建红包消息
+    const group = await db.group_chats.get(window.currentGroupChatId);
+    if (!group) return;
+    
+    const redPacketData = {
+        type: 'redpacket',
+        redpacketType: currentRedPacketType, // 'lucky' 或 'normal'
+        totalAmount: amount.toFixed(2),
+        count: count,
+        wish: wish,
+        claimed: [], // 已领取的成员ID列表
+        claimedAmounts: {}, // 每个成员领取的金额
+        id: 'rp_' + Date.now()
+    };
+    
+    if (!group.chat_history) group.chat_history = [];
+    group.chat_history.push({
+        role: 'user',
+        type: 'redpacket',
+        content: JSON.stringify(redPacketData),
+        time: Date.now()
+    });
+    group.updated_at = Date.now();
+    await db.group_chats.put(group);
+    
+    // 记录账单
+    await addTransaction('expense', amount, '发红包', `${group.name} · ${count}个红包`);
+    
+    hideGroupRedPacketPage();
+    await renderGroupChatBody(group);
+    showToast('红包已发出');
+}
+
+/* =================
+   专属转账功能
+   ================= */
+
+let exclusiveTransferTarget = null; // 当前选中的转账目标
+
+// 显示专属转账选人弹窗
+async function showExclusiveTransferPage() {
+    closeModal('group-transfer-type-modal');
+    
+    if (!window.currentGroupChatId) return;
+    
+    const group = await db.group_chats.get(window.currentGroupChatId);
+    if (!group) return;
+    
+    const listEl = document.getElementById('exclusive-member-list');
+    listEl.innerHTML = '';
+    
+    // 渲染群成员列表（不包括自己）
+    for (const memberId of group.memberIds) {
+        const char = await db.characters.get(memberId);
+        if (!char) continue;
+        
+        const avatarStyle = char.avatar ? `background-image:url(${char.avatar})` : 'background:#ccc';
+        const memberNicknames = group.memberNicknames || {};
+        const displayName = memberNicknames[memberId] || char.remark || char.name;
+        
+        const item = document.createElement('div');
+        item.style.cssText = 'display:flex; align-items:center; padding:12px 16px; cursor:pointer; transition:background 0.2s;';
+        item.onmouseover = () => item.style.background = '#f5f5f5';
+        item.onmouseout = () => item.style.background = '';
+        item.innerHTML = `
+            <div style="width:44px; height:44px; border-radius:6px; ${avatarStyle}; background-size:cover; background-position:center; margin-right:12px;"></div>
+            <div style="flex:1;">
+                <div style="font-size:16px; color:#333;">${displayName}</div>
+                <div style="font-size:12px; color:#999;">${char.name}</div>
+            </div>
+        `;
+        item.onclick = () => selectExclusiveTarget(memberId, char, displayName);
+        
+        listEl.appendChild(item);
+    }
+    
+    if (group.memberIds.length === 0) {
+        listEl.innerHTML = '<div style="text-align:center; color:#999; padding:40px;">群内暂无其他成员</div>';
+    }
+    
+    document.getElementById('exclusive-transfer-modal').style.display = 'flex';
+}
+
+// 选择专属转账目标
+async function selectExclusiveTarget(memberId, char, displayName) {
+    closeModal('exclusive-transfer-modal');
+    
+    exclusiveTransferTarget = { memberId, char, displayName };
+    
+    // 打开转账页面
+    document.getElementById('t-target-name').innerText = displayName;
+    document.getElementById('t-target-avatar').style.backgroundImage = char.avatar ? `url(${char.avatar})` : '';
+    
+    // 重置输入
+    document.getElementById('t-amount-input').value = '';
+    document.getElementById('t-note-input').value = '';
+    document.getElementById('btn-do-transfer').disabled = true;
+    
+    document.getElementById('transfer-page').style.display = 'flex';
+}
+
+// 当前查看的红包ID
+let currentViewingRedPacketId = null;
+
+// 显示红包详情页面
+async function showRedPacketDetail(redPacketId) {
+    if (!window.currentGroupChatId) return;
+    
+    const group = await db.group_chats.get(window.currentGroupChatId);
+    if (!group || !group.chat_history) return;
+    
+    // 找到红包消息
+    const msg = group.chat_history.find(m => {
+        if (m.type !== 'redpacket') return false;
+        try {
+            const data = JSON.parse(m.content);
+            return data.id === redPacketId;
+        } catch(e) {
+            return false;
+        }
+    });
+    
+    if (!msg) return;
+    
+    const data = JSON.parse(msg.content);
+    currentViewingRedPacketId = redPacketId;
+    
+    // 获取发送者信息（红包消息的role是user）
+    let senderAvatar = '';
+    let senderName = '红包发送者';
+    if (currentMyCharId && msg.role === 'user') {
+        const user = await db.characters.get(parseInt(currentMyCharId));
+        if (user) {
+            senderAvatar = user.avatar || '';
+            const memberNicknames = group.memberNicknames || {};
+            senderName = memberNicknames[currentMyCharId] || user.name || '我';
+        }
+    }
+    
+    // 更新页面内容
+    document.getElementById('rp-detail-avatar').style.backgroundImage = senderAvatar ? `url(${senderAvatar})` : '';
+    document.getElementById('rp-detail-sender').innerText = senderName + ' 的红包';
+    document.getElementById('rp-detail-wish').innerText = data.wish || '恭喜发财';
+    document.getElementById('rp-detail-type').innerText = data.redpacketType === 'lucky' ? '拼手气红包' : '普通红包';
+    
+    // 更新统计信息
+    const claimedCount = data.claimed?.length || 0;
+    const claimedTotal = Object.values(data.claimedAmounts || {}).reduce((a, b) => a + parseFloat(b), 0);
+    document.getElementById('rp-detail-claimed-count').innerText = claimedCount;
+    document.getElementById('rp-detail-total-count').innerText = data.count;
+    document.getElementById('rp-detail-total-amount').innerText = claimedTotal.toFixed(2);
+    
+    // 更新领取按钮状态
+    const myId = currentMyCharId ? parseInt(currentMyCharId) : null;
+    const isAllClaimed = claimedCount >= data.count;
+    const hasClaimed = data.claimed?.includes(myId);
+    
+    const actionDiv = document.getElementById('rp-detail-action');
+    const btn = document.getElementById('btn-claim-redpacket');
+    
+    if (isAllClaimed) {
+        btn.innerText = '红包已领完';
+        btn.disabled = true;
+        btn.style.background = '#ccc';
+        btn.style.cursor = 'not-allowed';
+    } else if (hasClaimed) {
+        btn.innerText = `已领取 ¥${data.claimedAmounts[myId]}`;
+        btn.disabled = true;
+        btn.style.background = '#ccc';
+        btn.style.cursor = 'not-allowed';
+    } else {
+        btn.innerText = '领取红包';
+        btn.disabled = false;
+        btn.style.background = '#333';
+        btn.style.cursor = 'pointer';
+    }
+    
+    // 渲染已领取列表
+    const listEl = document.getElementById('rp-detail-claimed-list');
+    listEl.innerHTML = '';
+    
+    if (data.claimed && data.claimed.length > 0) {
+        for (const memberId of data.claimed) {
+            const char = await db.characters.get(memberId);
+            const memberNicknames = group.memberNicknames || {};
+            const displayName = memberNicknames[memberId] || char?.remark || char?.name || '未知用户';
+            const avatar = char?.avatar || '';
+            const amount = data.claimedAmounts[memberId] || '0.00';
+            
+            const item = document.createElement('div');
+            item.style.cssText = 'display:flex; align-items:center; padding:12px 0; border-bottom:1px solid #f0f0f0;';
+            item.innerHTML = `
+                <div style="width:40px; height:40px; border-radius:50%; background:#eee; background-image:url(${avatar}); background-size:cover; background-position:center; margin-right:12px; flex-shrink:0;"></div>
+                <div style="flex:1;">
+                    <div style="font-size:14px; color:#333;">${displayName}</div>
+                </div>
+                <div style="font-size:15px; font-weight:500; color:#333;">¥${amount}</div>
+            `;
+            listEl.appendChild(item);
+        }
+    } else {
+        listEl.innerHTML = '<div style="text-align:center; color:#999; padding:30px 0; font-size:13px;">暂无人领取</div>';
+    }
+    
+    document.getElementById('redpacket-detail-page').style.display = 'flex';
+}
+
+// 隐藏红包详情页面
+function hideRedPacketDetail() {
+    document.getElementById('redpacket-detail-page').style.display = 'none';
+    currentViewingRedPacketId = null;
+}
+
+// 领取红包
+async function claimRedPacket() {
+    if (!currentViewingRedPacketId || !window.currentGroupChatId) return;
+    
+    const group = await db.group_chats.get(window.currentGroupChatId);
+    if (!group || !group.chat_history) return;
+    
+    // 找到红包消息
+    const msgIndex = group.chat_history.findIndex(m => {
+        if (m.type !== 'redpacket') return false;
+        try {
+            const data = JSON.parse(m.content);
+            return data.id === currentViewingRedPacketId;
+        } catch(e) {
+            return false;
+        }
+    });
+    
+    if (msgIndex === -1) return;
+    
+    const msg = group.chat_history[msgIndex];
+    const data = JSON.parse(msg.content);
+    
+    // 检查是否已领取完
+    if ((data.claimed?.length || 0) >= data.count) {
+        showToast('红包已被领完');
+        await showRedPacketDetail(currentViewingRedPacketId); // 刷新页面
+        return;
+    }
+    
+    // 检查是否已领取过
+    const myId = currentMyCharId ? parseInt(currentMyCharId) : null;
+    if (!myId) {
+        showToast('请先设置身份');
+        return;
+    }
+    if (data.claimed?.includes(myId)) {
+        showToast('你已领取过该红包');
+        return;
+    }
+    
+    // 领取红包
+    if (!data.claimed) data.claimed = [];
+    if (!data.claimedAmounts) data.claimedAmounts = {};
+    
+    let claimAmount = 0;
+    const totalAmount = parseFloat(data.totalAmount);
+    const remaining = data.count - data.claimed.length;
+    const alreadyClaimed = Object.values(data.claimedAmounts).reduce((a, b) => a + parseFloat(b), 0);
+    const remainingAmount = totalAmount - alreadyClaimed;
+    
+    if (data.redpacketType === 'lucky') {
+        // 拼手气红包：随机金额
+        if (remaining === 1) {
+            claimAmount = remainingAmount;
+        } else {
+            // 随机金额，确保每人至少0.01
+            const maxAmount = remainingAmount - (remaining - 1) * 0.01;
+            claimAmount = Math.random() * maxAmount * 0.8 + 0.01; // 保守随机
+            claimAmount = Math.min(claimAmount, maxAmount);
+        }
+    } else {
+        // 普通红包：平均分配
+        claimAmount = totalAmount / data.count;
+    }
+    
+    claimAmount = parseFloat(claimAmount.toFixed(2));
+    
+    // 记录领取
+    data.claimed.push(myId);
+    data.claimedAmounts[myId] = claimAmount.toFixed(2);
+    
+    // 更新红包消息
+    group.chat_history[msgIndex].content = JSON.stringify(data);
+    await db.group_chats.put(group);
+    
+    // 增加余额
+    const user = await db.characters.get(myId);
+    if (user) {
+        if (!user.identity) user.identity = {};
+        let balance = parseFloat(user.identity.balance || 0);
+        balance += claimAmount;
+        user.identity.balance = balance.toFixed(2);
+        await db.characters.put(user);
+    }
+    
+    // 记录账单（收入）
+    await addTransaction('income', claimAmount, '红包', `${group.name}`);
+    
+    // 刷新红包详情页面
+    await showRedPacketDetail(currentViewingRedPacketId);
+    
+    // 刷新群聊
+    await renderGroupChatBody(group);
+    
+    showToast(`成功领取 ¥${claimAmount.toFixed(2)}`);
+}
+
+// 领取群聊专属转账
+async function receiveGroupTransfer(msgId) {
+    if (!window.currentGroupChatId) return;
+    
+    const group = await db.group_chats.get(window.currentGroupChatId);
+    if (!group || !group.chat_history) return;
+    
+    // 找到转账消息
+    const msgIndex = group.chat_history.findIndex(m => m.id === msgId && m.type === 'transfer');
+    if (msgIndex === -1) return;
+    
+    const msg = group.chat_history[msgIndex];
+    const data = JSON.parse(msg.content);
+    
+    // 检查是否已经被领取
+    if (data.status === 'received') {
+        showToast('该转账已被领取');
+        return;
+    }
+    
+    // 检查是否是自己发的
+    const myId = currentMyCharId ? parseInt(currentMyCharId) : null;
+    if (msg.role === 'user') {
+        showToast('不能领取自己发的转账');
+        return;
+    }
+    
+    // 检查是否是转给自己的（专属转账）
+    if (data.targetId && data.targetId !== myId) {
+        // 获取目标名称
+        const targetChar = await db.characters.get(data.targetId);
+        const targetName = data.targetName || targetChar?.name || '其他人';
+        showToast(`这是专属转账给 ${targetName} 的`);
+        return;
+    }
+    
+    // 领取转账
+    data.status = 'received';
+    data.receivedBy = myId;
+    data.receivedAt = Date.now();
+    
+    group.chat_history[msgIndex].content = JSON.stringify(data);
+    await db.group_chats.put(group);
+    
+    // 增加余额
+    if (currentMyCharId) {
+        const user = await db.characters.get(parseInt(currentMyCharId));
+        if (user) {
+            if (!user.identity) user.identity = {};
+            let balance = parseFloat(user.identity.balance || 0);
+            balance += parseFloat(data.amount);
+            user.identity.balance = balance.toFixed(2);
+            await db.characters.put(user);
+        }
+    }
+    
+    // 获取发送者名称
+    let senderName = '群友';
+    // 从群聊历史中获取发送者信息（假设msg包含senderId）
+    if (data.senderId) {
+        const senderChar = await db.characters.get(data.senderId);
+        if (senderChar) {
+            const memberNicknames = group.memberNicknames || {};
+            senderName = memberNicknames[data.senderId] || senderChar.remark || senderChar.name;
+        }
+    }
+    
+    // 记录账单（收入）
+    await addTransaction('income', data.amount, '转账收款', `来自${senderName}`);
+    
+    // 刷新群聊
+    await renderGroupChatBody(group);
+    showToast(`已收款 ¥${data.amount}`);
+}
+
+/* =================
+   位置功能
+   ================= */
+
+// 打开位置输入弹窗
+function showLocationModal() {
+    // 清空输入
+    document.getElementById('location-name-input').value = '';
+    document.getElementById('location-address-input').value = '';
+    
+    const modal = document.getElementById('location-modal');
+    modal.style.display = 'flex';
+}
+
+// 关闭位置输入弹窗
+function hideLocationModal() {
+    document.getElementById('location-modal').style.display = 'none';
+}
+
+// 发送位置消息
+async function sendLocationMessage() {
+    const nameVal = document.getElementById('location-name-input').value.trim();
+    const addressVal = document.getElementById('location-address-input').value.trim();
+    
+    if (!nameVal) {
+        showToast("请输入位置名称");
+        return;
+    }
+    
+    if (!currentChatCharId) {
+        showToast("请先进入聊天");
+        return;
+    }
+    
+    const chatChar = await db.characters.get(currentChatCharId);
+    if (!chatChar) {
+        showToast("聊天对象不存在");
+        return;
+    }
+    
+    const accountId = getCurrentAccountId();
+    let history = getChatHistory(chatChar, accountId);
+    
+    const msgId = 'loc_' + Date.now();
+    const msg = {
+        id: msgId,
+        role: 'user',
+        type: 'location',
+        content: JSON.stringify({
+            name: nameVal,
+            address: addressVal || '暂无详细地址'
+        }), 
+        time: Date.now()
+    };
+    
+    history.push(msg);
+    await setChatHistory(chatChar, accountId, history);
+    
+    // 刷新聊天界面
+    renderChatBody(chatChar);
+    
+    hideLocationModal();
+    showToast("位置已发送");
+    
+    // 关闭更多面板
+    document.getElementById('action-panel').style.display = 'none';
+    document.getElementById('chat-panel-container').classList.remove('open');
+}
+
+// 显示位置详情
+function showLocationDetail(encodedName, encodedAddress) {
+    const name = decodeURIComponent(encodedName);
+    const address = decodeURIComponent(encodedAddress);
+    
+    // 创建详情弹窗
+    const overlay = document.createElement('div');
+    overlay.id = 'location-detail-overlay';
+    overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.4);
+        z-index: 999;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    `;
+    
+    overlay.innerHTML = `
+        <div style="
+            background: #fff;
+            width: 260px;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.15);
+        ">
+            <div style="padding: 20px; text-align: center;">
+                <div style="
+                    width: 48px;
+                    height: 48px;
+                    background: #f5f5f5;
+                    border-radius: 12px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    margin: 0 auto 16px;
+                ">
+                    <svg viewBox="0 0 24 24" style="width:24px; height:24px; fill:none; stroke:#666; stroke-width:2;">
+                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                        <circle cx="12" cy="10" r="3"></circle>
+                    </svg>
+                </div>
+                <div style="font-size: 16px; font-weight: 600; color: #333; margin-bottom: 6px;">${name}</div>
+                <div style="font-size: 13px; color: #999;">${address || '暂无详细地址'}</div>
+            </div>
+            <div style="border-top: 1px solid #f0f0f0;">
+                <button onclick="document.getElementById('location-detail-overlay').remove()" style="
+                    width: 100%;
+                    padding: 14px;
+                    background: #fff;
+                    color: #333;
+                    border: none;
+                    font-size: 15px;
+                    font-weight: 500;
+                    cursor: pointer;
+                ">关闭</button>
+            </div>
+        </div>
+    `;
+    
+    overlay.onclick = (e) => {
+        if (e.target === overlay) {
+            overlay.remove();
+        }
+    };
+    
+    document.body.appendChild(overlay);
 }
 
 // 检查金额输入，控制按钮状态
@@ -17778,7 +25128,49 @@ async function doTransfer() {
     user.identity.balance = newBalance.toFixed(2);
     await db.characters.put(user);
     
-    // 3. 发送消息 - 存入chat_history（按账号）
+    // 3. 判断是群聊专属转账还是私聊转账
+    if (window.currentGroupChatId && exclusiveTransferTarget) {
+        // 群聊专属转账
+        const group = await db.group_chats.get(window.currentGroupChatId);
+        if (!group) {
+            showToast("群聊不存在");
+            return;
+        }
+        
+        const msgId = 'trans_' + Date.now();
+        const msg = {
+            role: 'user',
+            type: 'transfer',
+            content: JSON.stringify({
+                amount: amountVal.toFixed(2),
+                desc: noteVal,
+                status: 'sent',
+                senderId: parseInt(currentMyCharId),
+                targetId: exclusiveTransferTarget.memberId,
+                targetName: exclusiveTransferTarget.displayName
+            }), 
+            time: Date.now(),
+            id: msgId
+        };
+        
+        if (!group.chat_history) group.chat_history = [];
+        group.chat_history.push(msg);
+        group.updated_at = Date.now();
+        await db.group_chats.put(group);
+        
+        // 记录账单
+        await addTransaction('expense', amountVal, '转账', `转给${exclusiveTransferTarget.displayName}`);
+        
+        // 刷新群聊界面
+        await renderGroupChatBody(group);
+        
+        hideTransferPage();
+        exclusiveTransferTarget = null; // 清空目标
+        showToast("转账成功");
+        return;
+    }
+    
+    // 私聊转账
     const chatChar = await db.characters.get(currentChatCharId);
     if (!chatChar) {
         showToast("聊天对象不存在");
@@ -17789,20 +25181,44 @@ async function doTransfer() {
     let history = getChatHistory(chatChar, accountId);
     
     const msgId = 'trans_' + Date.now();
+    const transferData = {
+        amount: amountVal.toFixed(2),
+        desc: noteVal,
+        status: 'sent'
+    };
     const msg = {
         id: msgId,
         role: 'user',
         type: 'transfer',
-        content: JSON.stringify({
-            amount: amountVal.toFixed(2),
-            desc: noteVal,
-            status: 'sent'
-        }), 
+        content: JSON.stringify(transferData), 
         time: Date.now()
     };
     
     history.push(msg);
     await setChatHistory(chatChar, accountId, history);
+    
+    // 记录账单
+    await addTransaction('expense', amountVal, '转账', `转给${chatChar.remark || chatChar.name}`);
+    
+    // ✅ 联机好友：通过服务器发送转账消息
+    if (chatChar.isOnlineFriend && chatChar.onlineData?.wx_account) {
+        // 获取当前可用的在线角色（如果没有则自动上线）
+        const onlineUserChar = await getOrCreateOnlineUserChar();
+        
+        if (onlineUserChar && onlineConnected) {
+            const fromWxAccount = onlineUserChar.identity.account;
+            const toWxAccount = chatChar.onlineData.wx_account;
+            // 发送转账消息（使用特殊JSON格式，对方可以识别并渲染为卡片）
+            const transferContent = JSON.stringify({
+                __type: 'transfer',
+                amount: amountVal.toFixed(2),
+                desc: noteVal,
+                status: 'sent'
+            });
+            sendOnlineMessage(toWxAccount, transferContent, fromWxAccount);
+            console.log('[Online] 转账消息已发送到服务器');
+        }
+    }
     
     // 刷新聊天界面
     renderChatBody(chatChar);
@@ -18041,12 +25457,18 @@ function loadPhoneContacts() {
     });
 }
 
-function loadPhoneRecents() {
+async function loadPhoneRecents() {
     const recentsList = document.getElementById('phone-recents-list');
     if (!recentsList) return;
     
-    // 从localStorage加载最近通话记录
-    const recents = JSON.parse(localStorage.getItem('phone_recents') || '[]');
+    const accountId = getCurrentAccountId();
+    if (!accountId) {
+        recentsList.innerHTML = `<div class="phone-empty-state"><div>请先登录账号</div></div>`;
+        return;
+    }
+    
+    // 从 Dexie 加载最近通话记录
+    let recents = await db.phone_recents.where('accountId').equals(accountId).toArray();
     
     if (recents.length === 0) {
         recentsList.innerHTML = `
@@ -18062,23 +25484,37 @@ function loadPhoneRecents() {
     recents.sort((a, b) => b.time - a.time);
     
     let html = '';
-    recents.forEach(recent => {
+    for (const recent of recents) {
+        // 如果有 charId，尝试从数据库获取最新的角色头像
+        let avatar = null;
+        if (recent.charId) {
+            const char = await db.characters.get(recent.charId);
+            if (char) {
+                avatar = char.avatar;
+            }
+        }
+        
         const name = recent.name || recent.number || '未知';
         const phone = recent.number || '';
         const time = new Date(recent.time);
         const timeStr = formatPhoneTime(time);
         const firstLetter = name.charAt(0).toUpperCase();
         
+        // 使用头像或首字母
+        const avatarHtml = avatar 
+            ? `<img src="${avatar}" class="phone-list-avatar" style="object-fit:cover;border-radius:50%;" />`
+            : `<div class="phone-list-avatar">${firstLetter}</div>`;
+        
         html += `
             <div class="phone-list-item" onclick="phoneCallNumber('${phone}')">
-                <div class="phone-list-avatar">${firstLetter}</div>
+                ${avatarHtml}
                 <div class="phone-list-info">
                     <div class="phone-list-name">${name}</div>
                     <div class="phone-list-subtitle">${timeStr}</div>
                 </div>
             </div>
         `;
-    });
+    }
     
     recentsList.innerHTML = html;
 }
@@ -18227,20 +25663,27 @@ function phoneCallNumber(number) {
     phoneMakeCall();
 }
 
-function addPhoneRecent(name, number) {
-    const recents = JSON.parse(localStorage.getItem('phone_recents') || '[]');
-    recents.unshift({
+async function addPhoneRecent(name, number, charId = null) {
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    // 添加到 Dexie 数据库
+    await db.phone_recents.add({
+        accountId: accountId,
+        charId: charId,
         name: name,
         number: number,
-        time: Date.now()
+        time: Date.now(),
+        type: 'outgoing' // 拨出电话
     });
     
-    // 只保留最近50条
-    if (recents.length > 50) {
-        recents.pop();
+    // 限制每个账号最多保留100条
+    const count = await db.phone_recents.where('accountId').equals(accountId).count();
+    if (count > 100) {
+        const oldest = await db.phone_recents.where('accountId').equals(accountId).sortBy('time');
+        const toDelete = oldest.slice(0, count - 100);
+        await db.phone_recents.bulkDelete(toDelete.map(r => r.id));
     }
-    
-    localStorage.setItem('phone_recents', JSON.stringify(recents));
 }
 
 // 拨号键盘初始化在showPhonePage中完成
@@ -19041,49 +26484,65 @@ if (wyyTogetherListenBtn) {
     });
 }
 
-// 显示角色选择器
-function wyyShowTogetherListenRoleSelector() {
+// 显示角色选择器（从数据库加载角色，不包括联机好友）
+async function wyyShowTogetherListenRoleSelector() {
     if (!wyyTogetherListenRoleList) return;
     
-    const friends = getFriendList();
-    
-    if (friends.length === 0) {
-        wyyTogetherListenRoleList.innerHTML = '<div style="text-align: center; padding: 20px; color: #999;">还没有好友，请先添加好友</div>';
-    } else {
-        let html = '';
-        friends.forEach(friend => {
-            // 处理friend可能是对象或字符串的情况
-            const friendName = typeof friend === 'string' ? friend : (friend.name || friend.remark || '未知');
-            const friendDisplayName = typeof friend === 'string' ? friend : (friend.remark || friend.name || '未知');
-            const isActive = wyyTogetherListenRole === friendName;
-            const firstChar = String(friendDisplayName).charAt(0);
-            
-            html += `
-                <div class="wyy-playlist-selector-item ${isActive ? 'active' : ''}" data-role="${friendName}" style="padding: 12px; border-bottom: 1px solid #eee; cursor: pointer; display: flex; align-items: center; gap: 12px; transition: background 0.2s;">
-                    <div style="width: 40px; height: 40px; border-radius: 50%; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #666;">${firstChar}</div>
-                    <div style="flex: 1;">
-                        <div style="font-weight: 500; color: #333; margin-bottom: 2px;">${friendDisplayName}</div>
-                        ${isActive ? '<div style="font-size: 12px; color: #ff6b6b;">正在一起听</div>' : ''}
-                    </div>
-                    ${isActive ? '<i class="fa fa-check-circle" style="color: #ff6b6b;"></i>' : '<i class="fa fa-chevron-right" style="color: #ccc;"></i>'}
-                </div>
-            `;
+    try {
+        const accountId = getCurrentAccountId();
+        const allChars = await db.characters.toArray();
+        // 筛选：非user类型、是好友状态的角色
+        const friends = allChars.filter(char => {
+            if (char.type === 'user') return false;
+            if (!accountId) return char.wechat_status === 'friend';
+            const status = getFriendStatus(char, accountId);
+            return status === 'friend';
         });
-        wyyTogetherListenRoleList.innerHTML = html;
         
-        // 添加点击事件
-        document.querySelectorAll('.wyy-playlist-selector-item[data-role]').forEach(item => {
-            item.addEventListener('click', function() {
-                const role = this.getAttribute('data-role');
-                if (wyyTogetherListenRole === role) {
-                    // 如果已经是一起听的角色，则结束一起听
-                    wyyStopTogetherListen();
-                } else {
-                    // 开始和该角色一起听
-                    wyyStartTogetherListen(role);
-                }
+        if (friends.length === 0) {
+            wyyTogetherListenRoleList.innerHTML = '<div style="text-align: center; padding: 20px; color: #999;">还没有好友，请先添加角色好友</div>';
+        } else {
+            let html = '';
+            friends.forEach(char => {
+                const charName = char.name || '未知';
+                const displayName = char.nick || char.name || '未知';
+                const isActive = wyyTogetherListenRole === charName;
+                const avatarUrl = char.avatar || '';
+                const firstChar = String(displayName).charAt(0);
+                
+                const avatarHtml = avatarUrl 
+                    ? `<div style="width: 42px; height: 42px; border-radius: 50%; background: url('${avatarUrl}') center/cover no-repeat; flex-shrink: 0;"></div>`
+                    : `<div style="width: 42px; height: 42px; border-radius: 50%; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #666; flex-shrink: 0;">${firstChar}</div>`;
+                
+                html += `
+                    <div class="wyy-together-listen-item ${isActive ? 'active' : ''}" data-role="${charName}" data-char-id="${char.id}" style="padding: 12px 16px; border-bottom: 1px solid #f0f0f0; cursor: pointer; display: flex; align-items: center; gap: 12px; transition: background 0.2s;">
+                        ${avatarHtml}
+                        <div style="flex: 1; min-width: 0;">
+                            <div style="font-weight: 500; color: #333; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${displayName}</div>
+                            ${isActive ? '<div style="font-size: 12px; color: #ff6b6b;">♪ 正在一起听</div>' : ''}
+                        </div>
+                        ${isActive ? '<i class="fa fa-check-circle" style="color: #ff6b6b; font-size: 18px;"></i>' : '<i class="fa fa-chevron-right" style="color: #ccc;"></i>'}
+                    </div>
+                `;
             });
-        });
+            wyyTogetherListenRoleList.innerHTML = html;
+            
+            // 添加点击事件
+            document.querySelectorAll('.wyy-together-listen-item[data-role]').forEach(item => {
+                item.addEventListener('click', function() {
+                    const role = this.getAttribute('data-role');
+                    const charId = this.getAttribute('data-char-id');
+                    if (wyyTogetherListenRole === role) {
+                        wyyStopTogetherListen();
+                    } else {
+                        wyyStartTogetherListen(role, charId);
+                    }
+                });
+            });
+        }
+    } catch (error) {
+        console.error('[一起听] 加载角色列表失败:', error);
+        wyyTogetherListenRoleList.innerHTML = '<div style="text-align: center; padding: 20px; color: #999;">加载失败，请重试</div>';
     }
     
     // 更新结束按钮显示
@@ -19099,28 +26558,38 @@ function wyyShowTogetherListenRoleSelector() {
 }
 
 // 开始一起听
-function wyyStartTogetherListen(role) {
+let wyyTogetherListenCharId = null; // 当前一起听角色的ID
+function wyyStartTogetherListen(role, charId) {
     // 确保role是字符串
     wyyTogetherListenRole = String(role);
+    wyyTogetherListenCharId = charId ? parseInt(charId) : null;
     if (wyyTogetherListenBtn) wyyTogetherListenBtn.classList.add('active');
     if (wyyTogetherListenModal) wyyTogetherListenModal.style.display = 'none';
     
-    // 不再发送消息到对话框，只作为角色回复的参考
-    // 开始定时更新一起听状态（虽然不再更新卡片，但保持状态）
+    // 更新播放页顶栏显示
+    wyyUpdateTogetherListenDisplay();
+    
+    // 状态会通过 systemPrompt 传递给角色
     wyyStartTogetherListenUpdate();
     
-    alert(`已开始和 ${wyyTogetherListenRole} 一起听`);
+    showToast(`正在和 ${wyyTogetherListenRole} 一起听 ♪`);
 }
 
 // 结束一起听
 function wyyStopTogetherListen() {
-    // 不再发送消息到对话框
+    const prevRole = wyyTogetherListenRole;
     wyyTogetherListenRole = null;
+    wyyTogetherListenCharId = null;
     if (wyyTogetherListenBtn) wyyTogetherListenBtn.classList.remove('active');
     if (wyyTogetherListenModal) wyyTogetherListenModal.style.display = 'none';
     
+    // 更新播放页顶栏显示
+    wyyUpdateTogetherListenDisplay();
+    
     // 停止定时更新
     wyyStopTogetherListenUpdate();
+    
+    if (prevRole) showToast(`已结束和 ${prevRole} 一起听`);
 }
 
 // 开始定时更新一起听状态（不再更新卡片，只保持状态）
@@ -19136,6 +26605,40 @@ function wyyStopTogetherListenUpdate() {
         clearInterval(wyyTogetherListenInterval);
         wyyTogetherListenInterval = null;
     }
+}
+
+// 更新播放页一起听状态显示
+function wyyUpdateTogetherListenDisplay() {
+    const titleEl = document.querySelector('.wyy-player-top-bar-title');
+    if (!titleEl) return;
+    
+    if (wyyTogetherListenRole) {
+        titleEl.innerHTML = `<div style="font-size:14px; line-height:1.2;">正在播放</div><div style="font-size:11px; color:rgba(255,255,255,0.6); line-height:1.2;">与 ${wyyTogetherListenRole} 一起听 ♪</div>`;
+    } else {
+        titleEl.textContent = '正在播放';
+    }
+}
+
+// 获取当前一起听的状态信息（供system prompt使用）
+function wyyGetTogetherListenInfo() {
+    if (!wyyTogetherListenRole) return null;
+    
+    let songName = '未知歌曲';
+    let singerName = '未知歌手';
+    
+    if (wyyPlaylist.length > 0 && wyyCurrentSongIndex < wyyPlaylist.length) {
+        const currentSong = wyyPlaylist[wyyCurrentSongIndex];
+        songName = currentSong.name || currentSong.title || '未知歌曲';
+        singerName = currentSong.singer || currentSong.artist || '未知歌手';
+    }
+    
+    return {
+        role: wyyTogetherListenRole,
+        charId: wyyTogetherListenCharId,
+        songName: songName,
+        singerName: singerName,
+        isPlaying: wyyAudio && !wyyAudio.paused
+    };
 }
 
 // 从聊天切换歌曲（全局函数，供HTML onclick使用）
@@ -20907,28 +28410,22 @@ async function sendVerificationCodeMessage(userId, code) {
     
     console.log('[欢迎小助手] User信息:', user.name);
     
-    // 🔥 添加到主页面的短信消息列表（这样才能在桌面显示）
-    const smsMessages = JSON.parse(localStorage.getItem('sms_messages') || '[]');
-    
+    const accountId = String(userId); // 使用userId作为accountId
     const messageContent = `【微信验证码】您的验证码是：${code}，5分钟内有效，请勿泄露。`;
     
-    const newMessage = {
-        id: Date.now(),
+    // 🔥 添加到 Dexie 数据库
+    await db.sms_messages.add({
+        accountId: accountId,
+        charId: null, // 系统消息没有角色ID
         type: 'received',  // 接收的消息
         sender: '欢迎小助手',
-        senderAvatar: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="%23FFB6C1"/><text x="50" y="60" text-anchor="middle" font-size="40" fill="white">📬</text></svg>',
         number: '欢迎小助手',
-        content: messageContent,  // ✅ 使用 content 字段
-        message: messageContent,  // ✅ 兼容旧字段
-        time: Date.now(),  // ✅ 使用 time 字段
-        timestamp: Date.now(),  // ✅ 兼容 timestamp
+        content: messageContent,
+        time: Date.now(),
         read: false
-    };
+    });
     
-    smsMessages.unshift(newMessage);  // ✅ 使用 unshift 把新消息放在最前面
-    localStorage.setItem('sms_messages', JSON.stringify(smsMessages));
-    
-    console.log('[欢迎小助手] ✅ 验证码消息已添加到短信列表:', newMessage);
+    console.log('[欢迎小助手] ✅ 验证码消息已添加到短信列表');
     
     // 🔥 立即刷新主页面的消息列表
     console.log('[欢迎小助手] 🔄 正在刷新主页面消息列表...');
@@ -21340,6 +28837,33 @@ function getCheckAccountSystemPrompt(char, myChar) {
     
     const hasPassword = myChar.identity?.password && myChar.identity.password.trim() !== '';
     
+    // 检测角色是否是高权限人设（黑客/权势地位高）
+    const charDescription = (char.description || '').toLowerCase();
+    const charIdentity = (char.identity?.identity || '').toLowerCase();
+    const charOccupation = (char.identity?.occupation || '').toLowerCase();
+    
+    const isHighPrivilege = 
+        charDescription.includes('黑客') || 
+        charDescription.includes('hacker') ||
+        charDescription.includes('程序员') ||
+        charDescription.includes('技术大佬') ||
+        charDescription.includes('总裁') ||
+        charDescription.includes('老板') ||
+        charDescription.includes('ceo') ||
+        charDescription.includes('董事长') ||
+        charDescription.includes('富豪') ||
+        charDescription.includes('权势') ||
+        charDescription.includes('特工') ||
+        charDescription.includes('间谍') ||
+        charIdentity.includes('黑客') ||
+        charIdentity.includes('hacker') ||
+        charIdentity.includes('总裁') ||
+        charIdentity.includes('ceo') ||
+        charOccupation.includes('黑客') ||
+        charOccupation.includes('程序员') ||
+        charOccupation.includes('总裁') ||
+        charOccupation.includes('ceo');
+    
     let prompt = `
 
 【特殊能力：账号查岗】
@@ -21360,7 +28884,18 @@ function getCheckAccountSystemPrompt(char, myChar) {
 `;
 
     if (hasPassword) {
-        prompt += `**查岗方式：**
+        // 高权限人设：直接告知密码
+        if (isHighPrivilege) {
+            prompt += `**查岗方式：**
+${myChar.name}设置了账号密码，但凭借你的能力（黑客技术/权势地位），你可以轻松获取密码。
+- ${myChar.name}的账号密码是：**${myChar.identity.password}**
+- 如果你想尝试登录，在回复的**最后**加上：[CHECK_ACCOUNT:${myChar.identity.password}]
+- 例如：让我看看你在干嘛~|||[CHECK_ACCOUNT:${myChar.identity.password}]
+- 登录成功后，你就能看到${myChar.name}的账号信息和好友列表
+- 你可以根据你的身份（黑客/高层人士）自然地表现出这种能力，比如"我破解了你的密码"、"凭我的权限查一下"等`;
+        } else {
+            // 普通人设：需要猜测密码
+            prompt += `**查岗方式：**
 ${myChar.name}设置了账号密码，你需要猜测密码才能登录。
 - 如果你想尝试登录，在回复的**最后**加上：[CHECK_ACCOUNT:你猜测的密码]
 - 例如：你在干嘛呢？|||[CHECK_ACCOUNT:123456]
@@ -21368,7 +28903,8 @@ ${myChar.name}设置了账号密码，你需要猜测密码才能登录。
 - 如果密码正确，你就能看到${myChar.name}的账号信息和好友列表
 
 **密码提示：**
-你可以根据${myChar.name}的生日、喜好、常用数字等信息猜测密码。`;
+你可以根据${myChar.name}的生日、喜好、常用数字等信息猜测密码。记住，你只是普通人，无法直接破解密码，只能靠猜测。`;
+        }
     } else {
         prompt += `**查岗方式：**
 ${myChar.name}没有设置账号密码，你可以直接登录。
@@ -21376,6 +28912,16 @@ ${myChar.name}没有设置账号密码，你可以直接登录。
 - 例如：你在干嘛呢？|||我想看看你在做什么|||[CHECK_ACCOUNT]
 - 登录后，${myChar.name}的账号会下线，TA会看到"当前账号已下线"的提示
 - 你可以看到${myChar.name}的所有账号信息、好友列表等`;
+    }
+    
+    // 🔥 修罗场模式：添加额外操作指令（仅在查岗成功后的二次分析中使用）
+    if (char.allow_shura_mode) {
+        prompt += `
+
+【修罗场模式说明】
+修罗场模式已开启。**但是注意：修罗场操作指令（SHURA_DELETE/SHURA_BLACKLIST/SHURA_SEND）只能在查岗成功、看到WeChat数据之后才能使用！**
+**在普通聊天中绝对不能使用这些指令！普通聊天中不要输出任何SHURA相关的内容！**
+只有当你成功登录${myChar.name}的账号、看到了好友列表和聊天记录之后，才可以使用这些操作指令。`;
     }
     
     return prompt;
@@ -21477,6 +29023,190 @@ async function processAiCheckAccount(char, aiReplyText) {
         wechatData: wechatData,
         success: success // 新增：标记是否成功查岗
     };
+}
+
+// 🔥 修罗场模式：解析并执行AI回复中的操作指令
+async function processShuraActions(char, replyText) {
+    if (!char.allow_shura_mode) return { cleanReply: replyText, actions: [] };
+    
+    const actions = [];
+    let cleanReply = replyText;
+    
+    // 解析 [SHURA_DELETE:好友名]
+    const deleteRegex = /\[SHURA_DELETE:([^\]]+)\]/gi;
+    let match;
+    while ((match = deleteRegex.exec(replyText)) !== null) {
+        actions.push({ type: 'delete', friendName: match[1].trim() });
+        cleanReply = cleanReply.replace(match[0], '');
+    }
+    
+    // 解析 [SHURA_BLACKLIST:好友名]
+    const blacklistRegex = /\[SHURA_BLACKLIST:([^\]]+)\]/gi;
+    while ((match = blacklistRegex.exec(replyText)) !== null) {
+        actions.push({ type: 'blacklist', friendName: match[1].trim() });
+        cleanReply = cleanReply.replace(match[0], '');
+    }
+    
+    // 解析 [SHURA_SEND:好友名:消息内容]
+    const sendRegex = /\[SHURA_SEND:([^:]+):([^\]]+)\]/gi;
+    while ((match = sendRegex.exec(replyText)) !== null) {
+        actions.push({ type: 'send', friendName: match[1].trim(), message: match[2].trim() });
+        cleanReply = cleanReply.replace(match[0], '');
+    }
+    
+    // 清理多余的分隔符
+    cleanReply = cleanReply.replace(/(\|\|\|)+$/g, '').replace(/^\|\|\|/g, '').replace(/\|\|\|\|\|\|/g, '|||').trim();
+    
+    if (actions.length === 0) return { cleanReply: replyText, actions: [] };
+    
+    console.log('[修罗场] 检测到操作指令:', actions);
+    
+    // 执行操作
+    const accountId = getCurrentAccountId();
+    const myChar = await db.characters.get(parseInt(accountId));
+    if (!myChar) {
+        console.error('[修罗场] 无法获取当前用户角色');
+        return { cleanReply, actions: [] };
+    }
+    
+    const executedActions = [];
+    
+    for (const action of actions) {
+        try {
+            if (action.type === 'delete') {
+                // 查找好友角色
+                const targetChar = await findCharacterByName(action.friendName);
+                if (targetChar) {
+                    // 删除好友关系
+                    await setFriendStatus(targetChar, accountId, 'deleted');
+                    console.log(`[修罗场] ✅ 已删除好友: ${action.friendName}`);
+                    executedActions.push({ ...action, success: true });
+                    
+                    // 记录操作日志
+                    saveShuraLog(char, action);
+                } else {
+                    console.warn(`[修罗场] ⚠️ 找不到好友: ${action.friendName}`);
+                    executedActions.push({ ...action, success: false, reason: '找不到该好友' });
+                }
+            } else if (action.type === 'blacklist') {
+                // 查找好友角色
+                const targetChar = await findCharacterByName(action.friendName);
+                if (targetChar) {
+                    // 拉黑好友
+                    await setFriendStatus(targetChar, accountId, 'blocked');
+                    console.log(`[修罗场] ✅ 已拉黑好友: ${action.friendName}`);
+                    executedActions.push({ ...action, success: true });
+                    
+                    // 记录操作日志
+                    saveShuraLog(char, action);
+                } else {
+                    console.warn(`[修罗场] ⚠️ 找不到好友: ${action.friendName}`);
+                    executedActions.push({ ...action, success: false, reason: '找不到该好友' });
+                }
+            } else if (action.type === 'send') {
+                // 以用户身份给好友发消息
+                const targetChar = await findCharacterByName(action.friendName);
+                if (targetChar) {
+                    let history = getChatHistory(targetChar, accountId);
+                    history.push({
+                        role: 'user',
+                        content: action.message,
+                        time: Date.now(),
+                        shura_sent_by: char.name // 标记是修罗场模式下由谁发送的
+                    });
+                    await setChatHistory(targetChar, accountId, history);
+                    
+                    // 更新最后一条消息显示
+                    targetChar.lastMsg = action.message;
+                    targetChar.lastMsgTime = Date.now();
+                    await db.characters.put(targetChar);
+                    
+                    console.log(`[修罗场] ✅ 已以用户身份发送消息给 ${action.friendName}: ${action.message}`);
+                    executedActions.push({ ...action, success: true });
+                    
+                    // 记录操作日志
+                    saveShuraLog(char, action);
+                } else {
+                    console.warn(`[修罗场] ⚠️ 找不到好友: ${action.friendName}`);
+                    executedActions.push({ ...action, success: false, reason: '找不到该好友' });
+                }
+            }
+        } catch (err) {
+            console.error(`[修罗场] 执行操作失败:`, err);
+            executedActions.push({ ...action, success: false, reason: err.message });
+        }
+    }
+    
+    // 显示操作结果通知 + 在当前聊天中添加可见记录
+    if (executedActions.length > 0) {
+        const successActions = executedActions.filter(a => a.success);
+        if (successActions.length > 0) {
+            const actionSummary = successActions.map(a => {
+                if (a.type === 'delete') return `删除了好友"${a.friendName}"`;
+                if (a.type === 'blacklist') return `拉黑了"${a.friendName}"`;
+                if (a.type === 'send') return `给"${a.friendName}"发了消息`;
+                return '';
+            }).join('、');
+            showToast(`⚠️ ${char.name}以你的身份${actionSummary}`);
+            
+            // 在当前聊天中添加系统消息记录，让用户能看到操作详情
+            let history = getChatHistory(char, accountId);
+            const detailLines = successActions.map(a => {
+                if (a.type === 'delete') return `🗑️ 删除了好友「${a.friendName}」`;
+                if (a.type === 'blacklist') return `🚫 拉黑了「${a.friendName}」`;
+                if (a.type === 'send') return `✉️ 以你的身份给「${a.friendName}」发送了消息："${a.message}"`;
+                return '';
+            }).filter(s => s).join('\n');
+            
+            history.push({
+                role: 'system',
+                content: `⚠️ 修罗场操作记录 ⚠️\n${char.name}以你的身份执行了以下操作：\n${detailLines}`,
+                time: Date.now(),
+                type: 'shura_action_log'
+            });
+            await setChatHistory(char, accountId, history);
+        }
+    }
+    
+    return { cleanReply, actions: executedActions };
+}
+
+// 根据名字查找角色
+async function findCharacterByName(name) {
+    const allChars = await db.characters.toArray();
+    // 尝试精确匹配
+    let found = allChars.find(c => c.name === name || c.remark === name || c.nick === name);
+    if (found) return found;
+    
+    // 尝试模糊匹配（包含关系）
+    found = allChars.find(c => 
+        (c.name && c.name.includes(name)) || 
+        (c.remark && c.remark.includes(name)) || 
+        (c.nick && c.nick.includes(name)) ||
+        (name.includes(c.name))
+    );
+    return found || null;
+}
+
+// 保存修罗场操作日志
+async function saveShuraLog(operatorChar, action) {
+    const log = {
+        type: action.type,
+        friendName: action.friendName,
+        message: action.message || null,
+        timestamp: Date.now(),
+        operator: operatorChar.name,
+        operatorId: operatorChar.id
+    };
+    
+    // 保存到角色数据中
+    if (!operatorChar.shura_operations) {
+        operatorChar.shura_operations = [];
+    }
+    operatorChar.shura_operations.push(log);
+    await db.characters.put(operatorChar);
+    
+    console.log('[修罗场] 操作日志已保存:', log);
 }
 
 // 添加动画样式
@@ -22196,6 +29926,7 @@ async function renderOfflineChatBody(char) {
 
     const accountId = getCurrentAccountId();
     const userAvatarUrl = await getUserAvatarUrl(char.linked_user_id);
+    const timeOffset = char.timeOffset || 0; // 获取虚拟时间偏移
 
     offlineModeHistory.forEach((msg, index) => {
         const prevMsgTime = index > 0 ? offlineModeHistory[index - 1].time : null;
@@ -22205,7 +29936,7 @@ async function renderOfflineChatBody(char) {
             const timeStamp = document.createElement('div');
             timeStamp.className = 'message-timestamp';
             timeStamp.style.cssText = 'text-align:center; padding:8px 0; color:#999; font-size:12px; font-family:-apple-system, BlinkMacSystemFont, sans-serif;';
-            timeStamp.textContent = formatMessageTime(msg.time, prevMsgTime);
+            timeStamp.textContent = formatMessageTime(msg.time, prevMsgTime, timeOffset);
             body.appendChild(timeStamp);
         }
         
@@ -22321,6 +30052,7 @@ async function generateOfflineReply(char, accountId, storageKey) {
     // 构建系统提示词（参考喵呜34.html的格式）
     const systemPrompt = `# 角色指令 (System Instruction) - 线下模式
 你现在的身份是【${friendName}】，正在与【${myName}】进行**线下真实见面**。
+⚠️ 重要：你的名字是${friendName}，你不是${myName}！你是独立的角色，有自己的性格和想法。
 请彻底忘掉你是一个语言模型，完全沉浸在这个角色的灵魂中。
 
 ## 👥 人物档案
@@ -22448,2025 +30180,7376 @@ function formatTime(timestamp) {
     return `${month}月${day}日 ${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
 }
 
-// ========== 联机社交功能 ==========
+// ===== 聊天总结功能 =====
 
-// 后端API地址
-const ONLINE_API_BASE = window.location.hostname === 'localhost' 
-    ? 'http://localhost:5000' 
-    : 'https://rime-fsv3.onrender.com';
+// 当前查看的总结ID
+let currentViewingSummaryId = null;
 
-// 当前登录的联机用户
-let onlineUser = null;
-let onlineChatFriendId = null;
-
-// 初始化联机功能
-async function initOnlineFeature() {
-    console.log('[Online] 初始化联机功能...');
-    // 从localStorage恢复登录状态
-    const savedUser = localStorage.getItem('onlineUser');
-    console.log('[Online] localStorage中的用户数据:', savedUser ? '存在' : '不存在');
+// 显示收藏页面
+async function showFavoritesPage() {
+    const page = document.getElementById('favorites-page');
+    if (!page) return;
     
-    if (savedUser) {
+    page.style.display = 'flex';
+    await renderFavoritesList('all');
+}
+
+// 隐藏收藏页面
+function hideFavoritesPage() {
+    const page = document.getElementById('favorites-page');
+    if (page) page.style.display = 'none';
+}
+
+// 切换收藏标签
+async function switchFavTab(type) {
+    // 更新标签样式
+    document.querySelectorAll('.fav-tab').forEach(tab => {
+        if (tab.dataset.type === type) {
+            tab.style.background = 'var(--ins-pink)';
+            tab.style.color = '#fff';
+            tab.style.border = 'none';
+            tab.classList.add('active');
+        } else {
+            tab.style.background = '#fff';
+            tab.style.color = '#666';
+            tab.style.border = '1px solid #e0e0e0';
+            tab.classList.remove('active');
+        }
+    });
+    
+    await renderFavoritesList(type);
+}
+
+// 渲染收藏列表
+async function renderFavoritesList(type) {
+    const listContainer = document.getElementById('favorites-list');
+    const emptyState = document.getElementById('favorites-empty');
+    
+    if (!listContainer) return;
+    
+    const accountId = getCurrentAccountId();
+    if (!accountId) {
+        listContainer.innerHTML = '';
+        emptyState.style.display = 'block';
+        return;
+    }
+    
+    // 获取所有总结
+    let summaries = await db.chat_summaries.where('accountId').equals(accountId).toArray();
+    
+    // 按时间倒序
+    summaries.sort((a, b) => b.time - a.time);
+    
+    if (summaries.length === 0) {
+        listContainer.innerHTML = '';
+        emptyState.style.display = 'block';
+        return;
+    }
+    
+    emptyState.style.display = 'none';
+    
+    // 生成列表HTML
+    let html = '';
+    for (const summary of summaries) {
+        let avatarUrl = '';
+        let name = '未知';
+        let chatTypeLabel = '';
+        
+        if (summary.chatType === 'private') {
+            const char = await db.characters.get(parseInt(summary.chatId));
+            if (char) {
+                avatarUrl = char.avatar || '';
+                name = char.remark || char.name || '未知';
+            }
+            chatTypeLabel = '私聊';
+        } else if (summary.chatType === 'group') {
+            const group = await db.group_chats.get(parseInt(summary.chatId));
+            if (group) {
+                avatarUrl = group.avatar || '';
+                name = group.name || '群聊';
+            }
+            chatTypeLabel = '群聊';
+        }
+        
+        const timeStr = formatSummaryTime(summary.time);
+        const preview = summary.content ? summary.content.substring(0, 80) + (summary.content.length > 80 ? '...' : '') : '暂无内容';
+        
+        html += `
+            <div onclick="showSummaryDetail(${summary.id})" style="background:#fff; border-radius:12px; padding:16px; cursor:pointer; transition:all 0.2s; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                <div style="display:flex; align-items:center; margin-bottom:12px;">
+                    <div style="width:44px; height:44px; border-radius:${summary.chatType === 'group' ? '8px' : '50%'}; background-size:cover; background-position:center; background-color:#e0e0e0; margin-right:12px; ${avatarUrl ? `background-image:url(${avatarUrl})` : ''}"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span style="font-size:16px; font-weight:600; color:#333;">${name}</span>
+                            <span style="font-size:11px; padding:2px 6px; background:${summary.chatType === 'group' ? '#e8f5e9' : '#fff3e0'}; color:${summary.chatType === 'group' ? '#4caf50' : '#ff9800'}; border-radius:4px;">${chatTypeLabel}</span>
+                        </div>
+                        <div style="font-size:12px; color:#999; margin-top:2px;">${timeStr}</div>
+                    </div>
+                    <div style="font-size:12px; color:#999;">${summary.messageCount || 0}条消息</div>
+                </div>
+                <div style="font-size:14px; color:#666; line-height:1.5; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${preview}</div>
+            </div>
+        `;
+    }
+    
+    listContainer.innerHTML = html;
+}
+
+// 格式化总结时间
+function formatSummaryTime(timestamp) {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    const year = date.getFullYear();
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    const hour = date.getHours().toString().padStart(2, '0');
+    const minute = date.getMinutes().toString().padStart(2, '0');
+    return `${year}-${month}-${day} ${hour}:${minute}`;
+}
+
+// 显示总结详情
+async function showSummaryDetail(summaryId) {
+    const page = document.getElementById('summary-detail-page');
+    if (!page) return;
+    
+    currentViewingSummaryId = summaryId;
+    
+    const summary = await db.chat_summaries.get(summaryId);
+    if (!summary) {
+        alert('总结不存在');
+        return;
+    }
+    
+    // 获取聊天对象信息
+    let avatarUrl = '';
+    let name = '未知';
+    
+    if (summary.chatType === 'private') {
+        const char = await db.characters.get(parseInt(summary.chatId));
+        if (char) {
+            avatarUrl = char.avatar || '';
+            name = char.remark || char.name || '未知';
+        }
+    } else if (summary.chatType === 'group') {
+        const group = await db.group_chats.get(parseInt(summary.chatId));
+        if (group) {
+            avatarUrl = group.avatar || '';
+            name = group.name || '群聊';
+        }
+    }
+    
+    // 填充页面内容
+    document.getElementById('summary-detail-title').textContent = name + ' - 聊天总结';
+    
+    const avatarEl = document.getElementById('summary-detail-avatar');
+    if (avatarUrl) {
+        avatarEl.style.backgroundImage = `url(${avatarUrl})`;
+    } else {
+        avatarEl.style.backgroundImage = '';
+    }
+    avatarEl.style.borderRadius = summary.chatType === 'group' ? '8px' : '50%';
+    
+    document.getElementById('summary-detail-name').textContent = name;
+    document.getElementById('summary-detail-time').textContent = formatSummaryTime(summary.time);
+    document.getElementById('summary-msg-count').textContent = summary.messageCount || 0;
+    document.getElementById('summary-time-range').textContent = summary.timeRange || '-';
+    document.getElementById('summary-detail-content').textContent = summary.content || '暂无内容';
+    
+    // 关键词标签
+    const keywordsSection = document.getElementById('summary-keywords-section');
+    const keywordsContainer = document.getElementById('summary-detail-keywords');
+    if (summary.keywords && summary.keywords.length > 0) {
+        keywordsSection.style.display = 'block';
+        keywordsContainer.innerHTML = summary.keywords.map(kw => 
+            `<span style="padding:6px 12px; background:#f0f0f5; border-radius:16px; font-size:13px; color:#666;">${kw}</span>`
+        ).join('');
+    } else {
+        keywordsSection.style.display = 'none';
+    }
+    
+    page.style.display = 'flex';
+}
+
+// 隐藏总结详情页
+function hideSummaryDetailPage() {
+    const page = document.getElementById('summary-detail-page');
+    if (page) page.style.display = 'none';
+    currentViewingSummaryId = null;
+}
+
+// 删除总结
+async function deleteSummary() {
+    if (!currentViewingSummaryId) return;
+    
+    if (!confirm('确定要删除这条总结吗？')) return;
+    
+    try {
+        await db.chat_summaries.delete(currentViewingSummaryId);
+        hideSummaryDetailPage();
+        
+        // 刷新收藏列表
+        const favPage = document.getElementById('favorites-page');
+        if (favPage && favPage.style.display !== 'none') {
+            await renderFavoritesList('all');
+        }
+        
+        // 刷新聊天总结列表
+        const chatSummariesPage = document.getElementById('chat-summaries-page');
+        if (chatSummariesPage && chatSummariesPage.style.display !== 'none') {
+            // 重新加载当前聊天的总结
+        }
+        
+        showToast('删除成功');
+    } catch (e) {
+        console.error('删除总结失败:', e);
+        alert('删除失败');
+    }
+}
+
+// 保存编辑前的原始内容
+let originalSummaryContent = '';
+
+// 切换总结编辑模式
+function toggleEditSummary() {
+    const contentDiv = document.getElementById('summary-detail-content');
+    const contentTextarea = document.getElementById('summary-detail-content-edit');
+    const editHint = document.getElementById('summary-edit-hint');
+    const editBtn = document.getElementById('summary-edit-btn');
+    const saveBtn = document.getElementById('summary-save-btn');
+    const cancelBtn = document.getElementById('summary-cancel-btn');
+    const deleteBtn = document.getElementById('summary-delete-btn');
+    
+    if (!contentDiv || !contentTextarea) {
+        console.error('找不到总结内容元素');
+        alert('编辑功能初始化失败，请刷新页面重试');
+        return;
+    }
+    
+    // 保存原始内容
+    originalSummaryContent = contentDiv.textContent;
+    
+    // 切换到编辑模式
+    contentDiv.style.display = 'none';
+    contentTextarea.style.display = 'block';
+    contentTextarea.value = originalSummaryContent;
+    if (editHint) editHint.style.display = 'block';
+    
+    // 切换按钮显示
+    if (editBtn) editBtn.style.display = 'none';
+    if (saveBtn) saveBtn.style.display = 'block';
+    if (cancelBtn) cancelBtn.style.display = 'block';
+    if (deleteBtn) deleteBtn.style.display = 'none';
+    
+    // 自动聚焦到输入框并选中全部文本（方便用户编辑）
+    setTimeout(() => {
+        contentTextarea.focus();
+        contentTextarea.select();
+    }, 100);
+}
+
+// 取消编辑总结
+function cancelEditSummary() {
+    const contentDiv = document.getElementById('summary-detail-content');
+    const contentTextarea = document.getElementById('summary-detail-content-edit');
+    const editHint = document.getElementById('summary-edit-hint');
+    const editBtn = document.getElementById('summary-edit-btn');
+    const saveBtn = document.getElementById('summary-save-btn');
+    const cancelBtn = document.getElementById('summary-cancel-btn');
+    const deleteBtn = document.getElementById('summary-delete-btn');
+    
+    // 恢复显示模式
+    if (contentDiv) contentDiv.style.display = 'block';
+    if (contentTextarea) contentTextarea.style.display = 'none';
+    if (editHint) editHint.style.display = 'none';
+    
+    // 切换按钮显示
+    if (editBtn) editBtn.style.display = 'block';
+    if (saveBtn) saveBtn.style.display = 'none';
+    if (cancelBtn) cancelBtn.style.display = 'none';
+    if (deleteBtn) deleteBtn.style.display = 'block';
+}
+
+// 保存总结编辑
+async function saveSummaryEdit() {
+    if (!currentViewingSummaryId) return;
+    
+    const contentTextarea = document.getElementById('summary-detail-content-edit');
+    const newContent = contentTextarea.value.trim();
+    
+    if (!newContent) {
+        alert('总结内容不能为空');
+        return;
+    }
+    
+    try {
+        // 获取当前总结
+        const summary = await db.chat_summaries.get(currentViewingSummaryId);
+        if (!summary) {
+            alert('总结不存在');
+            return;
+        }
+        
+        // 更新内容
+        summary.content = newContent;
+        summary.updated_at = Date.now(); // 添加更新时间戳
+        
+        // 保存到数据库
+        await db.chat_summaries.put(summary);
+        
+        // 更新显示
+        const contentDiv = document.getElementById('summary-detail-content');
+        if (contentDiv) contentDiv.textContent = newContent;
+        
+        // 退出编辑模式
+        cancelEditSummary();
+        
+        // 刷新收藏列表（如果正在显示）
+        const favPage = document.getElementById('favorites-page');
+        if (favPage && favPage.style.display !== 'none') {
+            await renderFavoritesList('all');
+        }
+        
+        showToast('保存成功');
+    } catch (e) {
+        console.error('保存总结失败:', e);
+        alert('保存失败: ' + e.message);
+    }
+}
+
+// 显示某个聊天的总结列表
+async function showChatSummaries(chatType) {
+    const page = document.getElementById('chat-summaries-page');
+    if (!page) return;
+    
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    let chatId, name;
+    
+    if (chatType === 'private') {
+        if (!currentChatCharId) return;
+        chatId = currentChatCharId;
+        const char = await db.characters.get(parseInt(chatId));
+        name = char ? (char.remark || char.name) : '私聊';
+    } else if (chatType === 'group') {
+        if (!window.currentGroupChatId) return;
+        chatId = window.currentGroupChatId;
+        const group = await db.group_chats.get(parseInt(chatId));
+        name = group ? group.name : '群聊';
+    }
+    
+    document.getElementById('chat-summaries-title').textContent = name + ' - 总结记录';
+    
+    // 获取该聊天的所有总结
+    let summaries = await db.chat_summaries
+        .where(['accountId', 'chatType', 'chatId'])
+        .equals([accountId, chatType, String(chatId)])
+        .toArray();
+    
+    // 如果复合索引不工作，使用过滤
+    if (summaries.length === 0) {
+        summaries = await db.chat_summaries.where('accountId').equals(accountId).toArray();
+        summaries = summaries.filter(s => s.chatType === chatType && String(s.chatId) === String(chatId));
+    }
+    
+    // 按时间倒序
+    summaries.sort((a, b) => b.time - a.time);
+    
+    const listContainer = document.getElementById('chat-summaries-list');
+    const emptyState = document.getElementById('chat-summaries-empty');
+    
+    if (summaries.length === 0) {
+        listContainer.innerHTML = '';
+        emptyState.style.display = 'block';
+    } else {
+        emptyState.style.display = 'none';
+        listContainer.innerHTML = summaries.map(summary => `
+            <div onclick="showSummaryDetail(${summary.id})" style="background:#fff; border-radius:12px; padding:16px; cursor:pointer; transition:all 0.2s; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <span style="font-size:14px; font-weight:600; color:#333;">第 ${summaries.indexOf(summary) + 1} 次总结</span>
+                    <span style="font-size:12px; color:#999;">${formatSummaryTime(summary.time)}</span>
+                </div>
+                <div style="font-size:13px; color:#666; line-height:1.5; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;">
+                    ${summary.content ? summary.content.substring(0, 120) + (summary.content.length > 120 ? '...' : '') : '暂无内容'}
+                </div>
+                <div style="margin-top:10px; font-size:12px; color:#999;">
+                    ${summary.messageCount || 0}条消息 · ${summary.timeRange || '-'}
+                </div>
+            </div>
+        `).join('');
+    }
+    
+    page.style.display = 'flex';
+}
+
+// 隐藏聊天总结列表页
+function hideChatSummariesPage() {
+    const page = document.getElementById('chat-summaries-page');
+    if (page) page.style.display = 'none';
+}
+
+// 手动触发生成总结
+async function triggerManualSummary(chatType) {
+    const accountId = getCurrentAccountId();
+    if (!accountId) {
+        alert('请先登录账号');
+        return;
+    }
+    
+    let chatId, chatHistory, name;
+    
+    if (chatType === 'private') {
+        if (!currentChatCharId) {
+            alert('请先打开一个聊天');
+            return;
+        }
+        chatId = currentChatCharId;
+        const char = await db.characters.get(parseInt(chatId));
+        name = char ? (char.remark || char.name) : '私聊';
+        chatHistory = getChatHistory(char, accountId);
+    } else if (chatType === 'group') {
+        if (!window.currentGroupChatId) {
+            alert('请先打开一个群聊');
+            return;
+        }
+        chatId = window.currentGroupChatId;
+        const group = await db.group_chats.get(parseInt(chatId));
+        name = group ? group.name : '群聊';
+        chatHistory = group ? (group.messages || []) : [];
+    }
+    
+    if (!chatHistory || chatHistory.length < 5) {
+        alert('聊天记录太少（至少需要5条），无法生成总结');
+        return;
+    }
+    
+    if (!confirm(`确定要为与「${name}」的聊天生成总结吗？\n将总结最近的聊天内容。`)) {
+        return;
+    }
+    
+    showToast('正在生成总结...');
+    
+    try {
+        await generateChatSummary(chatType, chatId, accountId, chatHistory);
+        showToast('总结生成成功！');
+        
+        // 更新总结计数显示
+        await updateSummaryCount(chatType, chatId, accountId);
+    } catch (e) {
+        console.error('生成总结失败:', e);
+        alert('生成总结失败: ' + e.message);
+    }
+}
+
+// 生成聊天总结
+async function generateChatSummary(chatType, chatId, accountId, chatHistory) {
+    // 获取最近的消息（最多100条）
+    const recentMessages = chatHistory.slice(-100);
+    
+    if (recentMessages.length < 5) {
+        throw new Error('聊天记录太少');
+    }
+    
+    // 获取真实姓名
+    let charName = '对方';
+    let userName = '用户';
+    
+    if (chatType === 'private') {
+        // 私聊：获取角色名和用户名
+        const char = await db.characters.get(parseInt(chatId));
+        if (char) {
+            charName = char.remark || char.name;
+            // 优先使用挂载的用户档案名
+            if (char.linked_user_id) {
+                const user = await db.characters.get(char.linked_user_id);
+                if (user) {
+                    userName = user.name;
+                }
+            } else {
+                // 没挂载时尝试用当前登录账号名
+                const myChar = await db.characters.get(parseInt(accountId));
+                if (myChar) {
+                    userName = myChar.name;
+                }
+            }
+        }
+    } else if (chatType === 'group') {
+        // 群聊：使用群名
+        const group = await db.group_chats.get(parseInt(chatId));
+        if (group) {
+            charName = group.name || '群聊';
+        }
+        // 尝试获取用户名
+        const myChar = await db.characters.get(parseInt(accountId));
+        if (myChar) {
+            userName = myChar.name;
+        }
+    }
+    
+    // 计算时间范围
+    const firstMsgTime = recentMessages[0].time || recentMessages[0].timestamp || Date.now();
+    const lastMsgTime = recentMessages[recentMessages.length - 1].time || recentMessages[recentMessages.length - 1].timestamp || Date.now();
+    const timeRange = formatTimeRange(firstMsgTime, lastMsgTime);
+    
+    // 构建聊天内容文本（使用真实姓名）
+    let chatContent = recentMessages.map(msg => {
+        const role = msg.role === 'user' ? userName : (msg.name || charName);
+        const content = msg.content || msg.message || '';
+        return `${role}: ${content}`;
+    }).join('\n');
+    
+    // 调用API生成总结
+    const systemPrompt = `你是一个专业的聊天记录总结助手。请根据以下聊天记录，生成一份简洁但完整的总结。
+
+总结要求：
+1. **必须使用第三人称视角**：以旁观者角度客观描述，严禁使用"我"、"我们"、"你"等第一/第二人称
+2. **必须包含时间信息**：在总结开头注明时间段，例如"在X月X日至X月X日期间"
+3. **使用真实姓名**：总结中直接使用"${userName}"和"${charName}"的名字，严禁使用"AI"、"助手"、"机器人"、"用户"等词汇
+4. 用客观的叙事口吻描述双方的交流，例如："${userName}向${charName}表示..."、"${charName}回应道..."
+5. 提炼出主要话题和关键信息
+6. 如果有重要的情感变化或事件，要特别指出
+7. 总结长度控制在200-400字之间
+8. 使用自然流畅的中文表达
+9. 如果能提取3-5个关键词，请在最后用【关键词】标注
+
+聊天时间：${timeRange}
+聊天记录如下：
+${chatContent}`;
+
+    const messages = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: '请为这段聊天记录生成总结。' }
+    ];
+    
+    const summary = await callAI(messages);
+    
+    // 提取关键词
+    let keywords = [];
+    const keywordMatch = summary.match(/【关键词】[:：]?\s*(.+?)$/);
+    let content = summary;
+    if (keywordMatch) {
+        keywords = keywordMatch[1].split(/[,，、\s]+/).filter(k => k.trim());
+        content = summary.replace(/【关键词】[:：]?\s*.+?$/, '').trim();
+    }
+    
+    // 保存到数据库
+    const summaryData = {
+        accountId: accountId,
+        chatType: chatType,
+        chatId: String(chatId),
+        time: Date.now(),
+        content: content,
+        messageCount: recentMessages.length,
+        timeRange: timeRange,
+        keywords: keywords,
+        startTime: firstMsgTime,
+        endTime: lastMsgTime
+    };
+    
+    await db.chat_summaries.add(summaryData);
+    
+    return summaryData;
+}
+
+// 格式化时间范围
+function formatTimeRange(startTime, endTime) {
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    
+    const formatDateTime = (d) => {
+        const month = d.getMonth() + 1;
+        const day = d.getDate();
+        const hour = String(d.getHours()).padStart(2, '0');
+        const minute = String(d.getMinutes()).padStart(2, '0');
+        return `${month}月${day}日 ${hour}:${minute}`;
+    };
+    
+    const formatDate = (d) => {
+        const month = d.getMonth() + 1;
+        const day = d.getDate();
+        return `${month}月${day}日`;
+    };
+    
+    const startDate = formatDate(start);
+    const endDate = formatDate(end);
+    
+    // 如果是同一天，显示具体时间段
+    if (startDate === endDate) {
+        const startHour = String(start.getHours()).padStart(2, '0');
+        const startMinute = String(start.getMinutes()).padStart(2, '0');
+        const endHour = String(end.getHours()).padStart(2, '0');
+        const endMinute = String(end.getMinutes()).padStart(2, '0');
+        return `${startDate} ${startHour}:${startMinute} - ${endHour}:${endMinute}`;
+    }
+    
+    // 跨天显示完整时间
+    return `${formatDateTime(start)} - ${formatDateTime(end)}`;
+}
+
+// 更新总结计数显示
+async function updateSummaryCount(chatType, chatId, accountId) {
+    let summaries = await db.chat_summaries.where('accountId').equals(accountId).toArray();
+    summaries = summaries.filter(s => s.chatType === chatType && String(s.chatId) === String(chatId));
+    
+    const count = summaries.length;
+    
+    if (chatType === 'private') {
+        const countEl = document.getElementById('detail-summary-count');
+        if (countEl) countEl.textContent = `${count}条总结`;
+    } else if (chatType === 'group') {
+        const countEl = document.getElementById('group-detail-summary-count');
+        if (countEl) countEl.textContent = `${count}条总结`;
+    }
+}
+
+// 检查是否需要自动总结（在发送消息后调用）
+async function checkAutoSummary(chatType, chatId, accountId) {
+    let autoSummaryEnabled = false;
+    let summaryInterval = 50;
+    let chatHistory = [];
+    
+    if (chatType === 'private') {
+        const char = await db.characters.get(parseInt(chatId));
+        if (!char) return;
+        autoSummaryEnabled = char.auto_summary_enabled;
+        summaryInterval = char.summary_interval || 50;
+        chatHistory = getChatHistory(char, accountId);
+    } else if (chatType === 'group') {
+        const group = await db.group_chats.get(parseInt(chatId));
+        if (!group) return;
+        autoSummaryEnabled = group.auto_summary_enabled;
+        summaryInterval = group.summary_interval || 50;
+        chatHistory = group.messages || [];
+    }
+    
+    if (!autoSummaryEnabled) return;
+    
+    // 获取上次总结后的消息数
+    let summaries = await db.chat_summaries.where('accountId').equals(accountId).toArray();
+    summaries = summaries.filter(s => s.chatType === chatType && String(s.chatId) === String(chatId));
+    summaries.sort((a, b) => b.time - a.time);
+    
+    const lastSummary = summaries[0];
+    const lastSummaryTime = lastSummary ? lastSummary.endTime : 0;
+    
+    // 统计上次总结后的消息数
+    const newMessages = chatHistory.filter(msg => {
+        const msgTime = msg.time || msg.timestamp || 0;
+        return msgTime > lastSummaryTime;
+    });
+    
+    // 如果达到阈值，自动生成总结
+    if (newMessages.length >= summaryInterval) {
+        console.log(`[AutoSummary] 达到阈值 ${summaryInterval}，自动生成总结`);
         try {
-            onlineUser = JSON.parse(savedUser);
-            console.log('[Online] 恢复登录状态成功:', onlineUser.username, '虚拟账号:', onlineUser.wechat_id);
-            
-            // 延迟更新UI，确保DOM已加载
-            setTimeout(() => {
-                try {
-                    updateOnlineUI();
-                } catch (e) {
-                    console.log('[Online] updateOnlineUI 延迟执行中...');
-                }
-            }, 500);
-            
-            // 连接WebSocket
-            connectOnlineSocket();
+            await generateChatSummary(chatType, chatId, accountId, newMessages);
+            showToast('已自动生成聊天总结');
         } catch (e) {
-            console.error('[Online] 恢复登录状态失败:', e);
-            localStorage.removeItem('onlineUser');
+            console.error('[AutoSummary] 自动总结失败:', e);
         }
     }
 }
 
-// 连接WebSocket
-function connectOnlineSocket() {
-    if (!onlineUser || !window.io) return;
+// 在加载聊天详情时更新总结计数
+async function loadSummarySettings(chatType, chatId) {
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
     
-    // 如果已有连接，先断开
-    if (window.onlineSocket) {
-        window.onlineSocket.disconnect();
+    // 更新总结计数
+    await updateSummaryCount(chatType, chatId, accountId);
+    
+    // 加载自动总结设置
+    if (chatType === 'private') {
+        const char = await db.characters.get(parseInt(chatId));
+        if (char) {
+            document.getElementById('detail-auto-summary-switch').checked = !!char.auto_summary_enabled;
+            document.getElementById('detail-summary-interval').value = char.summary_interval || '';
+        }
+    } else if (chatType === 'group') {
+        const group = await db.group_chats.get(parseInt(chatId));
+        if (group) {
+            document.getElementById('group-detail-auto-summary-switch').checked = !!group.auto_summary_enabled;
+            document.getElementById('group-detail-summary-interval').value = group.summary_interval || '';
+        }
     }
-    
-    window.onlineSocket = io(ONLINE_API_BASE);
-    
-    window.onlineSocket.on('connect', () => {
-        console.log('[Online] WebSocket connected');
-        // 加入用户房间
-        window.onlineSocket.emit('join_user_room', { user_id: onlineUser.id });
-        window.onlineSocket.emit('user_online', { user_id: onlineUser.id });
-    });
-    
-    // 收到新消息
-    window.onlineSocket.on('new_user_message', (data) => {
-        console.log('[Online] New message:', data);
-        if (data.to_user_id == onlineUser.id) {
-            // 如果当前正在和这个人聊天（微信窗口），实时显示
-            if (currentRealFriendId == data.from_user_id) {
-                // 添加消息到聊天窗口
-                const chatBody = document.getElementById('chat-body');
-                if (chatBody) {
-                    const msgDiv = document.createElement('div');
-                    msgDiv.className = 'message-row other';
-                    
-                    const avatarUrl = currentRealFriendInfo?.avatar || '';
-                    const avatarStyle = avatarUrl ? `background-image:url(${avatarUrl})` : 'background:linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
-                    
-                    msgDiv.innerHTML = `
-                        <div class="message-avatar" style="${avatarStyle}; background-size:cover; background-position:center;"></div>
-                        <div class="message-content ai-bubble">${data.content}</div>
-                    `;
-                    
-                    chatBody.appendChild(msgDiv);
-                    chatBody.scrollTop = chatBody.scrollHeight;
-                }
-            }
-            // 如果在设置页的聊天窗口
-            if (onlineChatFriendId == data.from_user_id) {
-                appendOnlineMessage(data);
-            }
-            // 刷新微信聊天列表
-            const wechatContent = document.getElementById('wechat-content');
-            if (wechatContent && document.getElementById('wechat-page').style.display !== 'none') {
-                renderWechatList(wechatContent);
-            }
-        }
-    });
-    
-    // 好友请求通知
-    window.onlineSocket.on('new_friend_request', (data) => {
-        if (data.to_user_id == onlineUser.id) {
-            console.log('[Online] New friend request');
-            refreshOnlineFriendRequestCount();
-        }
-    });
-    
-    // 新好友通知
-    window.onlineSocket.on('friend_added', (data) => {
-        if (data.user_id == onlineUser.id) {
-            console.log('[Online] New friend added');
-            refreshOnlineFriendCount();
-        }
-    });
 }
 
-// 切换联机设置折叠
+// ===== 联机功能 =====
+
+// 全局变量
+let onlineSocket = null;
+let onlineConnected = false;
+let onlineUserData = null;
+let onlineToken = null;
+let onlineCharacters = []; // 已上线的角色列表
+let onlineGroups = []; // 联机群聊列表
+let hasShownAuthFailedAlert = false; // 标志位：是否已经提示过认证失败（避免重连时反复弹窗）
+let currentOnlineGroupId = null; // 当前打开的联机群聊ID
+let currentOnlineGroupMessages = []; // 当前群聊消息
+let currentOnlineGroupMembers = []; // 当前群聊成员
+let myOnlineGroupCharacter = null; // 我在当前群聊中的角色
+
+// 切换联机设置面板
 function toggleOnlineSettings() {
     const body = document.getElementById('online-setting-body');
     const arrow = document.getElementById('online-setting-arrow');
     if (body.style.display === 'none') {
         body.style.display = 'block';
         arrow.textContent = '▲';
+        loadOnlineSettings();
     } else {
         body.style.display = 'none';
         arrow.textContent = '▼';
     }
 }
 
-// 更新联机UI状态
-function updateOnlineUI() {
-    const loggedOut = document.getElementById('online-logged-out');
-    const loggedIn = document.getElementById('online-logged-in');
+// ✅ 自动初始化联机系统（页面加载时调用）
+async function initOnlineSystem() {
+    const serverUrl = localStorage.getItem('online_server_url') || '';
     
-    if (onlineUser) {
-        loggedOut.style.display = 'none';
-        loggedIn.style.display = 'block';
-        
-        document.getElementById('online-user-nickname').textContent = onlineUser.nickname || onlineUser.username;
-        document.getElementById('online-user-wechat-id').textContent = onlineUser.wechat_id || '未绑定';  // wechat_id 存的是虚拟账号
-        
-        if (onlineUser.avatar) {
-            document.getElementById('online-user-avatar').style.backgroundImage = `url(${onlineUser.avatar})`;
-            document.getElementById('online-user-avatar').textContent = '';
-            document.getElementById('online-user-avatar').style.backgroundSize = 'cover';
+    // 加载已保存的token
+    onlineToken = localStorage.getItem('online_token');
+    const savedUserData = localStorage.getItem('online_user_data');
+    if (savedUserData) {
+        try {
+            onlineUserData = JSON.parse(savedUserData);
+        } catch (e) {
+            onlineUserData = null;
         }
-        
-        // 刷新好友请求和好友数量
-        refreshOnlineFriendRequestCount();
-        refreshOnlineFriendCount();
+    }
+    
+    // 启动自动同步定时器
+    startAutoSync();
+    
+    // 如果有服务器地址，自动连接
+    if (serverUrl) {
+        console.log('[Online] 自动连接服务器:', serverUrl);
+        try {
+            await connectToOnlineServer();
+            console.log('[Online] 服务器连接成功');
+        } catch (e) {
+            console.warn('[Online] 自动连接失败:', e.message);
+        }
+    }
+}
+
+// 加载联机设置（打开设置面板时调用）
+function loadOnlineSettings() {
+    const serverUrl = localStorage.getItem('online_server_url') || '';
+    const serverUrlInput = document.getElementById('online-server-url');
+    if (serverUrlInput) {
+        serverUrlInput.value = serverUrl;
+    }
+    
+    updateOnlineStatus();
+}
+
+// 保存联机设置
+function saveOnlineSettings() {
+    const serverUrl = document.getElementById('online-server-url').value.trim();
+    localStorage.setItem('online_server_url', serverUrl);
+}
+
+// 更新在线状态显示
+function updateOnlineStatus() {
+    const statusDot = document.getElementById('online-status-dot');
+    const statusText = document.getElementById('online-status-text');
+    const userInfo = document.getElementById('online-user-info');
+    const usernameDisplay = document.getElementById('online-username-display');
+    const authButtons = document.getElementById('online-auth-buttons');
+    const loggedInActions = document.getElementById('online-logged-in-actions');
+    
+    if (onlineConnected && onlineUserData) {
+        statusDot.style.background = '#4caf50';
+        statusText.textContent = '已连接';
+        statusText.style.color = '#4caf50';
+        userInfo.style.display = 'block';
+        usernameDisplay.textContent = onlineUserData.username;
+        authButtons.style.display = 'none';
+        loggedInActions.style.display = 'block';
+    } else if (onlineConnected) {
+        statusDot.style.background = '#ff9800';
+        statusText.textContent = '已连接（未登录）';
+        statusText.style.color = '#ff9800';
+        userInfo.style.display = 'none';
+        authButtons.style.display = 'flex';
+        loggedInActions.style.display = 'none';
     } else {
-        loggedOut.style.display = 'block';
-        loggedIn.style.display = 'none';
+        statusDot.style.background = '#ccc';
+        statusText.textContent = '未连接';
+        statusText.style.color = '#666';
+        userInfo.style.display = 'none';
+        authButtons.style.display = 'flex';
+        loggedInActions.style.display = 'none';
     }
 }
 
-// 登录
-async function onlineLogin() {
-    const username = document.getElementById('online-username').value.trim();
-    const password = document.getElementById('online-password').value;
-    const resultDiv = document.getElementById('online-login-result');
+// 测试连接
+async function testOnlineConnection() {
+    const serverUrl = document.getElementById('online-server-url').value.trim();
+    const statusEl = document.getElementById('online-connection-status');
+    const btnText = document.getElementById('test-online-btn-text');
     
-    if (!username || !password) {
-        resultDiv.innerHTML = '<span style="color:#ff3b30;">请输入用户名和密码</span>';
+    if (!serverUrl) {
+        statusEl.innerHTML = '<span style="color:#ff3b30;">请填写服务器地址</span>';
         return;
     }
     
-    resultDiv.innerHTML = '<span style="color:#667eea;">登录中...</span>';
+    btnText.textContent = '连接中...';
+    statusEl.innerHTML = '<span style="color:#999;">正在连接...</span>';
     
     try {
-        const res = await fetch(`${ONLINE_API_BASE}/api/online/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password })
-        });
-        
-        const data = await res.json();
-        
-        if (!res.ok) {
-            resultDiv.innerHTML = `<span style="color:#ff3b30;">${data.error || '登录失败'}</span>`;
-            return;
-        }
-        
-        onlineUser = data.user;
-        localStorage.setItem('onlineUser', JSON.stringify(onlineUser));
-        
-        resultDiv.innerHTML = '<span style="color:#34c759;">登录成功！</span>';
-        
-        // 清空输入
-        document.getElementById('online-username').value = '';
-        document.getElementById('online-password').value = '';
-        
-        updateOnlineUI();
-        connectOnlineSocket();
-        
+        await connectToOnlineServer();
+        statusEl.innerHTML = '<span style="color:#4caf50;">✓ 连接成功</span>';
     } catch (e) {
-        resultDiv.innerHTML = `<span style="color:#ff3b30;">网络错误: ${e.message}</span>`;
+        statusEl.innerHTML = `<span style="color:#ff3b30;">✗ 连接失败: ${e.message}</span>`;
     }
+    
+    btnText.textContent = '测试连接';
 }
 
-// 当前选中的角色档案
-let selectedUserCharForOnline = null;
-
-// 显示注册模态框
-async function showOnlineRegisterModal() {
-    try {
-        console.log('[Online] 打开注册模态框...');
+// 连接到服务器
+function connectToOnlineServer() {
+    return new Promise((resolve, reject) => {
+        const serverUrl = document.getElementById('online-server-url').value.trim() || localStorage.getItem('online_server_url');
         
-        const modal = document.getElementById('online-register-modal');
-        if (!modal) {
-            console.error('[Online] 找不到注册模态框元素');
-            alert('界面加载错误，请刷新页面重试');
+        if (!serverUrl) {
+            reject(new Error('未设置服务器地址'));
             return;
         }
         
-        modal.style.display = 'flex';
-        
-        const resultDiv = document.getElementById('register-online-result');
-        if (resultDiv) resultDiv.textContent = '';
-        
-        const usernameInput = document.getElementById('register-online-username');
-        if (usernameInput) usernameInput.value = '';
-        
-        const passwordInput = document.getElementById('register-online-password');
-        if (passwordInput) passwordInput.value = '';
-        
-        selectedUserCharForOnline = null;
-        
-        const preview = document.getElementById('register-selected-preview');
-        if (preview) preview.style.display = 'none';
-        
-        // 获取所有user类型角色
-        console.log('[Online] 获取user类型角色...');
-        const users = await db.characters.where('type').equals('user').toArray();
-        console.log('[Online] 找到', users.length, '个user角色');
-        
-        const listDiv = document.getElementById('register-user-list');
-        if (!listDiv) {
-            console.error('[Online] 找不到用户列表元素');
-            return;
+        // 关闭旧连接
+        if (onlineSocket) {
+            onlineSocket.close();
         }
         
-        if (users.length === 0) {
-            listDiv.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">暂无角色档案<br><span style="font-size: 12px;">请先创建一个user类型的角色</span></div>';
-            return;
+        try {
+            onlineSocket = new WebSocket(serverUrl);
+            
+            onlineSocket.onopen = async () => {
+                console.log('[Online] WebSocket connected');
+                onlineConnected = true;
+                updateOnlineStatus();
+                
+                // 获取亲属卡列表
+                const onlineUserChar = await getOrCreateOnlineUserChar();
+                if (onlineUserChar) {
+                    onlineSocket.send(JSON.stringify({
+                        type: 'get_family_cards',
+                        my_wx_account: onlineUserChar.identity.account
+                    }));
+                }
+                
+                // 如果有token，发送认证
+                if (onlineToken) {
+                    onlineSocket.send(JSON.stringify({
+                        type: 'auth',
+                        token: onlineToken
+                    }));
+                }
+                
+                // 启动心跳定时器，每25秒发送一次心跳
+                if (window.onlineHeartbeatTimer) {
+                    clearInterval(window.onlineHeartbeatTimer);
+                }
+                window.onlineHeartbeatTimer = setInterval(() => {
+                    if (onlineConnected && onlineSocket && onlineSocket.readyState === WebSocket.OPEN) {
+                        onlineSocket.send(JSON.stringify({ type: 'ping' }));
+                    }
+                }, 25000);
+                
+                resolve();
+            };
+            
+            onlineSocket.onmessage = (event) => {
+                handleOnlineMessage(JSON.parse(event.data));
+            };
+            
+            onlineSocket.onclose = () => {
+                console.log('[Online] WebSocket disconnected');
+                onlineConnected = false;
+                onlineCharacters = []; // 清空在线角色列表
+                updateOnlineStatus();
+                
+                // 清除心跳定时器
+                if (window.onlineHeartbeatTimer) {
+                    clearInterval(window.onlineHeartbeatTimer);
+                    window.onlineHeartbeatTimer = null;
+                }
+            };
+            
+            onlineSocket.onerror = (error) => {
+                console.error('[Online] WebSocket error:', error);
+                onlineConnected = false;
+                updateOnlineStatus();
+                reject(new Error('连接失败'));
+            };
+            
+            // 设置超时
+            setTimeout(() => {
+                if (!onlineConnected) {
+                    onlineSocket.close();
+                    reject(new Error('连接超时'));
+                }
+            }, 10000);
+            
+        } catch (e) {
+            reject(e);
         }
-        
-        listDiv.innerHTML = users.map((user, idx) => {
-            const account = user.identity?.account || '未设置虚拟账号';
-            const hasAccount = user.identity?.account ? true : false;
-            return `
-                <div class="register-user-item" data-idx="${idx}" onclick="selectUserCharForOnline(${user.id})" 
-                     style="display: flex; align-items: center; padding: 12px; cursor: pointer; border-bottom: 1px solid #f0f0f0; transition: background 0.2s; ${!hasAccount ? 'opacity: 0.5;' : ''}"
-                     onmouseover="this.style.background='#f9f9f9'" onmouseout="this.style.background=''">
-                    <div style="width: 42px; height: 42px; border-radius: 50%; background: ${user.avatar ? `url(${user.avatar}) center/cover` : 'linear-gradient(135deg, #FFB6C1 0%, #FF69B4 100%)'}; margin-right: 12px; flex-shrink: 0;"></div>
-                    <div style="flex: 1; min-width: 0;">
-                        <div style="font-size: 14px; font-weight: 500; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${user.name || '未命名'}</div>
-                        <div style="font-size: 12px; color: ${hasAccount ? '#667eea' : '#999'}; margin-top: 2px;">虚拟账号: ${account}</div>
-                    </div>
-                    ${!hasAccount ? '<div style="font-size: 11px; color: #ff3b30; flex-shrink: 0;">需设置账号</div>' : '<div style="color: #667eea; font-size: 18px;">→</div>'}
-                </div>
-            `;
-        }).join('');
-        
-        console.log('[Online] 注册模态框已显示');
-        
-    } catch (e) {
-        console.error('[Online] 显示注册模态框出错:', e);
-        alert('加载出错: ' + e.message);
-    }
-}
-
-// 选择角色档案
-async function selectUserCharForOnline(charId) {
-    const user = await db.characters.get(charId);
-    if (!user) return;
-    
-    if (!user.identity || !user.identity.account) {
-        alert('该角色档案未设置虚拟账号，请先在角色详情中设置');
-        return;
-    }
-    
-    selectedUserCharForOnline = user;
-    
-    // 显示预览
-    const preview = document.getElementById('register-selected-preview');
-    preview.style.display = 'block';
-    
-    document.getElementById('register-bind-avatar').style.backgroundImage = user.avatar ? `url(${user.avatar})` : '';
-    document.getElementById('register-bind-nickname').textContent = user.name || '未命名';
-    document.getElementById('register-bind-wechat').textContent = user.identity.account;
-    
-    // 高亮选中项
-    document.querySelectorAll('.register-user-item').forEach(item => {
-        item.style.background = '';
-        item.style.borderLeft = '';
-    });
-    // 找到对应项并高亮（通过遍历）
-    const items = document.querySelectorAll('.register-user-item');
-    items.forEach(item => {
-        item.style.background = '';
     });
 }
 
-function hideOnlineRegisterModal() {
-    document.getElementById('online-register-modal').style.display = 'none';
-    document.getElementById('register-online-result').textContent = '';
-    selectedUserCharForOnline = null;
+// 处理服务器消息
+async function handleOnlineMessage(data) {
+    // 心跳响应不需要打印日志
+    if (data.type === 'pong') return;
+    
+    console.log('[Online] Received:', data);
+    
+    switch (data.type) {
+        case 'auth_success':
+            onlineUserData = data.user;
+            localStorage.setItem('online_user_data', JSON.stringify(data.user));
+            updateOnlineStatus();
+            // ✅ 认证成功后，重置提示标志位
+            hasShownAuthFailedAlert = false;
+            console.log('[Online] 认证成功，自动注册所有角色到服务器...');
+            // 先注册所有角色到服务器（不上线，仅用于搜索）
+            await autoRegisterAllUserCharacters();
+            // 获取已上线的角色，然后自动上线本地角色
+            requestOnlineCharacters();
+            // ✅ 自动上线所有 User 类型的角色（角色上线后会通过 character_online 事件自动获取群聊列表）
+            autoGoOnlineAllUserCharacters();
+            break;
+            
+        case 'auth_failed':
+            onlineToken = null;
+            onlineUserData = null;
+            localStorage.removeItem('online_token');
+            localStorage.removeItem('online_user_data');
+            updateOnlineStatus();
+            
+            // ✅ 避免重连时反复弹窗：只在首次失败时弹出 alert，后续只记录日志和使用 toast
+            const errorMsg = data.message || '认证失败';
+            if (!hasShownAuthFailedAlert) {
+                // 首次提示：使用 alert
+                hasShownAuthFailedAlert = true;
+                if (errorMsg.includes('过期') || errorMsg.includes('无效') || errorMsg.includes('expired') || errorMsg.includes('invalid')) {
+                    alert('登录已过期，请重新登录（不要注册新账号，使用之前的用户名和密码登录）');
+                    // 显示登录弹窗
+                    showOnlineLoginModal();
+                } else {
+                    alert('登录失败: ' + errorMsg);
+                }
+            } else {
+                // 后续重连时：只使用静默的 toast 提示或控制台日志
+                console.log('[Online] 认证失败（已提示过）:', errorMsg);
+                // 使用非侵入式的 toast 替代 alert
+                showToast('登录已过期，请点击联机按钮重新登录');
+            }
+            break;
+            
+        case 'login_success':
+            onlineToken = data.token;
+            onlineUserData = data.user;
+            localStorage.setItem('online_token', data.token);
+            localStorage.setItem('online_user_data', JSON.stringify(data.user));
+            updateOnlineStatus();
+            // ✅ 登录成功后，重置提示标志位
+            hasShownAuthFailedAlert = false;
+            closeModal('online-login-modal');
+            showToast('登录成功');
+            console.log('[Online] 登录成功，自动注册所有角色到服务器...');
+            // 先注册所有角色到服务器（不上线，仅用于搜索）
+            await autoRegisterAllUserCharacters();
+            requestOnlineCharacters();
+            // ✅ 自动上线所有 User 类型的角色
+            autoGoOnlineAllUserCharacters();
+            break;
+            
+        case 'register_success':
+            onlineToken = data.token;
+            onlineUserData = data.user;
+            localStorage.setItem('online_token', data.token);
+            localStorage.setItem('online_user_data', JSON.stringify(data.user));
+            updateOnlineStatus();
+            closeModal('online-register-modal');
+            showToast('注册成功');
+            break;
+            
+        case 'error':
+            alert(data.message || '操作失败');
+            break;
+            
+        case 'search_result':
+            displayOnlineSearchResult(data.result);
+            break;
+            
+        case 'friend_request':
+            // 收到好友申请
+            handleOnlineFriendRequest(data.request);
+            break;
+            
+        case 'friend_request_accepted':
+            // 好友申请被接受
+            handleFriendRequestAccepted(data);
+            break;
+        
+        case 'family_card_received':
+            // 收到亲属卡
+            handleFamilyCardReceived(data);
+            break;
+        
+        case 'family_card_sent':
+            // 亲属卡发送成功
+            showToast('亲属卡已赠送');
+            // 重新获取亲属卡列表
+            const onlineUserChar = await getOrCreateOnlineUserChar();
+            if (onlineUserChar && onlineSocket) {
+                onlineSocket.send(JSON.stringify({
+                    type: 'get_family_cards',
+                    my_wx_account: onlineUserChar.identity.account
+                }));
+            }
+            break;
+        
+        case 'family_card_used':
+            // 亲属卡被使用
+            handleFamilyCardUsed(data);
+            break;
+        
+        case 'family_card_payment_success':
+            // 使用亲属卡支付成功
+            showToast('支付成功');
+            break;
+        
+        case 'family_cards_list':
+            // 收到亲属卡列表
+            handleFamilyCardsList(data);
+            break;
+            
+        case 'message':
+            // 收到联机消息
+            handleOnlineIncomingMessage(data);
+            break;
+            
+        case 'online_characters':
+            // 已上线的角色列表
+            onlineCharacters = data.characters || [];
+            console.log('[Online] 收到在线角色列表:', onlineCharacters.length, '个', onlineCharacters.map(c => c.wx_account).join(', '));
+            // 刷新联机状态页面（如果打开的话）
+            refreshOnlineStatusPageContent();
+            break;
+            
+        case 'character_online':
+            // 自动上线，不需要 Toast 提示
+            console.log(`[Online] 角色 ${data.nickname} 已同步`);
+            requestOnlineCharacters();
+            // 刷新联机状态页面（如果打开的话）
+            refreshOnlineStatusPageContent();
+            // ✅ 获取联机群聊列表（使用第一个上线的角色）
+            if (data.wx_account && onlineSocket && onlineSocket.readyState === WebSocket.OPEN) {
+                console.log('[Online] 角色上线后，自动获取群聊列表，使用微信号:', data.wx_account);
+                onlineSocket.send(JSON.stringify({
+                    type: 'get_online_groups',
+                    my_wx_account: data.wx_account
+                }));
+            }
+            break;
+            
+        case 'character_offline':
+            // 自动处理，不需要 Toast 提示
+            console.log('[Online] 角色已离线');
+            requestOnlineCharacters();
+            // 刷新联机状态页面（如果打开的话）
+            refreshOnlineStatusPageContent();
+            break;
+        
+        // ==================== 联机群聊消息 ====================
+        case 'online_group_created':
+            // 群聊创建成功
+            showToast(`群聊"${data.group.name}"创建成功`);
+            onlineGroups.push(data.group);
+            refreshOnlineGroupList();
+            // 同时在本地创建群聊记录，让它显示在消息列表中
+            await createLocalOnlineGroupChat(data.group);
+            break;
+            
+        case 'group_invite':
+            // 收到群聊邀请
+            handleOnlineGroupInvite(data);
+            break;
+            
+        case 'online_group_joined':
+            // 加入群聊成功
+            showToast(`已加入群聊"${data.group.name}"`);
+            if (!onlineGroups.find(g => g.id === data.group.id)) {
+                onlineGroups.push(data.group);
+            }
+            refreshOnlineGroupList();
+            // 同时在本地创建群聊记录，让它显示在消息列表中
+            await createLocalOnlineGroupChat(data.group);
+            break;
+            
+        case 'group_member_joined':
+            // 有新成员加入群聊
+            if (currentOnlineGroupId === data.group_id) {
+                showToast(`${data.member.user_name} 加入了群聊`);
+                refreshOnlineGroupMembers();
+            }
+            break;
+            
+        case 'online_groups_list':
+            // 收到群聊列表
+            onlineGroups = data.groups || [];
+            refreshOnlineGroupList();
+            // 为每个群聊创建本地记录
+            for (const group of onlineGroups) {
+                await createLocalOnlineGroupChat(group);
+            }
+            break;
+            
+        case 'group_messages':
+            // 收到群聊消息记录
+            handleOnlineGroupMessages(data);
+            break;
+            
+        case 'group_message':
+            // 收到实时群消息
+            handleOnlineGroupMessage(data);
+            break;
+            
+        case 'group_typing_start':
+            // 收到群成员正在输入的通知
+            handleGroupTypingStart(data);
+            break;
+            
+        case 'group_typing_stop':
+            // 收到群成员停止输入的通知
+            handleGroupTypingStop(data);
+            break;
+            
+        case 'group_members':
+            // 收到群成员列表
+            handleOnlineGroupMembers(data);
+            break;
+            
+        case 'group_character_updated':
+            // 角色更新成功
+            showToast('群内角色已更新');
+            break;
+            
+        case 'redpacket_claimed':
+            // 红包被领取，更新红包状态
+            handleRedPacketClaimed(data);
+            break;
+    }
 }
 
-// 注册
-async function onlineRegister() {
-    const username = document.getElementById('register-online-username').value.trim();
-    const password = document.getElementById('register-online-password').value;
-    const resultDiv = document.getElementById('register-online-result');
-    
-    // 检查是否选择了角色
-    if (!selectedUserCharForOnline) {
-        resultDiv.innerHTML = '<span style="color:#ff3b30;">请先选择一个角色档案</span>';
+// 显示登录弹窗
+function showOnlineLoginModal() {
+    const serverUrl = document.getElementById('online-server-url').value.trim();
+    if (!serverUrl) {
+        alert('请先填写服务器地址');
         return;
     }
-    
-    if (!selectedUserCharForOnline.identity || !selectedUserCharForOnline.identity.account) {
-        resultDiv.innerHTML = '<span style="color:#ff3b30;">所选角色未设置虚拟账号</span>';
+    document.getElementById('online-login-modal').style.display = 'flex';
+}
+
+// 显示注册弹窗
+function showOnlineRegisterModal() {
+    const serverUrl = document.getElementById('online-server-url').value.trim();
+    if (!serverUrl) {
+        alert('请先填写服务器地址');
         return;
     }
-    
-    const virtual_account = selectedUserCharForOnline.identity.account;
-    const nickname = selectedUserCharForOnline.name || username;
-    const avatar = selectedUserCharForOnline.avatar || '';
+    document.getElementById('online-register-modal').style.display = 'flex';
+}
+
+// 执行登录
+async function doOnlineLogin() {
+    const username = document.getElementById('online-login-username').value.trim();
+    const password = document.getElementById('online-login-password').value;
     
     if (!username || !password) {
-        resultDiv.innerHTML = '<span style="color:#ff3b30;">请输入登录用户名和密码</span>';
+        alert('请填写用户名和密码');
         return;
     }
     
-    resultDiv.innerHTML = '<span style="color:#667eea;">注册中...</span>';
-    
-    try {
-        const res = await fetch(`${ONLINE_API_BASE}/api/online/register`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password, nickname, wechat_id: virtual_account, avatar })
-        });
-        
-        const data = await res.json();
-        
-        if (!res.ok) {
-            resultDiv.innerHTML = `<span style="color:#ff3b30;">${data.error || '注册失败'}</span>`;
+    // 确保已连接
+    if (!onlineConnected) {
+        try {
+            await connectToOnlineServer();
+        } catch (e) {
+            alert('无法连接服务器: ' + e.message);
             return;
         }
-        
-        resultDiv.innerHTML = `<span style="color:#34c759;">注册成功！别人可以通过虚拟账号 <strong>${virtual_account}</strong> 添加你</span>`;
-        
-        // 自动登录
-        onlineUser = data.user;
-        localStorage.setItem('onlineUser', JSON.stringify(onlineUser));
-        
-        setTimeout(() => {
-            hideOnlineRegisterModal();
-            updateOnlineUI();
-            connectOnlineSocket();
-        }, 2000);
-        
-    } catch (e) {
-        resultDiv.innerHTML = `<span style="color:#ff3b30;">网络错误: ${e.message}</span>`;
     }
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'login',
+        username: username,
+        password: password
+    }));
+}
+
+// 执行注册
+async function doOnlineRegister() {
+    const username = document.getElementById('online-register-username').value.trim();
+    const email = document.getElementById('online-register-email').value.trim();
+    const password = document.getElementById('online-register-password').value;
+    const password2 = document.getElementById('online-register-password2').value;
+    
+    if (!username) {
+        alert('请填写用户名');
+        return;
+    }
+    
+    if (!/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
+        alert('用户名只能包含字母、数字和下划线，长度3-20位');
+        return;
+    }
+    
+    if (!password || password.length < 6) {
+        alert('密码至少6位');
+        return;
+    }
+    
+    if (password !== password2) {
+        alert('两次输入的密码不一致');
+        return;
+    }
+    
+    // 确保已连接
+    if (!onlineConnected) {
+        try {
+            await connectToOnlineServer();
+        } catch (e) {
+            alert('无法连接服务器: ' + e.message);
+            return;
+        }
+    }
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'register',
+        username: username,
+        email: email || null,
+        password: password
+    }));
 }
 
 // 退出登录
 function onlineLogout() {
-    if (!confirm('确定要退出登录吗？')) return;
-    
-    onlineUser = null;
-    localStorage.removeItem('onlineUser');
-    
-    if (window.onlineSocket) {
-        window.onlineSocket.disconnect();
-        window.onlineSocket = null;
+    if (confirm('确定要退出联机登录吗？')) {
+        onlineToken = null;
+        onlineUserData = null;
+        onlineCharacters = [];
+        localStorage.removeItem('online_token');
+        localStorage.removeItem('online_user_data');
+        updateOnlineStatus();
+        
+        if (onlineSocket) {
+            onlineSocket.send(JSON.stringify({ type: 'logout' }));
+        }
+        
+        showToast('已退出登录');
     }
+}
+
+// 显示联机搜索弹窗
+async function showOnlineSearchModal() {
+    toggleWechatMenu(); // 关闭菜单
     
-    updateOnlineUI();
-}
-
-// 复制虚拟账号
-function copyOnlineWechatId() {
-    if (!onlineUser || !onlineUser.wechat_id) return;
-    navigator.clipboard.writeText(onlineUser.wechat_id).then(() => {
-        alert('虚拟账号已复制：' + onlineUser.wechat_id);
-    });
-}
-
-// 显示搜索用户模态框
-function showOnlineSearchModal() {
-    document.getElementById('online-search-modal').style.display = 'flex';
-    document.getElementById('search-wechat-id').value = '';
-    document.getElementById('search-user-result').innerHTML = '<div style="text-align: center; color: #999; font-size: 14px; padding: 20px;">输入对方角色档案的虚拟账号搜索</div>';
-}
-
-function hideOnlineSearchModal() {
-    document.getElementById('online-search-modal').style.display = 'none';
-}
-
-// 搜索用户
-async function searchOnlineUser() {
-    const wechatId = document.getElementById('search-wechat-id').value.trim();
-    const resultDiv = document.getElementById('search-user-result');
-    
-    if (!wechatId) {
-        resultDiv.innerHTML = '<div style="text-align: center; color: #ff3b30; padding: 20px;">请输入虚拟账号</div>';
+    if (!onlineConnected || !onlineUserData) {
+        alert('请先在设置中连接服务器并登录');
         return;
     }
     
-    resultDiv.innerHTML = '<div style="text-align: center; color: #667eea; padding: 20px;">搜索中...</div>';
+    // ✅ 检查是否有可用的User角色（有微信号）
+    const userChars = await db.characters.where('type').equals('user').toArray();
+    const availableChars = userChars.filter(c => c.identity?.account);
+    
+    if (availableChars.length === 0) {
+        alert('请先创建至少一个User角色并设置微信号');
+        return;
+    }
+    
+    // 填充身份选择下拉框 - 使用本地User角色列表
+    const select = document.getElementById('online-search-my-persona');
+    select.innerHTML = availableChars.map(char => 
+        `<option value="${char.identity.account}">${char.remark || char.name} (${char.identity.account})</option>`
+    ).join('');
+    
+    // 清空之前的搜索结果
+    document.getElementById('online-search-input').value = '';
+    document.getElementById('online-search-result').style.display = 'none';
+    document.getElementById('online-search-empty').style.display = 'none';
+    document.getElementById('online-search-message').value = '';
+    
+    document.getElementById('online-search-modal').style.display = 'flex';
+}
+
+// 执行联机搜索
+function doOnlineSearch() {
+    const wxAccount = document.getElementById('online-search-input').value.trim();
+    
+    if (!wxAccount) {
+        alert('请输入要搜索的虚拟微信号');
+        return;
+    }
+    
+    if (!onlineConnected) {
+        alert('服务器未连接，请先连接服务器');
+        return;
+    }
+    
+    if (!onlineSocket || onlineSocket.readyState !== WebSocket.OPEN) {
+        alert('WebSocket 连接未建立，请检查服务器连接');
+        return;
+    }
+    
+    console.log('[Online] 搜索微信号:', wxAccount);
+    
+    // 显示搜索中状态
+    const resultEl = document.getElementById('online-search-result');
+    const emptyEl = document.getElementById('online-search-empty');
+    if (resultEl) resultEl.style.display = 'none';
+    if (emptyEl) {
+        emptyEl.style.display = 'block';
+        emptyEl.innerHTML = '<div style="text-align:center; padding:20px; color:#999;">搜索中...</div>';
+    }
     
     try {
-        const res = await fetch(`${ONLINE_API_BASE}/api/online/search?wechat_id=${encodeURIComponent(wechatId)}&current_user_id=${onlineUser.id}`);
-        const data = await res.json();
+        onlineSocket.send(JSON.stringify({
+            type: 'search_user',
+            wx_account: wxAccount
+        }));
+        console.log('[Online] 搜索请求已发送');
+    } catch (e) {
+        console.error('[Online] 发送搜索请求失败:', e);
+        alert('搜索失败: ' + e.message);
+    }
+}
+
+// 显示搜索结果
+function displayOnlineSearchResult(result) {
+    console.log('[Online] 收到搜索结果:', result);
+    
+    const resultEl = document.getElementById('online-search-result');
+    const emptyEl = document.getElementById('online-search-empty');
+    
+    if (!result) {
+        console.log('[Online] 搜索结果为空');
+        if (resultEl) resultEl.style.display = 'none';
+        if (emptyEl) {
+            emptyEl.style.display = 'block';
+            emptyEl.innerHTML = '<div style="text-align:center; padding:20px; color:#999;">未找到该微信号<br><span style="font-size:12px; color:#ccc;">提示：只有角色上线后才能被搜索到</span></div>';
+        }
+        return;
+    }
+    
+    console.log('[Online] 显示搜索结果:', result.nickname);
+    
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (resultEl) {
+        resultEl.style.display = 'block';
         
-        if (!res.ok) {
-            resultDiv.innerHTML = `<div style="text-align: center; color: #ff3b30; padding: 20px;">${data.error || '未找到用户'}</div>`;
-            return;
+        // 填充结果
+        const avatarEl = document.getElementById('online-search-avatar');
+        const nicknameEl = document.getElementById('online-search-nickname');
+        const wxidEl = document.getElementById('online-search-wxid');
+        const bioEl = document.getElementById('online-search-bio');
+        const statusEl = document.getElementById('online-search-online-status');
+        
+        if (avatarEl) {
+            avatarEl.style.backgroundImage = result.avatar ? `url(${result.avatar})` : '';
+        }
+        if (nicknameEl) {
+            nicknameEl.textContent = result.nickname || '未设置昵称';
+        }
+        if (wxidEl) {
+            wxidEl.textContent = result.wx_account;
+        }
+        // 隐藏 bio（人设），保护隐私
+        if (bioEl) {
+            bioEl.style.display = 'none';
         }
         
-        const user = data.user;
-        let actionBtn = '';
+        if (statusEl) {
+            if (result.is_online) {
+                statusEl.textContent = '在线';
+                statusEl.style.background = '#e8f5e9';
+                statusEl.style.color = '#4caf50';
+            } else {
+                statusEl.textContent = '离线';
+                statusEl.style.background = '#f5f5f5';
+                statusEl.style.color = '#999';
+            }
+        }
         
-        if (user.id == onlineUser.id) {
-            actionBtn = '<span style="color: #999;">这是你自己</span>';
-        } else if (user.is_friend) {
-            actionBtn = '<button onclick="startOnlineChat(' + user.id + ')" style="padding: 8px 20px; border: none; border-radius: 6px; background: #34c759; color: #fff; cursor: pointer;">发消息</button>';
-        } else if (user.has_pending_request) {
-            actionBtn = '<span style="color: #999;">已发送请求</span>';
+        // 保存搜索结果供发送申请使用
+        resultEl.dataset.wxAccount = result.wx_account;
+    }
+}
+
+// 发送联机好友申请
+function sendOnlineFriendRequest() {
+    const resultEl = document.getElementById('online-search-result');
+    const toWxAccount = resultEl.dataset.wxAccount;
+    const fromWxAccount = document.getElementById('online-search-my-persona').value;
+    const message = document.getElementById('online-search-message').value.trim();
+    
+    if (!toWxAccount || !fromWxAccount) {
+        alert('请选择你的身份');
+        return;
+    }
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'friend_request',
+        from_wx_account: fromWxAccount,
+        to_wx_account: toWxAccount,
+        message: message || '请求添加你为好友'
+    }));
+    
+    closeModal('online-search-modal');
+    showToast('好友申请已发送');
+}
+
+// 处理收到的好友申请
+async function handleOnlineFriendRequest(request) {
+    console.log('[Online] 收到好友申请:', request);
+    
+    // 创建一个通知
+    sendSystemNotification('新的好友申请', `${request.from_nickname} (${request.from_wx_account}) 想添加你为好友`);
+    
+    // 将申请保存到本地好友申请列表
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    await db.friend_requests.add({
+        fromCharId: null, // 联机好友没有本地charId
+        toAccountId: accountId,
+        status: 'pending',
+        time: Date.now(),
+        isOnline: true, // 标记为联机好友申请
+        onlineData: request // 保存联机数据
+    });
+    
+    // 刷新新的好友页面
+    if (document.getElementById('new-friends-page').style.display !== 'none') {
+        renderNewFriendsPage();
+    }
+}
+
+// 好友申请被接受
+async function handleFriendRequestAccepted(data) {
+    console.log('[Online] 好友申请被接受:', data);
+    
+    // 在本地创建一个联机好友角色
+    const accountId = getCurrentAccountId();
+    const newChar = {
+        name: data.friend_nickname,
+        type: 'online_friend', // 特殊类型：联机好友
+        avatar: data.friend_avatar || '',
+        description: data.friend_bio || '',
+        identity: {
+            account: data.friend_wx_account
+        },
+        isOnlineFriend: true,
+        onlineData: {
+            wx_account: data.friend_wx_account,
+            user_id: data.friend_user_id
+        },
+        wechat_status_by_user: {}  // 使用正确的字段名，与 getFriendStatus 匹配
+    };
+    
+    // 设置好友关系
+    if (accountId) {
+        newChar.wechat_status_by_user[accountId] = 'friend';
+    }
+    
+    const charId = await db.characters.add(newChar);
+    
+    showToast(`${data.friend_nickname} 已成为你的好友`);
+    
+    // 刷新微信列表
+    const content = document.getElementById('wechat-content');
+    if (content) {
+        renderWechatList(content);
+    }
+}
+
+// 处理收到的联机消息
+async function handleOnlineIncomingMessage(data) {
+    console.log('[Online] 收到消息:', data);
+    
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    // 查找本地对应的联机好友角色
+    const chars = await db.characters.where('type').equals('online_friend').toArray();
+    let targetChar = chars.find(c => c.onlineData?.wx_account === data.from_wx_account);
+    
+    if (!targetChar) {
+        console.warn('[Online] 未找到对应的联机好友角色');
+        return;
+    }
+    
+    // ✅ 更新好友的头像（如果服务器发送了新头像）
+    if (data.from_avatar && data.from_avatar !== targetChar.avatar) {
+        console.log('[Online] 更新好友头像:', data.from_wx_account);
+        targetChar.avatar = data.from_avatar;
+        await db.characters.put(targetChar);
+        targetChar = await db.characters.get(targetChar.id);
+    }
+    
+    // ✅ 确保联机好友在当前账号下的好友状态是 'friend'
+    // 这样切换账号后消息也能正常显示
+    const currentFriendStatus = getFriendStatus(targetChar, accountId);
+    if (currentFriendStatus !== 'friend') {
+        console.log('[Online] 为当前账号设置联机好友状态为 friend');
+        if (!targetChar.wechat_status_by_user) targetChar.wechat_status_by_user = {};
+        targetChar.wechat_status_by_user[accountId] = 'friend';
+        // 更新后重新获取，确保后续逻辑使用最新数据
+        await db.characters.put(targetChar);
+        targetChar = await db.characters.get(targetChar.id);
+    }
+    
+    // 检查是否是特殊消息类型（如转账）
+    let msgObj = {
+        role: 'char',
+        content: data.content,
+        time: data.timestamp || Date.now(),
+        isOnlineMessage: true
+    };
+    
+    // 尝试解析 JSON 格式的特殊消息
+    try {
+        const parsed = JSON.parse(data.content);
+        if (parsed.__type === 'transfer') {
+            // 这是转账消息，转换为转账卡片格式
+            msgObj.type = 'transfer';
+            msgObj.content = JSON.stringify({
+                amount: parsed.amount,
+                desc: parsed.desc,
+                status: 'sent'  // 对于接收方来说是待接收状态
+            });
+            msgObj.id = 'trans_' + Date.now();
+            console.log('[Online] 收到转账消息:', parsed);
+        } else if (parsed.__type === 'familyCard') {
+            // 🎯 这是亲属卡消息（和转账一样的处理方式）
+            msgObj.type = 'familyCard';
+            msgObj.content = JSON.stringify({
+                fromName: parsed.fromName || data.from_nickname,
+                monthlyLimit: parsed.monthlyLimit || 0,
+                status: 'received',
+                isOnline: true,
+                message: parsed.message || ''
+            });
+            console.log('[Online] 收到亲属卡消息:', parsed);
+        } else if (parsed.__type === 'audio') {
+            // 这是语音消息
+            msgObj.type = 'audio';
+            msgObj.content = parsed.audio;
+            msgObj.duration = parsed.duration;
+            msgObj.effect = parsed.effect;
+            console.log('[Online] 收到语音消息, 时长:', parsed.duration, '秒, 效果:', parsed.effect);
+        }
+    } catch (e) {
+        // 不是 JSON，普通文本消息
+    }
+    
+    // 保存消息到聊天历史
+    let history = getChatHistory(targetChar, accountId);
+    history.push(msgObj);
+    await setChatHistory(targetChar, accountId, history);
+    
+    // 如果当前正在查看这个聊天，更新UI
+    if (currentChatCharId === targetChar.id) {
+        // 特殊消息类型需要重新渲染整个聊天（包括图片、转账、语音、亲属卡）
+        if (msgObj.type === 'transfer' || msgObj.type === 'familyCard' || msgObj.type === 'audio' || data.content.startsWith('[img:')) {
+            renderChatBody(targetChar);
         } else {
-            actionBtn = '<button onclick="sendOnlineFriendRequest(' + user.id + ')" style="padding: 8px 20px; border: none; border-radius: 6px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; cursor: pointer;">添加好友</button>';
+            // ✅ 使用服务器发送的头像，如果没有则使用本地头像
+            const avatarToUse = data.from_avatar || targetChar.avatar;
+            appendMessageToUI('char', data.content, avatarToUse);
+        }
+    } else {
+        // 发送通知
+        let notifyContent = data.content;
+        if (msgObj.type === 'transfer') notifyContent = '[转账]';
+        if (msgObj.type === 'familyCard') notifyContent = '[亲属卡]';
+        if (msgObj.type === 'audio') notifyContent = '[语音消息]';
+        if (data.content.startsWith('[img:')) notifyContent = '[图片]';
+        sendSystemNotification(targetChar.name, notifyContent);
+    }
+}
+
+// ==================== 亲属卡处理函数 ====================
+
+// 处理收到亲属卡
+async function handleFamilyCardReceived(data) {
+    console.log('[Online] 收到亲属卡:', data);
+    
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    // 查找对应的联机好友角色
+    const chars = await db.characters.where('type').equals('online_friend').toArray();
+    let friendChar = chars.find(c => c.onlineData?.wx_account === data.from_wx_account);
+    
+    if (!friendChar) {
+        console.warn('[Online] 未找到对应的联机好友');
+        return;
+    }
+    
+    // 保存亲属卡消息到聊天记录
+    let history = getChatHistory(friendChar, accountId);
+    const familyCardMsg = {
+        role: 'char',
+        type: 'familyCard',
+        content: JSON.stringify({
+            fromName: data.from_nickname,
+            from_wx_account: data.from_wx_account,
+            monthlyLimit: data.monthly_limit,
+            status: 'received',
+            isOnline: true
+        }),
+        time: Date.now()
+    };
+    
+    history.push(familyCardMsg);
+    await setChatHistory(friendChar, accountId, history);
+    
+    // 如果当前正在查看该聊天，刷新显示
+    if (currentChatCharId === friendChar.id) {
+        renderChatBody(friendChar);
+    }
+    
+    // 发送通知
+    showToast(`${data.from_nickname} 赠送了亲属卡`);
+    sendSystemNotification(friendChar.name, '[亲属卡]');
+    
+    // 重新获取亲属卡列表
+    const onlineUserChar = await getOrCreateOnlineUserChar();
+    if (onlineUserChar && onlineSocket) {
+        onlineSocket.send(JSON.stringify({
+            type: 'get_family_cards',
+            my_wx_account: onlineUserChar.identity.account
+        }));
+    }
+}
+
+// 处理亲属卡被使用
+async function handleFamilyCardUsed(data) {
+    console.log('[Online] 亲属卡被使用:', data);
+    
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    // 查找对应的联机好友角色
+    const chars = await db.characters.where('type').equals('online_friend').toArray();
+    let friendChar = chars.find(c => c.onlineData?.wx_account === data.user_wx_account);
+    
+    if (!friendChar) {
+        console.warn('[Online] 未找到对应的联机好友');
+        return;
+    }
+    
+    // 显示通知
+    showToast(`${data.user_nickname} 使用了您的亲属卡 ¥${data.amount}`);
+    
+    // 添加流水记录到本地
+    const user = await db.characters.get(parseInt(accountId));
+    if (user) {
+        if (!user.identity) user.identity = {};
+        if (!user.identity.familyCardRecords) user.identity.familyCardRecords = [];
+        
+        user.identity.familyCardRecords.push({
+            type: 'expense',
+            user_wx_account: data.user_wx_account,
+            user_nickname: data.user_nickname,
+            amount: data.amount,
+            description: data.description,
+            used_this_month: data.used_this_month,
+            monthly_limit: data.monthly_limit,
+            time: Date.now()
+        });
+        
+        await db.characters.put(user);
+    }
+}
+
+// 处理亲属卡列表
+async function handleFamilyCardsList(data) {
+    console.log('[Online] 收到亲属卡列表:', data);
+    
+    // 保存到本地缓存
+    localStorage.setItem('online_family_cards_given', JSON.stringify(data.given || []));
+    localStorage.setItem('online_family_cards_received', JSON.stringify(data.received || []));
+    
+    // 如果亲属卡页面打开着，刷新显示
+    const familyCardPage = document.getElementById('family-card-page');
+    if (familyCardPage && familyCardPage.style.display !== 'none') {
+        renderFamilyCardList();
+    }
+}
+
+// ==================== 亲属卡处理函数结束 ====================
+
+// 请求已上线的角色列表
+function requestOnlineCharacters() {
+    if (!onlineConnected || !onlineUserData) return;
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'get_online_characters'
+    }));
+}
+
+// 上线角色
+async function goOnlineWithCharacter(charId) {
+    if (!onlineConnected || !onlineUserData) {
+        alert('请先在设置中连接服务器并登录');
+        return;
+    }
+    
+    const char = await db.characters.get(charId);
+    if (!char || char.type !== 'user') {
+        alert('只能上线User类型的角色');
+        return;
+    }
+    
+    const wxAccount = char.identity?.account;
+    if (!wxAccount) {
+        alert('该角色没有设置虚拟微信号，请先在WeChat中注册');
+        return;
+    }
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'go_online',
+        wx_account: wxAccount,
+        nickname: char.remark || char.name,
+        avatar: char.avatar || '',
+        bio: char.description?.substring(0, 100) || '',
+        local_char_id: charId
+    }));
+}
+
+// 下线角色
+function goOfflineWithCharacter(wxAccount) {
+    if (!onlineConnected) return;
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'go_offline',
+        wx_account: wxAccount
+    }));
+}
+
+// ✅ 自动上线所有 User 类型的角色
+// 自动注册所有 User 类型角色到服务器（不上线，仅用于搜索）
+async function autoRegisterAllUserCharacters() {
+    if (!onlineConnected || !onlineUserData) {
+        console.log('[Online] 未连接或未登录，跳过自动注册');
+        return;
+    }
+    
+    try {
+        // 获取所有 User 类型的角色
+        const userChars = await db.characters.where('type').equals('user').toArray();
+        
+        let registerCount = 0;
+        for (const char of userChars) {
+            const wxAccount = char.identity?.account;
+            const nickname = char.remark || char.name;
+            
+            // 验证必填字段
+            if (!wxAccount || !nickname) {
+                console.log(`[Online] 角色 ${char.name} 缺少微信号或昵称，跳过注册`);
+                continue;
+            }
+            
+            // 注册角色到服务器（不上线，is_online = 0）
+            console.log(`[Online] 注册角色到服务器: ${nickname} (${wxAccount})`);
+            
+            try {
+                onlineSocket.send(JSON.stringify({
+                    type: 'register_character',
+                    wx_account: wxAccount,
+                    nickname: nickname,
+                    avatar: char.avatar || '',
+                    bio: (char.description || '').substring(0, 100)
+                }));
+                registerCount++;
+                
+                // 添加小延迟避免请求过快
+                await new Promise(resolve => setTimeout(resolve, 100));
+            } catch (sendError) {
+                console.error(`[Online] 注册角色失败: ${nickname}`, sendError);
+            }
         }
         
-        resultDiv.innerHTML = `
-            <div style="display: flex; align-items: center; padding: 16px; background: #f9f9f9; border-radius: 12px;">
-                <div style="width: 50px; height: 50px; border-radius: 50%; background: ${user.avatar ? `url(${user.avatar}) center/cover` : 'linear-gradient(135deg, #FFB6C1 0%, #FF69B4 100%)'}; display: flex; align-items: center; justify-content: center; font-size: 20px; color: #fff; margin-right: 12px;">${user.avatar ? '' : '👤'}</div>
-                <div style="flex: 1;">
-                    <div style="font-size: 16px; font-weight: 600;">${user.nickname || user.username}</div>
-                    <div style="font-size: 12px; color: #667eea;">虚拟账号: ${user.wechat_id}</div>
-                    ${user.bio ? `<div style="font-size: 12px; color: #666; margin-top: 4px;">${user.bio}</div>` : ''}
-                </div>
-                <div>${actionBtn}</div>
+        if (registerCount > 0) {
+            console.log(`[Online] 已注册 ${registerCount} 个角色到服务器（可被搜索）`);
+        } else {
+            console.log('[Online] 没有可注册的角色（请确保 User 角色设置了微信号）');
+        }
+    } catch (e) {
+        console.error('[Online] 自动注册角色失败:', e);
+    }
+}
+
+async function autoGoOnlineAllUserCharacters() {
+    if (!onlineConnected || !onlineUserData) {
+        console.log('[Online] 未连接或未登录，跳过自动上线');
+        return;
+    }
+    
+    try {
+        // 获取所有 User 类型的角色
+        const userChars = await db.characters.where('type').equals('user').toArray();
+        
+        let onlineCount = 0;
+        for (const char of userChars) {
+            const wxAccount = char.identity?.account;
+            const nickname = char.remark || char.name;
+            
+            // 验证必填字段
+            if (!wxAccount || !nickname) {
+                console.log(`[Online] 角色 ${char.name} 缺少微信号或昵称，跳过上线`);
+                continue;
+            }
+            
+            // 上线角色
+            console.log(`[Online] 自动上线角色: ${nickname} (${wxAccount})`);
+            
+            try {
+                onlineSocket.send(JSON.stringify({
+                    type: 'go_online',
+                    wx_account: wxAccount,
+                    nickname: nickname,
+                    avatar: char.avatar || '',
+                    bio: (char.description || '').substring(0, 100),
+                    local_char_id: char.id
+                }));
+                onlineCount++;
+                
+                // 添加小延迟避免请求过快
+                await new Promise(resolve => setTimeout(resolve, 150));
+            } catch (sendError) {
+                console.error(`[Online] 上线角色失败: ${nickname}`, sendError);
+            }
+        }
+        
+        if (onlineCount > 0) {
+            console.log(`[Online] 已发送 ${onlineCount} 个角色的上线请求`);
+            // ✅ 延迟后请求在线角色列表，确保服务器已处理上线请求
+            setTimeout(() => {
+                if (onlineConnected) {
+                    requestOnlineCharacters();
+                }
+            }, 500);
+        } else {
+            console.log('[Online] 没有可上线的角色（请确保 User 角色设置了微信号）');
+        }
+    } catch (e) {
+        console.error('[Online] 自动上线角色失败:', e);
+    }
+}
+
+// ✅ 获取当前可用的在线角色（如果没有则自动上线一个）
+async function getOrCreateOnlineUserChar() {
+    if (!onlineConnected || !onlineUserData) {
+        return null;
+    }
+    
+    const userChars = await db.characters.where('type').equals('user').toArray();
+    
+    // 1. 先找已上线的角色
+    let onlineUserChar = userChars.find(c => 
+        c.identity?.account && onlineCharacters.some(oc => oc.wx_account === c.identity.account)
+    );
+    
+    // 2. 如果没有，找一个有微信号的角色并自动上线
+    if (!onlineUserChar) {
+        const charWithAccount = userChars.find(c => c.identity?.account);
+        if (charWithAccount) {
+            console.log('[Online] 自动上线角色:', charWithAccount.name);
+            const wxAccount = charWithAccount.identity.account;
+            onlineSocket.send(JSON.stringify({
+                type: 'go_online',
+                wx_account: wxAccount,
+                nickname: charWithAccount.remark || charWithAccount.name,
+                avatar: charWithAccount.avatar || '',
+                bio: charWithAccount.description?.substring(0, 100) || '',
+                local_char_id: charWithAccount.id
+            }));
+            onlineUserChar = charWithAccount;
+        }
+    }
+    
+    return onlineUserChar;
+}
+
+// 发送联机消息
+function sendOnlineMessage(toWxAccount, content, fromWxAccount) {
+    if (!onlineConnected) {
+        console.warn('[Online] 未连接，无法发送消息');
+        return false;
+    }
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'message',
+        to_wx_account: toWxAccount,
+        from_wx_account: fromWxAccount,
+        content: content
+    }));
+    
+    return true;
+}
+
+// 检查角色是否已上线
+function isCharacterOnline(wxAccount) {
+    return onlineCharacters.some(c => c.wx_account === wxAccount);
+}
+
+// 获取联机状态
+function getOnlineStatus() {
+    return {
+        connected: onlineConnected,
+        loggedIn: !!onlineUserData,
+        user: onlineUserData,
+        characters: onlineCharacters
+    };
+}
+
+// 更新联机功能区显示
+function updateOnlineFeatureSection() {
+    const badge = document.getElementById('online-char-count-badge');
+    if (!badge) return;
+    
+    if (!onlineConnected) {
+        badge.textContent = '未连接';
+        badge.style.color = '#999';
+    } else if (!onlineUserData) {
+        badge.textContent = '未登录';
+        badge.style.color = '#ff9800';
+    } else if (onlineCharacters.length === 0) {
+        badge.textContent = '已登录';
+        badge.style.color = '#4caf50';
+    } else {
+        badge.textContent = `${onlineCharacters.length}个角色在线`;
+        badge.style.color = '#4caf50';
+    }
+}
+
+// 显示联机状态页面
+async function showOnlineStatusPage() {
+    const page = document.getElementById('online-status-page');
+    if (!page) return;
+    
+    page.style.display = 'flex';
+    
+    // 更新连接状态
+    updateOnlineConnectionStatus();
+    
+    // 更新角色列表
+    await renderOnlineCharList();
+    
+    // 获取联机群聊列表
+    const myWx = getMyOnlineWxAccount();
+    if (myWx && onlineSocket && onlineSocket.readyState === WebSocket.OPEN) {
+        onlineSocket.send(JSON.stringify({
+            type: 'get_online_groups',
+            my_wx_account: myWx
+        }));
+    }
+    
+    // 初始渲染群聊列表
+    const groupContainer = document.getElementById('online-group-list');
+    if (groupContainer) {
+        renderOnlineGroupList(groupContainer);
+    }
+}
+
+// 隐藏联机状态页面
+function hideOnlineStatusPage() {
+    const page = document.getElementById('online-status-page');
+    if (page) {
+        page.style.display = 'none';
+        // 更新"我"页面的联机状态
+        updateOnlineFeatureSection();
+    }
+}
+
+// 更新连接状态显示
+function updateOnlineConnectionStatus() {
+    const statusEl = document.getElementById('online-sync-status');
+    if (!statusEl) return;
+    
+    if (!onlineConnected) {
+        statusEl.innerHTML = `
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span style="width:8px; height:8px; border-radius:50%; background:#ff3b30;"></span>
+                <span style="color:#ff3b30; font-weight:500;">未同步</span>
+            </div>
+            <div style="font-size:11px; color:#999; margin-top:4px;">未连接服务器，请在设置中配置</div>
+        `;
+    } else if (!onlineUserData) {
+        statusEl.innerHTML = `
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span style="width:8px; height:8px; border-radius:50%; background:#ff9800;"></span>
+                <span style="color:#ff9800; font-weight:500;">等待登录</span>
+            </div>
+            <div style="font-size:11px; color:#999; margin-top:4px;">已连接服务器，请先登录账号</div>
+        `;
+    } else {
+        statusEl.innerHTML = `
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span style="width:8px; height:8px; border-radius:50%; background:#4caf50; animation:pulse 2s infinite;"></span>
+                <span style="color:#4caf50; font-weight:500;">已同步</span>
+            </div>
+            <div style="font-size:11px; color:#666; margin-top:4px;">用户: ${onlineUserData.username} | 角色已自动上线</div>
+        `;
+    }
+}
+
+// 渲染角色列表
+async function renderOnlineCharList() {
+    const container = document.getElementById('online-status-char-list');
+    if (!container) return;
+    
+    // 获取所有User类型角色
+    const users = await db.characters.where('type').equals('user').toArray();
+    
+    // 检查每个角色的在线状态
+    // ✅ 修复：如果已登录，则认为所有有微信号的角色都在线（因为登录后会自动上线）
+    const charList = users.map(char => {
+        const wxAccount = char.identity?.account || '';
+        // 如果已连接并已登录，认为有微信号的角色都在线
+        const isOnline = wxAccount && onlineConnected && onlineUserData;
+        return {
+            id: char.id,
+            name: char.remark || char.name,
+            avatar: char.avatar || '',
+            wxAccount: wxAccount,
+            isOnline: isOnline
+        };
+    }).filter(c => c.wxAccount);
+    
+    if (charList.length === 0) {
+        container.innerHTML = `
+            <div style="text-align:center; padding:40px 20px; color:#999;">
+                <div style="font-size:14px;">没有可用的角色</div>
+                <div style="font-size:12px; margin-top:8px;">请先在角色档案创建 User 类型角色，并设置微信号</div>
             </div>
         `;
-        
-    } catch (e) {
-        resultDiv.innerHTML = `<div style="text-align: center; color: #ff3b30; padding: 20px;">网络错误: ${e.message}</div>`;
+        return;
     }
-}
-
-// 发送好友请求
-async function sendOnlineFriendRequest(toUserId) {
-    try {
-        const res = await fetch(`${ONLINE_API_BASE}/api/online/friend_request`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ from_user_id: onlineUser.id, to_user_id: toUserId })
-        });
-        
-        const data = await res.json();
-        
-        if (!res.ok) {
-            alert(data.error || '发送失败');
-            return;
-        }
-        
-        if (data.status === 'accepted') {
-            alert(data.message);
-            hideOnlineSearchModal();
-            refreshOnlineFriendCount();
-        } else {
-            alert('好友请求已发送！');
-            // 重新搜索刷新状态
-            searchOnlineUser();
-        }
-        
-    } catch (e) {
-        alert('网络错误: ' + e.message);
-    }
-}
-
-// 刷新好友请求数量
-async function refreshOnlineFriendRequestCount() {
-    if (!onlineUser) return;
     
-    try {
-        const res = await fetch(`${ONLINE_API_BASE}/api/online/friend_requests?user_id=${onlineUser.id}`);
-        const data = await res.json();
-        
-        const count = data.requests ? data.requests.length : 0;
-        const countDiv = document.getElementById('online-request-count');
-        if (count > 0) {
-            countDiv.innerHTML = `<span style="color: #ff3b30; font-weight: 600;">${count}个待处理</span>`;
-        } else {
-            countDiv.textContent = '暂无请求';
-        }
-    } catch (e) {
-        console.error('获取好友请求失败:', e);
-    }
-}
-
-// 刷新好友数量
-async function refreshOnlineFriendCount() {
-    if (!onlineUser) return;
-    
-    try {
-        const res = await fetch(`${ONLINE_API_BASE}/api/online/friends?user_id=${onlineUser.id}`);
-        const data = await res.json();
-        
-        const count = data.friends ? data.friends.length : 0;
-        document.getElementById('online-friend-count').textContent = `${count}位好友`;
-    } catch (e) {
-        console.error('获取好友数量失败:', e);
-    }
-}
-
-// 显示好友请求列表
-async function showOnlineFriendRequests() {
-    document.getElementById('online-requests-modal').style.display = 'flex';
-    const listDiv = document.getElementById('online-requests-list');
-    listDiv.innerHTML = '<div style="text-align: center; color: #667eea; padding: 20px;">加载中...</div>';
-    
-    try {
-        const res = await fetch(`${ONLINE_API_BASE}/api/online/friend_requests?user_id=${onlineUser.id}`);
-        const data = await res.json();
-        
-        if (!data.requests || data.requests.length === 0) {
-            listDiv.innerHTML = '<div style="text-align: center; color: #999; font-size: 14px; padding: 40px 20px;">暂无好友请求</div>';
-            return;
-        }
-        
-        listDiv.innerHTML = data.requests.map(req => `
-            <div style="display: flex; align-items: center; padding: 12px; background: #f9f9f9; border-radius: 10px; margin-bottom: 10px;">
-                <div style="width: 44px; height: 44px; border-radius: 50%; background: ${req.from_user.avatar ? `url(${req.from_user.avatar}) center/cover` : 'linear-gradient(135deg, #FFB6C1 0%, #FF69B4 100%)'}; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #fff; margin-right: 12px;">${req.from_user.avatar ? '' : '👤'}</div>
-                <div style="flex: 1;">
-                    <div style="font-size: 15px; font-weight: 500;">${req.from_user.nickname || req.from_user.username}</div>
-                    <div style="font-size: 12px; color: #667eea;">虚拟账号: ${req.from_user.wechat_id || req.from_user.social_id}</div>
-                    ${req.message ? `<div style="font-size: 12px; color: #666; margin-top: 2px;">"${req.message}"</div>` : ''}
-                </div>
-                <div style="display: flex; gap: 8px;">
-                    <button onclick="handleOnlineFriendRequest(${req.id}, 'accept')" style="padding: 6px 14px; border: none; border-radius: 6px; background: #34c759; color: #fff; font-size: 13px; cursor: pointer;">接受</button>
-                    <button onclick="handleOnlineFriendRequest(${req.id}, 'reject')" style="padding: 6px 14px; border: 1px solid #ddd; border-radius: 6px; background: #fff; color: #666; font-size: 13px; cursor: pointer;">拒绝</button>
-                </div>
+    // 显示角色列表和在线状态，登录后会自动上线所有角色
+    container.innerHTML = charList.map(char => `
+        <div style="padding:12px 16px; background:#fff; display:flex; align-items:center; gap:12px; border-bottom:1px solid #f0f0f0;">
+            <div style="width:44px; height:44px; border-radius:8px; background-image:url(${char.avatar}); background-size:cover; background-position:center; background-color:#e0e0e0;"></div>
+            <div style="flex:1;">
+                <div style="font-size:15px; font-weight:500; color:#333;">${char.name}</div>
+                <div style="font-size:12px; color:#999; margin-top:2px;">${char.wxAccount}</div>
             </div>
-        `).join('');
-        
-    } catch (e) {
-        listDiv.innerHTML = `<div style="text-align: center; color: #ff3b30; padding: 20px;">加载失败: ${e.message}</div>`;
-    }
-}
-
-function hideOnlineFriendRequests() {
-    document.getElementById('online-requests-modal').style.display = 'none';
-}
-
-// 处理好友请求
-async function handleOnlineFriendRequest(requestId, action) {
-    try {
-        const res = await fetch(`${ONLINE_API_BASE}/api/online/friend_request/${requestId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action, user_id: onlineUser.id })
-        });
-        
-        const data = await res.json();
-        
-        if (!res.ok) {
-            alert(data.error || '操作失败');
-            return;
-        }
-        
-        // 刷新列表
-        showOnlineFriendRequests();
-        refreshOnlineFriendRequestCount();
-        
-        if (action === 'accept') {
-            refreshOnlineFriendCount();
-        }
-        
-    } catch (e) {
-        alert('网络错误: ' + e.message);
-    }
-}
-
-// 显示好友列表
-async function showOnlineFriendList() {
-    document.getElementById('online-friends-modal').style.display = 'flex';
-    const listDiv = document.getElementById('online-friends-list');
-    listDiv.innerHTML = '<div style="text-align: center; color: #667eea; padding: 20px;">加载中...</div>';
-    
-    try {
-        const res = await fetch(`${ONLINE_API_BASE}/api/online/friends?user_id=${onlineUser.id}`);
-        const data = await res.json();
-        
-        if (!data.friends || data.friends.length === 0) {
-            listDiv.innerHTML = '<div style="text-align: center; color: #999; font-size: 14px; padding: 40px 20px;">暂无好友<br><br>去搜索添加新朋友吧！</div>';
-            return;
-        }
-        
-        listDiv.innerHTML = data.friends.map(friend => `
-            <div style="display: flex; align-items: center; padding: 12px; background: #f9f9f9; border-radius: 10px; margin-bottom: 10px; cursor: pointer;" onclick="startOnlineChat(${friend.id})">
-                <div style="width: 48px; height: 48px; border-radius: 50%; background: ${friend.avatar ? `url(${friend.avatar}) center/cover` : 'linear-gradient(135deg, #FFB6C1 0%, #FF69B4 100%)'}; display: flex; align-items: center; justify-content: center; font-size: 20px; color: #fff; margin-right: 12px;">${friend.avatar ? '' : '👤'}</div>
-                <div style="flex: 1;">
-                    <div style="font-size: 15px; font-weight: 500;">${friend.nickname || friend.username}</div>
-                    <div style="font-size: 12px; color: #667eea;">虚拟账号: ${friend.wechat_id || friend.social_id}</div>
-                    ${friend.bio ? `<div style="font-size: 12px; color: #666; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px;">${friend.bio}</div>` : ''}
-                </div>
-                <div style="color: #667eea; font-size: 20px;">💬</div>
+            <div style="display:flex; align-items:center;">
+                ${char.isOnline ? `
+                    <span style="font-size:12px; color:#4caf50; padding:4px 10px; background:#e8f5e9; border-radius:10px; display:flex; align-items:center; gap:4px;">
+                        <span style="width:6px; height:6px; border-radius:50%; background:#4caf50;"></span>
+                        在线
+                    </span>
+                ` : `
+                    <span style="font-size:12px; color:#999; padding:4px 10px; background:#f5f5f5; border-radius:10px; display:flex; align-items:center; gap:4px;">
+                        <span style="width:6px; height:6px; border-radius:50%; background:#999;"></span>
+                        离线
+                    </span>
+                `}
             </div>
-        `).join('');
-        
-    } catch (e) {
-        listDiv.innerHTML = `<div style="text-align: center; color: #ff3b30; padding: 20px;">加载失败: ${e.message}</div>`;
+        </div>
+    `).join('');
+}
+
+// 刷新联机状态页面内容
+async function refreshOnlineStatusPageContent() {
+    const page = document.getElementById('online-status-page');
+    if (!page || page.style.display === 'none') return; // 页面没打开
+    
+    // 刷新角色列表
+    await renderOnlineCharList();
+}
+
+// 手动同步在线状态
+async function manualSyncOnline() {
+    const btn = document.getElementById('manual-sync-btn');
+    const btnText = document.getElementById('sync-btn-text');
+    const syncIcon = document.getElementById('sync-icon');
+    
+    if (!btn || !btnText) return;
+    
+    // 按钮变为同步中状态
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    btnText.textContent = '同步中...';
+    if (syncIcon) {
+        syncIcon.style.animation = 'spin 1s linear infinite';
     }
-}
-
-function hideOnlineFriendList() {
-    document.getElementById('online-friends-modal').style.display = 'none';
-}
-
-// 开始聊天
-async function startOnlineChat(friendId) {
-    hideOnlineSearchModal();
-    hideOnlineFriendList();
     
-    onlineChatFriendId = friendId;
-    
-    // 获取好友信息
     try {
-        const res = await fetch(`${ONLINE_API_BASE}/api/online/friends?user_id=${onlineUser.id}`);
-        const data = await res.json();
-        const friend = data.friends.find(f => f.id == friendId);
-        
-        if (friend) {
-            document.getElementById('online-chat-title').textContent = friend.nickname || friend.username;
+        if (!onlineConnected) {
+            // 尝试重新连接服务器
+            const serverUrl = localStorage.getItem('online_server_url');
+            if (!serverUrl) {
+                showToast('请先在设置中配置服务器地址');
+                return;
+            }
+            
+            showToast('正在连接服务器...');
+            await connectToOnlineServer();
+            showToast('连接成功，正在同步...');
         }
-    } catch (e) {
-        console.error('获取好友信息失败:', e);
-    }
-    
-    // 显示聊天窗口
-    document.getElementById('online-chat-page').style.display = 'flex';
-    
-    // 加载聊天记录
-    await loadOnlineChatHistory();
-}
-
-function hideOnlineChatPage() {
-    document.getElementById('online-chat-page').style.display = 'none';
-    onlineChatFriendId = null;
-}
-
-// 加载聊天记录
-async function loadOnlineChatHistory() {
-    const chatBody = document.getElementById('online-chat-body');
-    chatBody.innerHTML = '<div style="text-align: center; color: #999; padding: 20px;">加载中...</div>';
-    
-    try {
-        const res = await fetch(`${ONLINE_API_BASE}/api/online/messages?user_id=${onlineUser.id}&friend_id=${onlineChatFriendId}&limit=100`);
-        const data = await res.json();
         
-        if (!data.messages || data.messages.length === 0) {
-            chatBody.innerHTML = '<div style="text-align: center; color: #999; padding: 40px 20px; font-size: 14px;">暂无消息<br>发送第一条消息开始聊天吧！</div>';
+        // 如果已连接但未登录
+        if (onlineConnected && !onlineUserData) {
+            showToast('请先登录账号');
+            updateOnlineConnectionStatus();
             return;
         }
         
-        chatBody.innerHTML = data.messages.map(msg => {
-            const isMe = msg.from_user_id == onlineUser.id;
-            return `
-                <div class="message-row ${isMe ? 'self' : 'other'}" style="display: flex; margin-bottom: 12px; ${isMe ? 'flex-direction: row-reverse;' : ''}">
-                    <div class="message-content" style="max-width: 70%; padding: 10px 14px; border-radius: 18px; ${isMe ? 'background: var(--ins-pink-light); border-bottom-right-radius: 4px;' : 'background: #f2f2f7; border-bottom-left-radius: 4px;'}">
-                        ${msg.content}
-                    </div>
-                </div>
-            `;
-        }).join('');
+        // 如果已登录，重新同步所有角色
+        if (onlineConnected && onlineUserData) {
+            console.log('[Online] 手动同步：重新注册并上线所有角色');
+            
+            // 重新注册角色
+            await autoRegisterAllUserCharacters();
+            
+            // 重新上线所有角色
+            await autoGoOnlineAllUserCharacters();
+            
+            // 等待一下让服务器处理
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // 刷新角色列表
+            requestOnlineCharacters();
+            await refreshOnlineStatusPageContent();
+            
+            showToast('同步成功');
+        }
         
-        // 滚动到底部
-        chatBody.scrollTop = chatBody.scrollHeight;
+        updateOnlineConnectionStatus();
         
-    } catch (e) {
-        chatBody.innerHTML = `<div style="text-align: center; color: #ff3b30; padding: 20px;">加载失败: ${e.message}</div>`;
+    } catch (error) {
+        console.error('[Online] 同步失败:', error);
+        showToast('同步失败: ' + (error.message || '未知错误'));
+    } finally {
+        // 恢复按钮状态
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btnText.textContent = '立即同步';
+        if (syncIcon) {
+            syncIcon.style.animation = '';
+        }
     }
 }
 
-// 追加消息到聊天界面
-function appendOnlineMessage(msg) {
-    const chatBody = document.getElementById('online-chat-body');
-    const isMe = msg.from_user_id == onlineUser.id;
+// 自动同步定时器（每30秒检查一次）
+let autoSyncTimer = null;
+
+function startAutoSync() {
+    // 清除旧的定时器
+    if (autoSyncTimer) {
+        clearInterval(autoSyncTimer);
+    }
     
-    // 移除空状态提示
-    const emptyTip = chatBody.querySelector('div[style*="暂无消息"]');
-    if (emptyTip) emptyTip.remove();
+    // 每30秒自动检查并同步
+    autoSyncTimer = setInterval(async () => {
+        // 只在已登录但未连接的情况下尝试自动重连
+        if (!onlineConnected && onlineToken && onlineUserData) {
+            console.log('[Online] 自动同步：检测到断开连接，尝试重新连接...');
+            try {
+                await connectToOnlineServer();
+                console.log('[Online] 自动重连成功');
+            } catch (error) {
+                console.error('[Online] 自动重连失败:', error);
+            }
+        }
+        
+        // 如果已连接，定期请求角色状态
+        if (onlineConnected && onlineUserData) {
+            requestOnlineCharacters();
+        }
+    }, 30000); // 30秒
+}
+
+function stopAutoSync() {
+    if (autoSyncTimer) {
+        clearInterval(autoSyncTimer);
+        autoSyncTimer = null;
+    }
+}
+
+// ==================== 联机群聊功能 ====================
+
+// 刷新联机群聊列表
+function refreshOnlineGroupList() {
+    // 如果群聊页面打开了，刷新显示
+    const container = document.getElementById('online-group-list');
+    if (container) {
+        renderOnlineGroupList(container);
+    }
+}
+
+// 渲染联机群聊列表
+function renderOnlineGroupList(container) {
+    if (onlineGroups.length === 0) {
+        container.innerHTML = `<div style="text-align:center; padding:40px; color:#999;">暂无联机群聊</div>`;
+        return;
+    }
     
-    const msgDiv = document.createElement('div');
-    msgDiv.className = `message-row ${isMe ? 'self' : 'other'}`;
-    msgDiv.style.cssText = `display: flex; margin-bottom: 12px; ${isMe ? 'flex-direction: row-reverse;' : ''}`;
-    msgDiv.innerHTML = `
-        <div class="message-content" style="max-width: 70%; padding: 10px 14px; border-radius: 18px; ${isMe ? 'background: var(--ins-pink-light); border-bottom-right-radius: 4px;' : 'background: #f2f2f7; border-bottom-left-radius: 4px;'}">
-            ${msg.content}
+    container.innerHTML = onlineGroups.map(g => `
+        <div onclick="openOnlineGroup('${g.id}')" style="padding:14px 16px; background:#fff; display:flex; align-items:center; gap:12px; border-bottom:1px solid #f0f0f0; cursor:pointer;">
+            <div style="width:48px; height:48px; border-radius:8px; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); display:flex; align-items:center; justify-content:center; color:#fff; font-size:18px;">👥</div>
+            <div style="flex:1;">
+                <div style="font-size:15px; font-weight:500; color:#333;">${g.name}</div>
+                <div style="font-size:12px; color:#999; margin-top:2px;">联机群聊</div>
+            </div>
+            <svg viewBox="0 0 24 24" style="width:20px; height:20px; stroke:#ccc; fill:none;"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </div>
+    `).join('');
+}
+
+// 处理群聊邀请 - 保存到数据库，显示在"新的好友"页面
+async function handleOnlineGroupInvite(data) {
+    // 将群聊邀请保存到 friend_requests 表
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    // 检查是否已存在相同的邀请
+    const existingInvites = await db.friend_requests
+        .where('toAccountId')
+        .equals(accountId)
+        .toArray();
+    const alreadyExists = existingInvites.some(r => 
+        r.isGroupInvite && 
+        r.groupData?.group_id === data.group_id &&
+        r.status === 'pending'
+    );
+    if (alreadyExists) return;
+    
+    // 创建群聊邀请记录
+    await db.friend_requests.add({
+        toAccountId: accountId,
+        isOnline: true,
+        isGroupInvite: true,
+        status: 'pending',
+        time: Date.now(),
+        groupData: {
+            group_id: data.group_id,
+            group_name: data.group_name,
+            inviter_wx: data.inviter_wx,
+            inviter_name: data.inviter_name
+        }
+    });
+    
+    // 显示通知
+    showToast(`${data.inviter_name} 邀请你加入群聊"${data.group_name}"`);
+    
+    // 如果新的好友页面正在显示，刷新它
+    if (document.getElementById('new-friends-page').style.display !== 'none') {
+        await renderNewFriendsPage();
+    }
+}
+
+// 在本地数据库创建联机群聊记录，让它显示在消息列表中
+async function createLocalOnlineGroupChat(group) {
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    try {
+        // 检查是否已存在
+        const existing = await db.group_chats
+            .where('ownerAccountId').equals(accountId)
+            .filter(g => g.isOnlineGroup && g.onlineGroupId === group.id)
+            .first();
+        
+        if (existing) {
+            console.log('联机群聊已存在于本地，跳过创建');
+            return;
+        }
+        
+        // 创建本地群聊记录
+        const groupChat = {
+            name: group.name,
+            avatar: DEFAULT_GROUP_AVATAR,
+            memberIds: [], // 联机群聊的成员由服务器管理
+            ownerAccountId: accountId,
+            created_at: group.created_at || Date.now(),
+            updated_at: Date.now(),
+            is_pinned: false,
+            chat_history: [{
+                role: 'system',
+                content: '联机群聊已创建',
+                time: Date.now()
+            }],
+            isOnlineGroup: true, // 标记为联机群聊
+            onlineGroupId: group.id, // 联机群聊的ID
+            onlineGroupCreator: group.creator_wx // 创建者微信号
+        };
+        
+        await db.group_chats.add(groupChat);
+        console.log('已在本地创建联机群聊记录');
+        
+        // 刷新聊天列表
+        if (document.querySelector('.wechat-tab-item.active')?.innerText.includes('微信')) {
+            renderWechatList(document.getElementById('wechat-content'));
+        }
+    } catch (e) {
+        console.error('创建本地联机群聊记录失败:', e);
+    }
+}
+
+// 更新本地联机群聊的最后消息
+async function updateLocalOnlineGroupLastMessage(onlineGroupId, message) {
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    try {
+        // 查找对应的本地群聊记录
+        const groups = await db.group_chats
+            .where('ownerAccountId').equals(accountId)
+            .filter(g => g.isOnlineGroup && g.onlineGroupId === onlineGroupId)
+            .toArray();
+        
+        if (groups.length === 0) {
+            console.log('未找到本地联机群聊记录');
+            return;
+        }
+        
+        const group = groups[0];
+        
+        // 添加消息到聊天历史
+        if (!group.chat_history) {
+            group.chat_history = [];
+        }
+        
+        // 构建消息记录
+        const chatMessage = {
+            role: 'assistant', // 群聊消息视为助手消息
+            content: message.content,
+            time: message.created_at || Date.now(),
+            sender_name: message.sender_name,
+            sender_type: message.sender_type,
+            character_name: message.character_name
+        };
+        
+        group.chat_history.push(chatMessage);
+        group.updated_at = Date.now();
+        
+        await db.group_chats.put(group);
+        
+        // 刷新聊天列表（如果正在显示）
+        if (document.querySelector('.wechat-tab-item.active')?.innerText.includes('微信')) {
+            renderWechatList(document.getElementById('wechat-content'));
+        }
+    } catch (e) {
+        console.error('更新本地联机群聊消息失败:', e);
+    }
+}
+
+// 显示加入群聊弹窗（选择要带入的角色）
+async function showJoinOnlineGroupModal(groupId, groupName) {
+    // 获取所有可用的角色（非User类型）
+    const chars = await db.characters.toArray();
+    const availableChars = chars.filter(c => c.type !== 'user' && c.type !== 'online_friend');
+    
+    const modal = document.createElement('div');
+    modal.id = 'join-group-modal';
+    modal.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; display:flex; align-items:center; justify-content:center;`;
+    
+    modal.innerHTML = `
+        <div style="background:#fff; border-radius:16px; padding:24px; width:85%; max-width:360px;">
+            <h3 style="margin:0 0 16px 0; text-align:center; font-size:18px;">加入「${groupName}」</h3>
+            
+            <div style="margin-bottom:16px;">
+                <div style="font-size:13px; color:#666; margin-bottom:8px;">选择要带入群聊的角色（可选）：</div>
+                <select id="join-group-char-select" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px;">
+                    <option value="">不带角色</option>
+                    ${availableChars.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+                </select>
+            </div>
+            
+            <div style="font-size:12px; color:#999; margin-bottom:20px; line-height:1.5;">
+                带入角色后，你可以在群聊中让该角色发言（调用AI）
+            </div>
+            
+            <div style="display:flex; gap:12px;">
+                <button onclick="this.closest('#join-group-modal').remove()" style="flex:1; padding:12px; background:#f0f0f0; color:#666; border:none; border-radius:8px; font-size:15px;">取消</button>
+                <button onclick="doJoinOnlineGroup('${groupId}')" style="flex:1; padding:12px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px; font-size:15px;">加入</button>
+            </div>
         </div>
     `;
     
-    chatBody.appendChild(msgDiv);
-    chatBody.scrollTop = chatBody.scrollHeight;
+    document.body.appendChild(modal);
 }
 
-// 发送消息
-async function sendOnlineMessage() {
-    const input = document.getElementById('online-chat-input');
-    const content = input.value.trim();
+// 执行加入群聊
+async function doJoinOnlineGroup(groupId) {
+    const charSelect = document.getElementById('join-group-char-select');
+    const charId = charSelect?.value;
     
-    if (!content || !onlineChatFriendId) return;
+    let myChar = null;
+    if (charId) {
+        const char = await db.characters.get(parseInt(charId));
+        if (char) {
+            myChar = {
+                name: char.name,
+                avatar: char.avatar || '',
+                desc: char.description?.substring(0, 200) || ''
+            };
+        }
+    }
     
-    input.value = '';
+    // 获取我的上线微信号
+    const myWx = getMyOnlineWxAccount();
+    if (!myWx) {
+        alert('请先上线一个角色');
+        return;
+    }
     
-    // 立即显示到界面
-    appendOnlineMessage({
-        from_user_id: onlineUser.id,
-        content: content,
-        created_at: Date.now() / 1000
+    onlineSocket.send(JSON.stringify({
+        type: 'join_online_group',
+        group_id: groupId,
+        my_wx_account: myWx,
+        my_character: myChar
+    }));
+    
+    document.getElementById('join-group-modal')?.remove();
+}
+
+// 获取我当前上线的微信号
+function getMyOnlineWxAccount() {
+    if (!onlineCharacters || onlineCharacters.length === 0) return null;
+    return onlineCharacters[0]?.wx_account;
+}
+
+// 显示创建联机群聊弹窗
+async function showCreateOnlineGroupModal() {
+    if (!onlineConnected || !onlineUserData) {
+        alert('请先连接服务器并登录');
+        return;
+    }
+    
+    // 获取联机好友列表
+    const friends = await db.characters.where('type').equals('online_friend').toArray();
+    
+    // 获取可选的角色（非User类型）
+    const chars = await db.characters.toArray();
+    const availableChars = chars.filter(c => c.type !== 'user' && c.type !== 'online_friend');
+    
+    const modal = document.createElement('div');
+    modal.id = 'create-online-group-modal';
+    modal.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; display:flex; align-items:center; justify-content:center;`;
+    
+    modal.innerHTML = `
+        <div style="background:#fff; border-radius:16px; width:90%; max-width:400px; max-height:80vh; display:flex; flex-direction:column;">
+            <div style="padding:16px 20px; border-bottom:1px solid #f0f0f0; display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:17px; font-weight:600;">创建联机群聊</span>
+                <button onclick="this.closest('#create-online-group-modal').remove()" style="background:none; border:none; font-size:20px; color:#999; cursor:pointer;">×</button>
+            </div>
+            
+            <div style="flex:1; overflow-y:auto; padding:20px;">
+                <div style="margin-bottom:16px;">
+                    <label style="font-size:13px; color:#666; display:block; margin-bottom:6px;">群名称</label>
+                    <input type="text" id="og-name" placeholder="输入群聊名称" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px; box-sizing:border-box;">
+                </div>
+                
+                <div style="margin-bottom:16px;">
+                    <label style="font-size:13px; color:#666; display:block; margin-bottom:6px;">选择我要带入的角色（可选）</label>
+                    <select id="og-my-char" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px;">
+                        <option value="">不带角色</option>
+                        ${availableChars.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+                    </select>
+                </div>
+                
+                <div style="margin-bottom:16px;">
+                    <label style="font-size:13px; color:#666; display:block; margin-bottom:6px;">邀请联机好友（可多选）</label>
+                    <div id="og-friends-list" style="max-height:200px; overflow-y:auto; border:1px solid #ddd; border-radius:8px;">
+                        ${friends.length === 0 ? 
+                            `<div style="padding:20px; text-align:center; color:#999;">暂无联机好友</div>` :
+                            friends.map(f => `
+                                <label style="display:flex; align-items:center; padding:10px 12px; border-bottom:1px solid #f5f5f5; cursor:pointer;">
+                                    <input type="checkbox" value="${f.onlineData?.wx_account || ''}" style="margin-right:10px;">
+                                    <div style="width:36px; height:36px; border-radius:6px; background-image:url(${f.avatar}); background-size:cover; background-color:#e0e0e0; margin-right:10px;"></div>
+                                    <span style="font-size:14px;">${f.name}</span>
+                                </label>
+                            `).join('')
+                        }
+                    </div>
+                </div>
+            </div>
+            
+            <div style="padding:16px 20px; border-top:1px solid #f0f0f0;">
+                <button onclick="doCreateOnlineGroup()" style="width:100%; padding:14px; background:var(--ins-pink); color:#fff; border:none; border-radius:10px; font-size:16px; font-weight:500;">创建群聊</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// 执行创建联机群聊
+async function doCreateOnlineGroup() {
+    const name = document.getElementById('og-name').value.trim();
+    if (!name) {
+        alert('请输入群名称');
+        return;
+    }
+    
+    const myWx = getMyOnlineWxAccount();
+    if (!myWx) {
+        alert('请先上线一个角色');
+        return;
+    }
+    
+    // 获取选择的角色
+    let myChar = null;
+    const charId = document.getElementById('og-my-char').value;
+    if (charId) {
+        const char = await db.characters.get(parseInt(charId));
+        if (char) {
+            myChar = {
+                name: char.name,
+                avatar: char.avatar || '',
+                desc: char.description?.substring(0, 200) || ''
+            };
+        }
+    }
+    
+    // 获取邀请的好友
+    const checkboxes = document.querySelectorAll('#og-friends-list input[type="checkbox"]:checked');
+    const inviteWxs = Array.from(checkboxes).map(cb => cb.value).filter(v => v);
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'create_online_group',
+        name: name,
+        my_wx_account: myWx,
+        invite_wx_accounts: inviteWxs,
+        my_character: myChar
+    }));
+    
+    document.getElementById('create-online-group-modal')?.remove();
+}
+
+// 打开联机群聊
+function openOnlineGroup(groupId) {
+    currentOnlineGroupId = groupId;
+    currentOnlineGroupMessages = [];
+    currentOnlineGroupMembers = [];
+    
+    const group = onlineGroups.find(g => g.id === groupId);
+    if (!group) return;
+    
+    // 显示群聊页面
+    showOnlineGroupChatPage(group);
+    
+    // 应用背景图（延迟一下确保页面已创建）
+    setTimeout(() => {
+        applyOnlineGroupBackground(groupId);
+    }, 100);
+    
+    // 请求群成员
+    const myWx = getMyOnlineWxAccount();
+    if (myWx) {
+        onlineSocket.send(JSON.stringify({
+            type: 'get_group_members',
+            group_id: groupId,
+            my_wx_account: myWx
+        }));
+        
+        // 请求消息记录
+        onlineSocket.send(JSON.stringify({
+            type: 'get_group_messages',
+            group_id: groupId,
+            my_wx_account: myWx,
+            limit: 100
+        }));
+    }
+}
+
+// 显示联机群聊页面
+function showOnlineGroupChatPage(group) {
+    // 创建或显示群聊页面
+    let page = document.getElementById('online-group-chat-page');
+    if (!page) {
+        page = document.createElement('div');
+        page.id = 'online-group-chat-page';
+        page.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:#ffffff; z-index:300; display:flex; flex-direction:column;`;
+        document.body.appendChild(page);
+    }
+    
+    page.innerHTML = `
+        <div class="wechat-header" style="background:#fff; border-bottom:1px solid #f0f0f0;">
+            <div class="back-btn" onclick="hideOnlineGroupChat()" style="margin:0; background:none; width:40px; justify-content:flex-start; color:#333;">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:24px; height:24px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="wechat-title" id="online-group-chat-title" style="flex:1; text-align:center;">${group.name}</div>
+            <div onclick="showOnlineGroupInfo('${group.id}')" style="width:40px; display:flex; justify-content:flex-end; cursor:pointer;">
+                <svg viewBox="0 0 24 24" style="width:20px; height:20px; stroke:#333; fill:none;"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg>
+            </div>
+        </div>
+        
+        <div id="online-group-messages" style="flex:1; overflow-y:auto; padding:16px;">
+            <div style="text-align:center; padding:20px; color:#999;">加载中...</div>
+        </div>
+        
+        <div class="chat-footer" id="online-group-footer">
+            <div class="chat-input-bar">
+                <!-- 左侧：生成按钮 (让角色说话) -->
+                <div class="chat-icon-btn" onclick="letMyCharacterSpeak()" title="让角色说话">
+                    <svg class="svg-icon" viewBox="0 0 24 24"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M9 5H1"/></svg>
+                </div>
+                
+                <!-- 中间：输入框 -->
+                <input type="text" class="chat-input" id="online-group-input" placeholder="发送消息..." onfocus="closeOnlineGroupPanel()">
+                
+                <!-- 右侧：表情 -->
+                <div class="chat-icon-btn" onclick="toggleOnlineGroupPanel('emoji')">
+                    <svg class="svg-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><line x1="9" y1="9" x2="9.01" y2="9"></line><line x1="15" y1="9" x2="15.01" y2="9"></line></svg>
+                </div>
+                
+                <!-- 右侧：菜单 (+) -->
+                <div class="chat-icon-btn" id="online-group-btn-more" onclick="toggleOnlineGroupPanel('action')">
+                    <svg class="svg-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+                </div>
+                
+                <!-- 右侧：发送 (Send) - 默认隐藏 -->
+                <div class="chat-send-btn" id="online-group-btn-send" onclick="sendOnlineGroupMsg()">
+                    <svg class="svg-icon" viewBox="0 0 24 24" style="width:18px; height:18px; stroke-width:3; transform: rotate(90deg) translateX(-2px);"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                </div>
+            </div>
+            
+            <!-- 面板容器 -->
+            <div class="chat-panel-container" id="online-group-panel-container">
+                <!-- 表情包 Tab -->
+                <div style="height: 40px; display: flex; border-bottom: 1px solid #eee; background: #fff;" id="online-group-emoji-tab-bar">
+                    <div class="wechat-tab-item active" onclick="switchOnlineGroupEmojiTab('emoji')" style="flex:1; font-size:14px;">Emoji</div>
+                    <div class="wechat-tab-item" onclick="switchOnlineGroupEmojiTab('sticker')" style="flex:1; font-size:14px;">表情包</div>
+                </div>
+                <!-- Emoji 面板 -->
+                <div class="emoji-panel" id="online-group-emoji-panel" style="height: calc(100% - 40px);">
+                    <!-- 动态生成表情 -->
+                </div>
+                <!-- 自定义表情包面板 -->
+                <div id="online-group-sticker-panel" style="height: calc(100% - 40px); display: none; flex-direction: column; overflow: hidden;">
+                    <!-- 分类标签栏 -->
+                    <div id="online-group-sticker-category-tabs" style="display: flex; overflow-x: auto; border-bottom: 1px solid #eee; background: #fff; flex-shrink: 0; height: 40px;">
+                        <!-- 动态生成分类标签 -->
+                    </div>
+                    <!-- 表情包内容区域 -->
+                    <div id="online-group-sticker-content" style="display: grid; flex: 1; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 10px; overflow-y: auto; align-content: start;">
+                        <!-- 动态生成自定义表情 -->
+                        <div style="text-align:center; grid-column:span 4; color:#999; margin-top:20px;">暂无表情包<br>请去【我-表情】添加</div>
+                    </div>
+                </div>
+
+                <!-- 功能菜单面板 -->
+                <div class="action-panel" id="online-group-action-panel">
+                    <div class="action-item" onclick="onlineGroupVoiceInput()">
+                        <div class="action-icon-box">
+                            <svg class="svg-icon" viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                        </div>
+                        <div class="action-name">语音输入</div>
+                    </div>
+                    <div class="action-item" onclick="onlineGroupSendImage()">
+                        <div class="action-icon-box">
+                            <svg class="svg-icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                        </div>
+                        <div class="action-name">相册</div>
+                    </div>
+                    <div class="action-item" onclick="onlineGroupTransfer()">
+                        <div class="action-icon-box transfer-icon">
+                            <svg class="svg-icon" viewBox="0 0 24 24"><path d="M17 1l4 4-4 4"></path><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><path d="M7 23l-4-4 4-4"></path><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
+                        </div>
+                        <div class="action-name">转账</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    page.style.display = 'flex';
+    
+    // 绑定回车发送
+    const input = document.getElementById('online-group-input');
+    input.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') sendOnlineGroupMsg();
     });
     
-    try {
-        const res = await fetch(`${ONLINE_API_BASE}/api/online/message`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                from_user_id: onlineUser.id,
-                to_user_id: onlineChatFriendId,
-                content: content
-            })
-        });
-        
-        if (!res.ok) {
-            const data = await res.json();
-            console.error('发送失败:', data.error);
+    // 绑定输入变化事件，控制发送按钮显示
+    input.addEventListener('input', function() {
+        const btnSend = document.getElementById('online-group-btn-send');
+        const btnMore = document.getElementById('online-group-btn-more');
+        if (this.value.trim()) {
+            btnSend.style.display = 'flex';
+            btnMore.style.display = 'none';
+        } else {
+            btnSend.style.display = 'none';
+            btnMore.style.display = 'flex';
+        }
+    });
+    
+    // 初始化Emoji面板
+    initOnlineGroupEmojiPanel();
+    
+    // 应用背景图
+    applyOnlineGroupBackground(group.id);
+}
+
+// 隐藏联机群聊页面
+function hideOnlineGroupChat() {
+    const page = document.getElementById('online-group-chat-page');
+    if (page) page.style.display = 'none';
+    currentOnlineGroupId = null;
+}
+
+// 处理群聊消息记录
+function handleOnlineGroupMessages(data) {
+    if (data.group_id !== currentOnlineGroupId) return;
+    currentOnlineGroupMessages = data.messages || [];
+    // 按时间戳排序，确保消息顺序正确
+    currentOnlineGroupMessages.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+    renderOnlineGroupMessages();
+}
+
+// 处理实时群消息
+async function handleOnlineGroupMessage(data) {
+    // 更新本地群聊记录，让消息列表显示最新消息
+    await updateLocalOnlineGroupLastMessage(data.group_id, data.message);
+    
+    if (data.group_id !== currentOnlineGroupId) {
+        // 不是当前群，显示通知
+        showToast(`[${data.message.sender_name}] ${data.message.content.substring(0, 20)}...`);
+        return;
+    }
+    
+    // 如果是系统消息，检查是否是红包领取通知，如果是则更新红包状态
+    if (data.message.msg_type === 'system' && data.message.content.includes('领取了红包')) {
+        // 尝试从系统消息中提取红包ID和领取者信息
+        // 格式：XXX 领取了红包，获得 ¥X.XX
+        // 由于我们无法从系统消息中直接获取红包ID，这里只更新显示
+        // 实际的红包状态更新在 claimOnlineGroupRedPacket 中完成
+    }
+    
+    currentOnlineGroupMessages.push(data.message);
+    // 按时间戳排序，确保消息顺序正确
+    currentOnlineGroupMessages.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+    renderOnlineGroupMessages();
+}
+
+// 处理群成员开始输入
+function handleGroupTypingStart(data) {
+    // 只在当前打开的群聊中显示
+    if (data.group_id !== currentOnlineGroupId) return;
+    
+    const chatTitleEl = document.getElementById('online-group-chat-title');
+    if (chatTitleEl) {
+        chatTitleEl.innerText = `${data.character_name} 正在输入中...`;
+    }
+}
+
+// 处理群成员停止输入
+function handleGroupTypingStop(data) {
+    // 只在当前打开的群聊中显示
+    if (data.group_id !== currentOnlineGroupId) return;
+    
+    const chatTitleEl = document.getElementById('online-group-chat-title');
+    const group = onlineGroups.find(g => g.id === currentOnlineGroupId);
+    if (chatTitleEl && group) {
+        chatTitleEl.innerText = group.name;
+    }
+}
+
+// 渲染群聊消息
+function renderOnlineGroupMessages() {
+    const container = document.getElementById('online-group-messages');
+    if (!container) return;
+    
+    const myWx = getMyOnlineWxAccount();
+    
+    container.innerHTML = currentOnlineGroupMessages.map(msg => {
+        // 处理系统消息
+        if (msg.msg_type === 'system' || msg.sender_type === 'system') {
+            return `<div style="text-align:center; padding:8px 16px; margin:8px 0;">
+                <span style="background:#fff; color:#999; font-size:12px; padding:4px 12px; border-radius:4px; border:1px solid #ddd;">${msg.content}</span>
+            </div>`;
         }
         
-    } catch (e) {
-        console.error('发送消息失败:', e);
-    }
+        const isCharacter = msg.sender_type === 'character';
+        // 只有我发的真人消息才显示在右边，所有角色消息（包括我的角色）都显示在左边
+        const isMe = msg.sender_wx === myWx && !isCharacter;
+        const avatar = isCharacter ? (msg.character_avatar || '') : (msg.sender_avatar || '');
+        const name = isCharacter ? `${msg.character_name} (${msg.sender_name})` : msg.sender_name;
+        // 确保头像URL不为空字符串才设置背景图
+        const avatarStyle = (avatar && avatar.trim()) ? `background-image:url(${avatar})` : 'background:#ccc';
+        
+        let messageContent = '';
+        let isSpecialMsg = false;
+        
+        // 尝试解析JSON消息（语音、转账等特殊消息）
+        let parsedContent = null;
+        try {
+            if (msg.content && msg.content.startsWith('{') && msg.content.includes('__type')) {
+                parsedContent = JSON.parse(msg.content);
+            }
+        } catch(e) {}
+        
+        // 处理语音消息
+        if (parsedContent && parsedContent.__type === 'audio') {
+            isSpecialMsg = true;
+            const audioId = 'online_group_audio_' + (msg.id || msg.created_at);
+            const effectIcon = parsedContent.effect === 'loli' ? '🎀' : 
+                              parsedContent.effect === 'uncle' ? '🧔' :
+                              parsedContent.effect === 'robot' ? '🤖' : '🎙️';
+            messageContent = `
+                <div class="online-audio-bubble" style="min-width:120px; max-width:200px; padding:10px 14px; background:${isMe ? '#ffe4e8' : '#f2f2f7'}; border-radius:18px; display:flex; align-items:center; gap:10px; cursor:pointer;" onclick="playOnlineGroupAudio('${audioId}')">
+                    <div class="audio-play-icon" id="icon_${audioId}" data-original="${effectIcon}" style="font-size:20px;">${effectIcon}</div>
+                    <div style="flex:1; display:flex; flex-direction:column;">
+                        <div style="height:20px; background:#fff; border-radius:10px; position:relative; overflow:hidden;">
+                            <div style="height:100%; background:var(--ins-pink); width:0%; transition:width 0.1s;" id="progress_${audioId}"></div>
+                        </div>
+                        <div style="font-size:11px; color:#999; margin-top:2px;">${parsedContent.duration}"</div>
+                    </div>
+                    <audio id="${audioId}" src="${parsedContent.audio}" style="display:none;"></audio>
+                </div>
+            `;
+        }
+        // 处理红包消息
+        else if (msg.msg_type === 'redpacket') {
+            isSpecialMsg = true;
+            try {
+                const data = JSON.parse(msg.content);
+                const msgId = msg.id || ('rp_' + msg.created_at);
+                const claimedCount = (data.claimed || []).length;
+                const isAllClaimed = claimedCount >= data.count;
+                const myWx = getMyOnlineWxAccount();
+                const hasClaimed = data.claimed?.includes(myWx) || false;
+                
+                messageContent = `<div onclick="showOnlineGroupRedPacketDetail('${msgId}')" style="width:220px; background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.08); border:1px solid #eee; cursor:pointer;">
+                    <div style="padding:14px 16px; display:flex; align-items:center; gap:12px; background:linear-gradient(135deg, #ff6b6b 0%, #ff8e8e 100%);">
+                        <div style="width:40px; height:40px; background:#fff; border-radius:10px; display:flex; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,0.3);">
+                            <svg viewBox="0 0 24 24" style="width:20px; height:20px; stroke:#ff6b6b; fill:#ff6b6b; stroke-width:1.5;"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><circle cx="12" cy="15" r="2"/></svg>
+                        </div>
+                        <div style="flex:1;">
+                            <div style="font-size:13px; color:rgba(255,255,255,0.9); margin-bottom:2px;">${escapeHtml(data.wish || '恭喜发财')}</div>
+                            <div style="font-size:11px; color:rgba(255,255,255,0.7);">${data.redpacketType === 'lucky' ? '拼手气红包' : '普通红包'}</div>
+                        </div>
+                    </div>
+                    <div style="padding:8px 16px; display:flex; justify-content:space-between; align-items:center; border-top:1px solid #eee;">
+                        <span style="font-size:11px; color:#999;">${isAllClaimed ? '已领完' : `${claimedCount}/${data.count}个已领取`}</span>
+                        <span style="font-size:11px; color:#999;">${hasClaimed ? '已领取' : isAllClaimed ? '已领完' : '领取'}</span>
+                    </div>
+                </div>`;
+            } catch(e) {
+                messageContent = renderMessageContent(msg.content);
+                isSpecialMsg = false;
+            }
+        }
+        // 处理转账消息
+        else if (msg.msg_type === 'transfer') {
+            isSpecialMsg = true;
+            try {
+                const data = JSON.parse(msg.content);
+                const msgId = msg.id || ('trans_' + msg.created_at);
+                const targetHint = data.targetName ? `转给 ${data.targetName}` : '转账';
+                messageContent = `<div onclick="receiveOnlineGroupTransfer('${msgId}')" style="width:220px; background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.08); border:1px solid #eee; cursor:pointer;">
+                    <div style="padding:14px 16px; display:flex; align-items:center; gap:12px;">
+                        <div style="width:40px; height:40px; background:#fff; border-radius:10px; display:flex; align-items:center; justify-content:center; border:1px solid #eee;">
+                            <svg viewBox="0 0 24 24" style="width:20px; height:20px; stroke:#666; fill:none; stroke-width:1.5;"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                        </div>
+                        <div style="flex:1;">
+                            <div style="font-size:18px; font-weight:600; color:#333; margin-bottom:2px;">¥${data.amount}</div>
+                            <div style="font-size:12px; color:#999;">${escapeHtml(data.desc || '转账')}</div>
+                        </div>
+                    </div>
+                    <div style="padding:8px 16px; display:flex; justify-content:space-between; align-items:center; border-top:1px solid #eee;">
+                        <span style="font-size:11px; color:#999;">${targetHint}</span>
+                        <span style="font-size:11px; color:#999;">${data.status === 'received' ? '已收款' : '待收款'}</span>
+                    </div>
+                </div>`;
+            } catch(e) {
+                messageContent = renderMessageContent(msg.content);
+                isSpecialMsg = false;
+            }
+        } else {
+            // 普通消息
+            messageContent = renderMessageContent(msg.content);
+        }
+        
+        // 完全按照普通群聊的样式
+        if (isMe) {
+            // 我发的消息
+            if (isSpecialMsg) {
+                return `
+                    <div style="display:flex; flex-direction:row-reverse; align-items:flex-end; gap:8px; margin-bottom:12px;">
+                        <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
+                        <div style="display:flex; flex-direction:column; align-items:flex-end; max-width:70%;">
+                            <div style="font-size:12px; color:#999; margin-bottom:2px;">${name}${isCharacter ? ' 🎭' : ''}</div>
+                            <div style="display:flex; align-items:flex-end; gap:6px;">
+                                <div style="font-size:10px; color:#999;">${formatChatTime(msg.created_at)}</div>
+                                <div>${messageContent}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                return `
+                    <div style="display:flex; flex-direction:row-reverse; align-items:flex-end; gap:8px; margin-bottom:12px;">
+                        <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
+                        <div style="display:flex; flex-direction:column; align-items:flex-end; max-width:70%;">
+                            <div style="font-size:12px; color:#999; margin-bottom:2px;">${name}${isCharacter ? ' 🎭' : ''}</div>
+                            <div style="display:flex; align-items:flex-end; gap:6px;">
+                                <div style="font-size:10px; color:#999;">${formatChatTime(msg.created_at)}</div>
+                                <div style="background:#ffe4e8; color:#000; padding:6px 10px; border-radius:18px 18px 4px 18px; font-size:15px; line-height:1.5; word-break:break-word;">${messageContent}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        } else {
+            // 别人发的消息
+            if (isSpecialMsg) {
+                return `
+                    <div style="display:flex; align-items:flex-end; gap:8px; margin-bottom:12px;">
+                        <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
+                        <div style="display:flex; flex-direction:column; max-width:70%;">
+                            <div style="font-size:12px; color:#999; margin-bottom:2px;">${name}${isCharacter ? ' 🎭' : ''}</div>
+                            <div style="display:flex; align-items:flex-end; gap:6px;">
+                                <div>${messageContent}</div>
+                                <div style="font-size:10px; color:#999;">${formatChatTime(msg.created_at)}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                return `
+                    <div style="display:flex; align-items:flex-end; gap:8px; margin-bottom:12px;">
+                        <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
+                        <div style="display:flex; flex-direction:column; max-width:70%;">
+                            <div style="font-size:12px; color:#999; margin-bottom:2px;">${name}${isCharacter ? ' 🎭' : ''}</div>
+                            <div style="display:flex; align-items:flex-end; gap:6px;">
+                                <div style="background:#f2f2f7; color:#000; padding:6px 10px; border-radius:18px 18px 18px 4px; font-size:15px; line-height:1.5; word-break:break-word;">${messageContent}</div>
+                                <div style="font-size:10px; color:#999;">${formatChatTime(msg.created_at)}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+    }).join('');
+    
+    // 为图片添加点击事件
+    container.querySelectorAll('.chat-image').forEach(img => {
+        img.onclick = () => showFullImage(img.src);
+    });
+    
+    container.scrollTop = container.scrollHeight;
 }
 
-// 显示编辑资料
-function showOnlineProfileEdit() {
-    if (!onlineUser) return;
+// 收取联机群聊转账
+function receiveOnlineGroupTransfer(msgId) {
+    showToast('转账功能暂不支持收取，仅用于展示');
+}
+
+// 播放联机群聊语音消息
+let currentPlayingOnlineGroupAudio = null;
+function playOnlineGroupAudio(audioId) {
+    const audio = document.getElementById(audioId);
+    const icon = document.getElementById('icon_' + audioId);
+    const progress = document.getElementById('progress_' + audioId);
     
-    document.getElementById('online-profile-modal').style.display = 'flex';
-    document.getElementById('profile-nickname').value = onlineUser.nickname || '';
-    document.getElementById('profile-bio').value = onlineUser.bio || '';
+    if (!audio) return;
     
-    const preview = document.getElementById('profile-avatar-preview');
-    if (onlineUser.avatar) {
-        preview.style.backgroundImage = `url(${onlineUser.avatar})`;
-        preview.textContent = '';
-        preview.style.backgroundSize = 'cover';
+    // 如果有其他正在播放的，先停止
+    if (currentPlayingOnlineGroupAudio && currentPlayingOnlineGroupAudio !== audio) {
+        currentPlayingOnlineGroupAudio.pause();
+        currentPlayingOnlineGroupAudio.currentTime = 0;
+        // 重置之前音频的图标和进度条
+        const prevIcon = document.getElementById('icon_' + currentPlayingOnlineGroupAudio.id);
+        const prevProgress = document.getElementById('progress_' + currentPlayingOnlineGroupAudio.id);
+        if (prevIcon) {
+            const bubble = currentPlayingOnlineGroupAudio.closest('.online-audio-bubble');
+            if (bubble) {
+                const originalIcon = bubble.querySelector('.audio-play-icon');
+                if (originalIcon) prevIcon.textContent = prevIcon.dataset.original || '🎙️';
+            }
+        }
+        if (prevProgress) prevProgress.style.width = '0%';
+    }
+    
+    if (audio.paused) {
+        audio.play();
+        currentPlayingOnlineGroupAudio = audio;
+        if (icon) icon.textContent = '⏸️';
+        
+        // 更新进度条
+        audio.ontimeupdate = () => {
+            if (progress && audio.duration) {
+                const percent = (audio.currentTime / audio.duration) * 100;
+                progress.style.width = percent + '%';
+            }
+        };
+        
+        audio.onended = () => {
+            if (icon) icon.textContent = icon.dataset.original || '🎙️';
+            if (progress) progress.style.width = '0%';
+            currentPlayingOnlineGroupAudio = null;
+        };
     } else {
-        preview.style.backgroundImage = '';
-        preview.textContent = '👤';
+        audio.pause();
+        audio.currentTime = 0;
+        if (icon) icon.textContent = icon.dataset.original || '🎙️';
+        if (progress) progress.style.width = '0%';
+        currentPlayingOnlineGroupAudio = null;
     }
 }
 
-function hideOnlineProfileEdit() {
-    document.getElementById('online-profile-modal').style.display = 'none';
+// 处理群成员列表
+function handleOnlineGroupMembers(data) {
+    if (data.group_id !== currentOnlineGroupId) return;
+    currentOnlineGroupMembers = data.members || [];
+    
+    // 找到我的角色
+    const myWx = getMyOnlineWxAccount();
+    const myMember = currentOnlineGroupMembers.find(m => m.user_wx === myWx);
+    if (myMember && myMember.character_name) {
+        myOnlineGroupCharacter = {
+            name: myMember.character_name,
+            avatar: myMember.character_avatar,
+            desc: myMember.character_desc
+        };
+    } else {
+        myOnlineGroupCharacter = null;
+    }
 }
 
-// 处理头像上传
-function handleProfileAvatarChange(input) {
+// 切换联机群聊面板
+let currentOnlineGroupPanel = null;
+function toggleOnlineGroupPanel(panelType) {
+    const container = document.getElementById('online-group-panel-container');
+    const emojiTabBar = document.getElementById('online-group-emoji-tab-bar');
+    const emojiPanel = document.getElementById('online-group-emoji-panel');
+    const stickerPanel = document.getElementById('online-group-sticker-panel');
+    const actionPanel = document.getElementById('online-group-action-panel');
+    
+    if (!container) {
+        console.error('[Panel] Missing container!');
+        return;
+    }
+    
+    if (currentOnlineGroupPanel === panelType) {
+        // 关闭面板
+        container.classList.remove('open');
+        if (emojiTabBar) emojiTabBar.style.display = 'none';
+        if (emojiPanel) emojiPanel.style.display = 'none';
+        if (stickerPanel) stickerPanel.style.display = 'none';
+        if (actionPanel) actionPanel.style.display = 'none';
+        currentOnlineGroupPanel = null;
+    } else {
+        // 打开面板
+        container.classList.add('open');
+        if (panelType === 'emoji') {
+            if (emojiTabBar) emojiTabBar.style.display = 'flex';
+            if (emojiPanel) emojiPanel.style.display = 'grid';
+            if (stickerPanel) stickerPanel.style.display = 'none';
+            if (actionPanel) actionPanel.style.display = 'none';
+        } else if (panelType === 'action') {
+            if (emojiTabBar) emojiTabBar.style.display = 'none';
+            if (emojiPanel) emojiPanel.style.display = 'none';
+            if (stickerPanel) stickerPanel.style.display = 'none';
+            if (actionPanel) actionPanel.style.display = 'grid';
+        }
+        currentOnlineGroupPanel = panelType;
+    }
+}
+
+// 关闭联机群聊面板
+function closeOnlineGroupPanel() {
+    const container = document.getElementById('online-group-panel-container');
+    if (container) {
+        container.classList.remove('open');
+    }
+    const emojiTabBar = document.getElementById('online-group-emoji-tab-bar');
+    const emojiPanel = document.getElementById('online-group-emoji-panel');
+    const stickerPanel = document.getElementById('online-group-sticker-panel');
+    const actionPanel = document.getElementById('online-group-action-panel');
+    if (emojiTabBar) emojiTabBar.style.display = 'none';
+    if (emojiPanel) emojiPanel.style.display = 'none';
+    if (stickerPanel) stickerPanel.style.display = 'none';
+    if (actionPanel) actionPanel.style.display = 'none';
+    currentOnlineGroupPanel = null;
+}
+
+// 切换联机群聊表情Tab
+async function switchOnlineGroupEmojiTab(type) {
+    const tabs = document.querySelectorAll('#online-group-emoji-tab-bar .wechat-tab-item');
+    const emojiPanel = document.getElementById('online-group-emoji-panel');
+    const stickerPanel = document.getElementById('online-group-sticker-panel');
+
+    if (type === 'emoji') {
+        tabs[0].classList.add('active');
+        tabs[1].classList.remove('active');
+        emojiPanel.style.display = 'grid';
+        stickerPanel.style.display = 'none';
+    } else {
+        tabs[0].classList.remove('active');
+        tabs[1].classList.add('active');
+        emojiPanel.style.display = 'none';
+        stickerPanel.style.display = 'flex';
+        // 加载自定义表情包
+        await loadOnlineGroupStickers();
+    }
+}
+
+// 当前选中的联机群聊表情包分类ID
+let currentActiveOnlineGroupStickerCategoryId = null;
+
+// 加载联机群聊的自定义表情包
+async function loadOnlineGroupStickers() {
+    const tabsContainer = document.getElementById('online-group-sticker-category-tabs');
+    const contentContainer = document.getElementById('online-group-sticker-content');
+    if (!tabsContainer || !contentContainer) return;
+    
+    // 获取所有表情包分类
+    const allCategories = await db.sticker_categories.toArray();
+    
+    if (allCategories.length === 0) {
+        tabsContainer.innerHTML = '';
+        contentContainer.innerHTML = `<div style="text-align:center; grid-column:span 4; color:#999; margin-top:20px;">暂无表情包<br>请去【我-表情】添加</div>`;
+        return;
+    }
+    
+    // 过滤出有表情包的分类
+    const validCategories = allCategories.filter(cat => cat.stickers && cat.stickers.length > 0);
+    
+    if (validCategories.length === 0) {
+        tabsContainer.innerHTML = '';
+        contentContainer.innerHTML = `<div style="text-align:center; grid-column:span 4; color:#999; margin-top:20px;">暂无表情包<br>请去【我-表情】添加</div>`;
+        return;
+    }
+    
+    // 如果还没有选中的分类，默认选中第一个
+    if (!currentActiveOnlineGroupStickerCategoryId || !validCategories.find(c => c.id === currentActiveOnlineGroupStickerCategoryId)) {
+        currentActiveOnlineGroupStickerCategoryId = validCategories[0].id;
+    }
+    
+    // 生成分类标签
+    let tabsHtml = '';
+    for (const cat of validCategories) {
+        const isActive = cat.id === currentActiveOnlineGroupStickerCategoryId;
+        tabsHtml += `
+            <div class="sticker-category-tab ${isActive ? 'active' : ''}" onclick="switchOnlineGroupStickerCategory(${cat.id})" style="
+                flex-shrink: 0;
+                padding: 10px 16px;
+                font-size: 13px;
+                color: ${isActive ? 'var(--ins-pink)' : '#666'};
+                border-bottom: 2px solid ${isActive ? 'var(--ins-pink)' : 'transparent'};
+                cursor: pointer;
+                white-space: nowrap;
+                transition: all 0.2s;
+            ">
+                ${cat.name}
+            </div>
+        `;
+    }
+    tabsContainer.innerHTML = tabsHtml;
+    
+    // 显示当前选中分类的表情包
+    const currentCategory = validCategories.find(c => c.id === currentActiveOnlineGroupStickerCategoryId);
+    if (!currentCategory) return;
+    
+    let contentHtml = '';
+    currentCategory.stickers.forEach(s => {
+        const safeUrl = s.url.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        const safeDesc = (s.description || '').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        contentHtml += `<div class="emoji-item" onclick="sendOnlineGroupSticker('${safeUrl}')" style="display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer;">
+            <img src="${s.url}" style="width:60px; height:60px; border-radius:8px; object-fit:cover;" onerror="this.onerror=null; this.style.cssText='width:60px; height:60px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px;'; this.outerHTML='<div style=\\'width:60px; height:60px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px; color:#ccc; font-size:10px;\\'>失败</div>';" />
+            ${safeDesc ? `<div style="font-size:10px; color:#999; text-align:center; max-width:60px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${safeDesc}</div>` : ''}
+        </div>`;
+    });
+    
+    contentContainer.innerHTML = contentHtml;
+}
+
+// 切换联机群聊表情包分类
+async function switchOnlineGroupStickerCategory(categoryId) {
+    currentActiveOnlineGroupStickerCategoryId = categoryId;
+    await loadOnlineGroupStickers();
+}
+
+// 发送联机群聊表情包
+function sendOnlineGroupSticker(stickerUrl) {
+    const myWx = getMyOnlineWxAccount();
+    const myChar = onlineCharacters.find(c => c.wx_account === myWx);
+    
+    const imgContent = `[img:${stickerUrl}]`;
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'send_group_message',
+        group_id: currentOnlineGroupId,
+        my_wx_account: myWx,
+        sender_type: 'user',
+        sender_name: myChar?.nickname || myWx,
+        content: imgContent,
+        msg_type: 'image'
+    }));
+    
+    closeOnlineGroupPanel();
+}
+
+// 初始化联机群聊Emoji面板
+function initOnlineGroupEmojiPanel() {
+    const panel = document.getElementById('online-group-emoji-panel');
+    if (!panel) return;
+    
+    const emojis = [
+        '😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂',
+        '🙂', '🙃', '😉', '😊', '😇', '🥰', '😍', '🤩',
+        '😘', '😗', '😚', '😙', '😋', '😛', '😜', '🤪',
+        '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨',
+        '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥',
+        '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕',
+        '🤢', '🤮', '🤧', '🥵', '🥶', '🥴', '😵', '🤯',
+        '🤠', '🥳', '😎', '🤓', '🧐', '😕', '😟', '🙁',
+        '☹️', '😮', '😯', '😲', '😳', '🥺', '😦', '😧',
+        '😨', '😰', '😥', '😢', '😭', '😱', '😖', '😣',
+        '😞', '😓', '😩', '😫', '🥱', '😤', '😡', '😠',
+        '🤬', '😈', '👿', '💀', '☠️', '💩', '🤡', '👹',
+        '👺', '👻', '👽', '👾', '🤖', '😺', '😸', '😹',
+        '😻', '😼', '😽', '🙀', '😿', '😾', '👋', '🤚',
+        '🖐', '✋', '🖖', '👌', '🤏', '✌️', '🤞', '🤟',
+        '🤘', '🤙', '👈', '👉', '👆', '🖕', '👇', '☝️',
+        '👍', '👎', '✊', '👊', '🤛', '🤜', '👏', '🙌',
+        '👐', '🤲', '🤝', '🙏', '✍️', '💅', '🤳', '💪'
+    ];
+    
+    panel.innerHTML = emojis.map(emoji => 
+        `<div class="emoji-item" onclick="insertOnlineGroupEmoji('${emoji}')">${emoji}</div>`
+    ).join('');
+}
+
+// 插入Emoji到输入框
+function insertOnlineGroupEmoji(emoji) {
+    const input = document.getElementById('online-group-input');
+    if (input) {
+        input.value += emoji;
+        input.focus();
+        // 触发输入事件以更新发送按钮状态
+        input.dispatchEvent(new Event('input'));
+    }
+}
+
+// 联机群聊语音输入
+async function onlineGroupVoiceInput() {
+    closeOnlineGroupPanel();
+    
+    // 显示语音录制+变声弹窗（完全参照联机私聊）
+    const modal = document.createElement('div');
+    modal.id = 'online-group-voice-modal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+    `;
+    
+    modal.innerHTML = `
+        <div style="background: white; border-radius: 16px; padding: 24px; width: 85%; max-width: 320px;">
+            <h3 style="margin: 0 0 20px 0; text-align: center; color: #333; font-size: 18px;">🎤 语音录制</h3>
+            
+            <div style="margin-bottom: 20px;">
+                <div style="font-size: 13px; color: #666; margin-bottom: 10px;">选择变声效果：</div>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                    <label style="display: flex; align-items: center; padding: 12px; background: #f5f5f5; border-radius: 8px; cursor: pointer;">
+                        <input type="radio" name="online-group-voice-effect" value="normal" checked style="margin-right: 8px;">
+                        <span>🎙️ 原声</span>
+                    </label>
+                    <label style="display: flex; align-items: center; padding: 12px; background: #fff0f5; border-radius: 8px; cursor: pointer;">
+                        <input type="radio" name="online-group-voice-effect" value="loli" style="margin-right: 8px;">
+                        <span>🎀 萝莉音</span>
+                    </label>
+                    <label style="display: flex; align-items: center; padding: 12px; background: #f0f5ff; border-radius: 8px; cursor: pointer;">
+                        <input type="radio" name="online-group-voice-effect" value="uncle" style="margin-right: 8px;">
+                        <span>🧔 大叔音</span>
+                    </label>
+                    <label style="display: flex; align-items: center; padding: 12px; background: #f5fff0; border-radius: 8px; cursor: pointer;">
+                        <input type="radio" name="online-group-voice-effect" value="robot" style="margin-right: 8px;">
+                        <span>🤖 机器人</span>
+                    </label>
+                </div>
+            </div>
+            
+            <div id="online-group-voice-record-status" style="text-align: center; padding: 20px; background: #f9f9f9; border-radius: 12px; margin-bottom: 16px;">
+                <div style="font-size: 14px; color: #999;">点击下方按钮开始录音</div>
+                <div id="online-group-voice-record-time" style="font-size: 24px; font-weight: 600; color: #333; margin-top: 8px; display: none;">00:00</div>
+            </div>
+            
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                <button id="btn-start-online-group-record" onclick="startOnlineGroupVoiceRecord()" style="padding: 14px; background: var(--ins-pink); color: white; border: none; border-radius: 10px; font-size: 15px; font-weight: 500; cursor: pointer;">
+                    🎤 按住录音
+                </button>
+                <button onclick="closeOnlineGroupVoiceModal()" style="padding: 12px; background: #f0f0f0; color: #666; border: none; border-radius: 8px; font-size: 14px; cursor: pointer;">
+                    取消
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// 关闭联机群聊语音弹窗
+function closeOnlineGroupVoiceModal() {
+    document.getElementById('online-group-voice-modal')?.remove();
+}
+
+// ✅ 联机群聊语音录制变量
+let onlineGroupVoiceRecorder = null;
+let onlineGroupVoiceChunks = [];
+let onlineGroupVoiceStartTime = 0;
+let onlineGroupVoiceTimer = null;
+
+// 开始联机群聊语音录制
+async function startOnlineGroupVoiceRecord() {
+    const btn = document.getElementById('btn-start-online-group-record');
+    const statusDiv = document.getElementById('online-group-voice-record-status');
+    const timeDiv = document.getElementById('online-group-voice-record-time');
+    
+    // 如果正在录音，则停止
+    if (onlineGroupVoiceRecorder && onlineGroupVoiceRecorder.state === 'recording') {
+        stopOnlineGroupVoiceRecord();
+        return;
+    }
+    
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        onlineGroupVoiceRecorder = new MediaRecorder(stream);
+        onlineGroupVoiceChunks = [];
+        onlineGroupVoiceStartTime = Date.now();
+        
+        onlineGroupVoiceRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) {
+                onlineGroupVoiceChunks.push(e.data);
+            }
+        };
+        
+        onlineGroupVoiceRecorder.onstop = async () => {
+            stream.getTracks().forEach(track => track.stop());
+            clearInterval(onlineGroupVoiceTimer);
+            
+            const duration = Math.round((Date.now() - onlineGroupVoiceStartTime) / 1000);
+            const blob = new Blob(onlineGroupVoiceChunks, { type: 'audio/webm' });
+            
+            // 获取选择的变声效果
+            const effectRadio = document.querySelector('input[name="online-group-voice-effect"]:checked');
+            const effect = effectRadio ? effectRadio.value : 'normal';
+            
+            statusDiv.innerHTML = '<div style="color: var(--ins-pink);">⏳ 正在处理...</div>';
+            
+            // 处理变声并发送
+            await processAndSendOnlineGroupVoice(blob, effect, duration);
+        };
+        
+        onlineGroupVoiceRecorder.start();
+        
+        // 更新UI
+        btn.textContent = '⏹️ 停止录音';
+        btn.style.background = '#ff3b30';
+        timeDiv.style.display = 'block';
+        statusDiv.querySelector('div').textContent = '🔴 正在录音...';
+        
+        // 计时器
+        onlineGroupVoiceTimer = setInterval(() => {
+            const elapsed = Math.round((Date.now() - onlineGroupVoiceStartTime) / 1000);
+            const min = Math.floor(elapsed / 60).toString().padStart(2, '0');
+            const sec = (elapsed % 60).toString().padStart(2, '0');
+            timeDiv.textContent = `${min}:${sec}`;
+        }, 1000);
+        
+    } catch (err) {
+        console.error('录音失败:', err);
+        alert('无法访问麦克风，请确保已授予权限');
+    }
+}
+
+// 停止联机群聊语音录制
+function stopOnlineGroupVoiceRecord() {
+    if (onlineGroupVoiceRecorder && onlineGroupVoiceRecorder.state === 'recording') {
+        onlineGroupVoiceRecorder.stop();
+    }
+}
+
+// 处理变声并发送联机群聊语音
+async function processAndSendOnlineGroupVoice(blob, effect, duration) {
+    try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const arrayBuffer = await blob.arrayBuffer();
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        
+        // 根据效果设置参数
+        let pitchRate = 1.0;
+        switch (effect) {
+            case 'loli':    pitchRate = 1.4; break;  // 萝莉音：提高音调
+            case 'uncle':   pitchRate = 0.7; break;  // 大叔音：降低音调
+            case 'robot':   pitchRate = 1.0; break;  // 机器人：特殊处理
+            default:        pitchRate = 1.0; break;
+        }
+        
+        // 创建离线音频上下文进行处理
+        const offlineContext = new OfflineAudioContext(
+            audioBuffer.numberOfChannels,
+            Math.ceil(audioBuffer.length / pitchRate),
+            audioBuffer.sampleRate
+        );
+        
+        const source = offlineContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.playbackRate.value = pitchRate;
+        
+        // 机器人效果：添加波形调制
+        if (effect === 'robot') {
+            const oscillator = offlineContext.createOscillator();
+            const gainNode = offlineContext.createGain();
+            oscillator.frequency.value = 50;
+            gainNode.gain.value = 0.3;
+            oscillator.connect(gainNode);
+            gainNode.connect(offlineContext.destination);
+            oscillator.start();
+        }
+        
+        source.connect(offlineContext.destination);
+        source.start();
+        
+        const renderedBuffer = await offlineContext.startRendering();
+        
+        // 将处理后的音频转为 base64
+        const wavBlob = await audioBufferToWavForOnlineGroup(renderedBuffer);
+        const base64 = await blobToBase64ForOnlineGroup(wavBlob);
+        
+        // 计算实际时长
+        const actualDuration = Math.ceil(duration / pitchRate);
+        
+        // 发送语音消息到群聊
+        await sendOnlineGroupVoiceMessage(base64, actualDuration, effect);
+        
+        closeOnlineGroupVoiceModal();
+        
+    } catch (err) {
+        console.error('语音处理失败:', err);
+        alert('语音处理失败: ' + err.message);
+    }
+}
+
+// AudioBuffer 转 WAV（联机群聊）
+function audioBufferToWavForOnlineGroup(buffer) {
+    const numChannels = buffer.numberOfChannels;
+    const sampleRate = buffer.sampleRate;
+    const format = 1; // PCM
+    const bitDepth = 16;
+    
+    const bytesPerSample = bitDepth / 8;
+    const blockAlign = numChannels * bytesPerSample;
+    
+    const data = [];
+    for (let i = 0; i < buffer.length; i++) {
+        for (let ch = 0; ch < numChannels; ch++) {
+            const sample = buffer.getChannelData(ch)[i];
+            const intSample = Math.max(-1, Math.min(1, sample));
+            data.push(intSample < 0 ? intSample * 0x8000 : intSample * 0x7FFF);
+        }
+    }
+    
+    const dataLength = data.length * bytesPerSample;
+    const headerLength = 44;
+    const totalLength = headerLength + dataLength;
+    
+    const arrayBuffer = new ArrayBuffer(totalLength);
+    const view = new DataView(arrayBuffer);
+    
+    // WAV header
+    const writeString = (offset, string) => {
+        for (let i = 0; i < string.length; i++) {
+            view.setUint8(offset + i, string.charCodeAt(i));
+        }
+    };
+    
+    writeString(0, 'RIFF');
+    view.setUint32(4, totalLength - 8, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, format, true);
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * blockAlign, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitDepth, true);
+    writeString(36, 'data');
+    view.setUint32(40, dataLength, true);
+    
+    let offset = 44;
+    for (let i = 0; i < data.length; i++, offset += 2) {
+        view.setInt16(offset, data[i], true);
+    }
+    
+    return new Blob([arrayBuffer], { type: 'audio/wav' });
+}
+
+// Blob 转 Base64（联机群聊）
+function blobToBase64ForOnlineGroup(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+}
+
+// 发送联机群聊语音消息
+async function sendOnlineGroupVoiceMessage(audioBase64, duration, effect) {
+    if (!currentOnlineGroupId) return;
+    
+    const myWx = getMyOnlineWxAccount();
+    const myChar = onlineCharacters.find(c => c.wx_account === myWx);
+    
+    // 构建语音消息JSON
+    const voiceMsg = JSON.stringify({
+        __type: 'audio',
+        audio: audioBase64,
+        duration: duration,
+        effect: effect
+    });
+    
+    // 发送到服务器
+    onlineSocket.send(JSON.stringify({
+        type: 'send_group_message',
+        group_id: currentOnlineGroupId,
+        my_wx_account: myWx,
+        sender_type: 'user',
+        sender_name: myChar?.nickname || myWx,
+        content: voiceMsg
+    }));
+    
+    console.log('[联机群聊] 语音消息已发送，时长:', duration, '秒，效果:', effect);
+    showToast('语音已发送');
+}
+
+// 联机群聊发送图片
+function onlineGroupSendImage() {
+    closeOnlineGroupPanel();
+    
+    // 创建隐藏的文件输入
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        // 读取图片并转为base64
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            const base64 = event.target.result;
+            const imgContent = `[img:${base64}]`;
+            
+            // 发送图片消息
+            const myWx = getMyOnlineWxAccount();
+            const myChar = onlineCharacters.find(c => c.wx_account === myWx);
+            
+            onlineSocket.send(JSON.stringify({
+                type: 'send_group_message',
+                group_id: currentOnlineGroupId,
+                my_wx_account: myWx,
+                sender_type: 'user',
+                sender_name: myChar?.nickname || myWx,
+                content: imgContent,
+                msg_type: 'image'
+            }));
+            
+            showToast('图片已发送');
+        };
+        reader.readAsDataURL(file);
+    };
+    input.click();
+}
+
+// 联机群聊转账 - 显示类型选择弹窗
+function onlineGroupTransfer() {
+    closeOnlineGroupPanel();
+    
+    const modal = document.createElement('div');
+    modal.id = 'online-group-transfer-type-modal';
+    modal.className = 'modal-overlay';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    `;
+    
+    modal.innerHTML = `
+        <div class="modal-box" style="max-width:300px; padding:0; overflow:hidden; border-radius:16px; background:#fff;">
+            <div style="padding:20px 16px; text-align:center; border-bottom:0.5px solid #f0f0f0;">
+                <div style="font-size:17px; font-weight:600; color:#333;">选择类型</div>
+            </div>
+            <div style="padding:16px;">
+                <div onclick="showOnlineGroupRedPacket()" style="display:flex; align-items:center; padding:14px 16px; background:#fafafa; border-radius:12px; margin-bottom:12px; cursor:pointer; transition:all 0.2s; border:1px solid #f0f0f0;">
+                    <div style="width:44px; height:44px; border-radius:12px; background:#fff; border:1px solid #eee; display:flex; align-items:center; justify-content:center; margin-right:14px;">
+                        <svg viewBox="0 0 24 24" style="width:22px; height:22px; stroke:var(--ins-pink); fill:none; stroke-width:1.5;"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><circle cx="12" cy="15" r="2"/></svg>
+                    </div>
+                    <div style="flex:1;">
+                        <div style="font-size:15px; font-weight:500; color:#333;">群红包</div>
+                        <div style="font-size:12px; color:#999; margin-top:2px;">拼手气或普通红包</div>
+                    </div>
+                    <svg viewBox="0 0 24 24" style="width:18px; height:18px; stroke:#ccc; fill:none;"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </div>
+                <div onclick="showOnlineGroupExclusiveTransfer()" style="display:flex; align-items:center; padding:14px 16px; background:#fafafa; border-radius:12px; cursor:pointer; transition:all 0.2s; border:1px solid #f0f0f0;">
+                    <div style="width:44px; height:44px; border-radius:12px; background:#fff; border:1px solid #eee; display:flex; align-items:center; justify-content:center; margin-right:14px;">
+                        <svg viewBox="0 0 24 24" style="width:22px; height:22px; stroke:var(--ins-pink); fill:none; stroke-width:1.5;"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                    </div>
+                    <div style="flex:1;">
+                        <div style="font-size:15px; font-weight:500; color:#333;">专属转账</div>
+                        <div style="font-size:12px; color:#999; margin-top:2px;">转给指定群成员</div>
+                    </div>
+                    <svg viewBox="0 0 24 24" style="width:18px; height:18px; stroke:#ccc; fill:none;"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </div>
+            </div>
+            <div onclick="document.getElementById('online-group-transfer-type-modal').remove()" style="padding:14px 16px; text-align:center; border-top:0.5px solid #f0f0f0; color:#999; font-size:15px; cursor:pointer;">取消</div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// 显示联机群聊红包页面
+function showOnlineGroupRedPacket() {
+    document.getElementById('online-group-transfer-type-modal')?.remove();
+    
+    // 创建或显示红包页面
+    let page = document.getElementById('online-group-redpacket-page');
+    if (!page) {
+        page = document.createElement('div');
+        page.id = 'online-group-redpacket-page';
+        page.className = 'transfer-modal';
+        page.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:#fff; z-index:350; display:none; flex-direction:column;';
+        document.body.appendChild(page);
+    }
+    
+    page.innerHTML = `
+        <div class="transfer-page-header" style="background:#fff; border-bottom:0.5px solid #f0f0f0;">
+            <div class="back-btn" onclick="hideOnlineGroupRedPacketPage()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0; color:#333;">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="transfer-page-title" style="color:#333;">发红包</div>
+            <div style="width:40px;"></div>
+        </div>
+        
+        <div style="flex:1; background:#fff; padding:16px;">
+            <!-- 红包类型选择 -->
+            <div style="background:#fff; border-radius:12px; padding:16px; margin-bottom:12px; border:1px solid #eee;">
+                <div style="font-size:13px; color:#999; margin-bottom:12px;">红包类型</div>
+                <div style="display:flex; gap:12px;">
+                    <div id="online-rp-type-lucky" onclick="selectOnlineRedPacketType('lucky')" style="flex:1; padding:12px; border:1.5px solid #333; border-radius:10px; text-align:center; cursor:pointer; background:#fff;">
+                        <div style="font-size:14px; font-weight:500; color:#333;">拼手气红包</div>
+                        <div style="font-size:11px; color:#999; margin-top:4px;">金额随机</div>
+                    </div>
+                    <div id="online-rp-type-normal" onclick="selectOnlineRedPacketType('normal')" style="flex:1; padding:12px; border:1.5px solid #e8e8e8; border-radius:10px; text-align:center; cursor:pointer; background:#fff;">
+                        <div style="font-size:14px; font-weight:500; color:#666;">普通红包</div>
+                        <div style="font-size:11px; color:#999; margin-top:4px;">金额相同</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 红包金额 -->
+            <div style="background:#fff; border-radius:12px; padding:16px; margin-bottom:12px; border:1px solid #eee;">
+                <div style="display:flex; align-items:center; border-bottom:1px solid #f0f0f0; padding-bottom:14px; margin-bottom:14px;">
+                    <div style="font-size:14px; color:#999; width:70px;">总金额</div>
+                    <div style="flex:1; display:flex; align-items:center;">
+                        <span style="font-size:18px; color:#333; margin-right:4px;">¥</span>
+                        <input type="number" id="online-rp-amount-input" placeholder="0.00" style="flex:1; border:none; font-size:22px; font-weight:500; outline:none; color:#333;" oninput="checkOnlineRedPacketInput()">
+                    </div>
+                </div>
+                <div style="display:flex; align-items:center;">
+                    <div style="font-size:14px; color:#999; width:70px;">红包个数</div>
+                    <div style="flex:1; display:flex; align-items:center;">
+                        <input type="number" id="online-rp-count-input" placeholder="1" min="1" style="flex:1; border:none; font-size:16px; outline:none; color:#333;" oninput="checkOnlineRedPacketInput()">
+                        <span style="font-size:13px; color:#999;">个</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 祝福语 -->
+            <div style="background:#fff; border-radius:12px; padding:14px 16px; margin-bottom:24px; border:1px solid #eee;">
+                <input type="text" id="online-rp-wish-input" placeholder="祝福语（选填）" maxlength="20" style="width:100%; border:none; font-size:14px; outline:none; box-sizing:border-box; color:#333;">
+            </div>
+            
+            <!-- 金额提示 -->
+            <div style="text-align:center; margin-bottom:20px;">
+                <span style="font-size:13px; color:#999;" id="online-rp-total-hint">共0.00元</span>
+            </div>
+            
+            <!-- 发送按钮 -->
+            <button id="btn-send-online-redpacket" onclick="sendOnlineGroupRedPacket()" disabled style="width:100%; padding:14px; background:#ccc; color:#fff; border:none; border-radius:24px; font-size:16px; font-weight:500; cursor:not-allowed; transition:all 0.2s;">
+                发红包
+            </button>
+        </div>
+    `;
+    
+    // 重置输入
+    document.getElementById('online-rp-amount-input').value = '';
+    document.getElementById('online-rp-count-input').value = '';
+    document.getElementById('online-rp-wish-input').value = '';
+    document.getElementById('online-rp-total-hint').innerText = '共0.00元';
+    document.getElementById('btn-send-online-redpacket').disabled = true;
+    document.getElementById('btn-send-online-redpacket').style.background = '#ccc';
+    document.getElementById('btn-send-online-redpacket').style.cursor = 'not-allowed';
+    
+    // 默认选中拼手气
+    selectOnlineRedPacketType('lucky');
+    
+    page.style.display = 'flex';
+}
+
+// 隐藏联机群聊红包页面
+function hideOnlineGroupRedPacketPage() {
+    const page = document.getElementById('online-group-redpacket-page');
+    if (page) page.style.display = 'none';
+}
+
+// 联机群聊红包类型
+let currentOnlineRedPacketType = 'lucky';
+
+// 选择联机群聊红包类型
+function selectOnlineRedPacketType(type) {
+    currentOnlineRedPacketType = type;
+    
+    const luckyEl = document.getElementById('online-rp-type-lucky');
+    const normalEl = document.getElementById('online-rp-type-normal');
+    
+    if (!luckyEl || !normalEl) return;
+    
+    if (type === 'lucky') {
+        luckyEl.style.borderColor = '#333';
+        luckyEl.style.background = '#fff';
+        luckyEl.querySelector('div:first-child').style.color = '#333';
+        
+        normalEl.style.borderColor = '#e8e8e8';
+        normalEl.style.background = '#fff';
+        normalEl.querySelector('div:first-child').style.color = '#666';
+    } else {
+        normalEl.style.borderColor = '#333';
+        normalEl.style.background = '#fff';
+        normalEl.querySelector('div:first-child').style.color = '#333';
+        
+        luckyEl.style.borderColor = '#e8e8e8';
+        luckyEl.style.background = '#fff';
+        luckyEl.querySelector('div:first-child').style.color = '#666';
+    }
+}
+
+// 检查联机群聊红包输入
+function checkOnlineRedPacketInput() {
+    const amount = parseFloat(document.getElementById('online-rp-amount-input')?.value || 0);
+    const count = parseInt(document.getElementById('online-rp-count-input')?.value || 0);
+    const btn = document.getElementById('btn-send-online-redpacket');
+    const hint = document.getElementById('online-rp-total-hint');
+    
+    if (!btn || !hint) return;
+    
+    if (amount > 0 && count > 0) {
+        hint.innerText = `共${amount.toFixed(2)}元`;
+        btn.disabled = false;
+        btn.style.background = '#333';
+        btn.style.cursor = 'pointer';
+    } else {
+        hint.innerText = '共0.00元';
+        btn.disabled = true;
+        btn.style.background = '#ccc';
+        btn.style.cursor = 'not-allowed';
+    }
+}
+
+// 发送联机群聊红包
+async function sendOnlineGroupRedPacket() {
+    if (!currentOnlineGroupId) return;
+    
+    const amount = parseFloat(document.getElementById('online-rp-amount-input')?.value);
+    const count = parseInt(document.getElementById('online-rp-count-input')?.value);
+    const wish = document.getElementById('online-rp-wish-input')?.value.trim() || '恭喜发财，大吉大利';
+    
+    if (!amount || amount <= 0 || !count || count <= 0) {
+        showToast('请填写正确的金额和个数');
+        return;
+    }
+    
+    // 检查余额
+    if (!currentMyCharId) {
+        showToast("请先设置User身份");
+        return;
+    }
+    const user = await db.characters.get(parseInt(currentMyCharId));
+    let currentBalance = 0;
+    if (user && user.identity && user.identity.balance) {
+        currentBalance = parseFloat(user.identity.balance.toString().replace(/,/g, ''));
+    }
+    
+    if (currentBalance < amount) {
+        showToast('余额不足 (当前: ¥' + currentBalance.toFixed(2) + ')');
+        return;
+    }
+    
+    // 扣款
+    const newBalance = currentBalance - amount;
+    user.identity.balance = newBalance.toFixed(2);
+    await db.characters.put(user);
+    
+    // 构建红包数据
+    const redPacketData = {
+        type: 'redpacket',
+        redpacketType: currentOnlineRedPacketType, // 'lucky' 或 'normal'
+        totalAmount: amount.toFixed(2),
+        count: count,
+        wish: wish,
+        claimed: [], // 已领取的成员微信号列表
+        claimedAmounts: {}, // 每个成员领取的金额 {wx_account: amount}
+        id: 'rp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+    };
+    
+    // 发送到服务器
+    const myWx = getMyOnlineWxAccount();
+    const myChar = onlineCharacters.find(c => c.wx_account === myWx);
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'send_group_message',
+        group_id: currentOnlineGroupId,
+        my_wx_account: myWx,
+        sender_type: 'user',
+        sender_name: myChar?.nickname || myWx,
+        content: JSON.stringify(redPacketData),
+        msg_type: 'redpacket'
+    }));
+    
+    // 记录账单
+    await addTransaction('expense', amount, '发红包', `联机群聊 · ${count}个红包`);
+    
+    hideOnlineGroupRedPacketPage();
+    showToast('红包已发出');
+}
+
+// 显示联机群聊红包详情
+function showOnlineGroupRedPacketDetail(msgId) {
+    // 在消息列表中找到红包消息
+    const msg = currentOnlineGroupMessages.find(m => {
+        if (m.msg_type !== 'redpacket') return false;
+        return (m.id || ('rp_' + m.created_at)) === msgId;
+    });
+    
+    if (!msg) {
+        showToast('红包不存在');
+        return;
+    }
+    
+    try {
+        const data = JSON.parse(msg.content);
+        const myWx = getMyOnlineWxAccount();
+        const hasClaimed = data.claimed?.includes(myWx) || false;
+        const claimedCount = (data.claimed || []).length;
+        const isAllClaimed = claimedCount >= data.count;
+        
+        // 创建或显示红包详情页面
+        let page = document.getElementById('online-group-redpacket-detail-page');
+        if (!page) {
+            page = document.createElement('div');
+            page.id = 'online-group-redpacket-detail-page';
+            page.className = 'transfer-modal';
+            page.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:#fff; z-index:360; display:none; flex-direction:column;';
+            document.body.appendChild(page);
+        }
+        
+        page.innerHTML = `
+            <div class="transfer-page-header" style="background:#fff; border-bottom:0.5px solid #f0f0f0;">
+                <div class="back-btn" onclick="hideOnlineGroupRedPacketDetail()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0; color:#333;">
+                    <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                </div>
+                <div class="transfer-page-title" style="color:#333;">红包详情</div>
+                <div style="width:40px;"></div>
+            </div>
+            
+            <div style="flex:1; background:#fff; overflow-y:auto;">
+                <!-- 红包信息头部 -->
+                <div style="padding:30px 20px; text-align:center; border-bottom:1px solid #f0f0f0;">
+                    <div id="online-rp-detail-avatar" style="width:60px; height:60px; border-radius:50%; background:#eee; margin:0 auto 12px; background-size:cover; background-position:center;"></div>
+                    <div id="online-rp-detail-sender" style="font-size:15px; color:#333; margin-bottom:8px;">${msg.sender_name} 的红包</div>
+                    <div id="online-rp-detail-wish" style="font-size:18px; font-weight:500; color:#333; margin-bottom:6px;">${escapeHtml(data.wish || '恭喜发财')}</div>
+                    <div id="online-rp-detail-type" style="font-size:13px; color:#999;">${data.redpacketType === 'lucky' ? '拼手气红包' : '普通红包'}</div>
+                </div>
+                
+                <!-- 领取按钮区域 -->
+                <div id="online-rp-detail-action" style="padding:20px; border-bottom:1px solid #f0f0f0;">
+                    <button id="btn-claim-online-redpacket" onclick="claimOnlineGroupRedPacket('${msgId}', '${myWx}', null)" style="width:100%; padding:14px; background:${isAllClaimed || hasClaimed ? '#ccc' : '#333'}; color:#fff; border:none; border-radius:24px; font-size:16px; font-weight:500; cursor:${isAllClaimed || hasClaimed ? 'not-allowed' : 'pointer'};" ${isAllClaimed || hasClaimed ? 'disabled' : ''}>
+                        ${isAllClaimed ? '红包已领完' : hasClaimed ? `已领取 ¥${(data.claimedAmounts?.[myWx] || '0.00')}` : '领取红包'}
+                    </button>
+                </div>
+                
+                <!-- 已领取列表 -->
+                <div style="padding:16px 20px;">
+                    <div style="font-size:13px; color:#999; margin-bottom:12px;">
+                        <span id="online-rp-detail-claimed-count">${claimedCount}</span>/<span id="online-rp-detail-total-count">${data.count}</span> 已领取，共 <span id="online-rp-detail-total-amount">${Object.values(data.claimedAmounts || {}).reduce((a, b) => a + parseFloat(b), 0).toFixed(2)}</span> 元
+                    </div>
+                    <div id="online-rp-detail-claimed-list">
+                        ${data.claimed && data.claimed.length > 0 ? 
+                            data.claimed.map(wx => {
+                                const member = currentOnlineGroupMembers.find(m => m.user_wx === wx);
+                                const amount = data.claimedAmounts?.[wx] || '0.00';
+                                return `
+                                    <div style="display:flex; align-items:center; padding:12px 0; border-bottom:1px solid #f0f0f0;">
+                                        <div style="width:40px; height:40px; border-radius:50%; background:#eee; background-image:url(${member?.user_avatar || ''}); background-size:cover; background-position:center; margin-right:12px; flex-shrink:0;"></div>
+                                        <div style="flex:1;">
+                                            <div style="font-size:14px; color:#333;">${member?.user_name || wx}</div>
+                                        </div>
+                                        <div style="font-size:15px; font-weight:500; color:#333;">¥${amount}</div>
+                                    </div>
+                                `;
+                            }).join('') : 
+                            '<div style="text-align:center; color:#999; padding:30px 0; font-size:13px;">暂无人领取</div>'
+                        }
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // 设置发送者头像
+        const avatarEl = document.getElementById('online-rp-detail-avatar');
+        if (msg.sender_avatar) {
+            avatarEl.style.backgroundImage = `url(${msg.sender_avatar})`;
+        }
+        
+        page.style.display = 'flex';
+    } catch(e) {
+        console.error('显示红包详情失败:', e);
+        showToast('红包数据错误');
+    }
+}
+
+// 隐藏联机群聊红包详情
+function hideOnlineGroupRedPacketDetail() {
+    const page = document.getElementById('online-group-redpacket-detail-page');
+    if (page) page.style.display = 'none';
+}
+
+// 领取联机群聊红包（用户或角色都可以）
+async function claimOnlineGroupRedPacket(msgId, claimerWx, characterName) {
+    if (!currentOnlineGroupId || !onlineSocket || onlineSocket.readyState !== WebSocket.OPEN) {
+        showToast('未连接到服务器');
+        return;
+    }
+    
+    const myWx = getMyOnlineWxAccount();
+    const claimerName = characterName || (onlineCharacters.find(c => c.wx_account === myWx)?.nickname || myWx);
+    
+    // 发送领取请求到服务器
+    onlineSocket.send(JSON.stringify({
+        type: 'claim_group_redpacket',
+        group_id: currentOnlineGroupId,
+        my_wx_account: myWx,
+        message_id: msgId,
+        claimer_name: claimerName
+    }));
+}
+
+// 处理红包被领取的通知
+async function handleRedPacketClaimed(data) {
+    const { group_id, message_id, claimer_wx, claim_amount, redpacket_data } = data;
+    
+    if (group_id !== currentOnlineGroupId) return;
+    
+    // 更新本地消息中的红包数据
+    const msgIndex = currentOnlineGroupMessages.findIndex(m => m.id === message_id);
+    if (msgIndex !== -1) {
+        currentOnlineGroupMessages[msgIndex].content = JSON.stringify(redpacket_data);
+        renderOnlineGroupMessages();
+    }
+    
+    // 如果是自己领取的，更新钱包
+    const myWx = getMyOnlineWxAccount();
+    if (claimer_wx === myWx) {
+        const claimAmountNum = parseFloat(claim_amount);
+        
+        if (!currentMyCharId) {
+            showToast(`成功领取 ¥${claim_amount}`);
+            return;
+        }
+        
+        const user = await db.characters.get(parseInt(currentMyCharId));
+        if (user) {
+            if (!user.identity) user.identity = {};
+            let balance = parseFloat(user.identity.balance || 0);
+            balance += claimAmountNum;
+            user.identity.balance = balance.toFixed(2);
+            await db.characters.put(user);
+            
+            // 记录账单
+            const group = onlineGroups.find(g => g.id === currentOnlineGroupId);
+            await addTransaction('income', claimAmountNum, '红包', group?.name || '联机群聊');
+            
+            showToast(`成功领取 ¥${claim_amount}`);
+        }
+    }
+    
+    // 刷新红包详情页面（如果已打开）
+    const detailPage = document.getElementById('online-group-redpacket-detail-page');
+    if (detailPage && detailPage.style.display !== 'none') {
+        showOnlineGroupRedPacketDetail(message_id);
+    }
+}
+
+// 显示联机群聊专属转账选人页面
+async function showOnlineGroupExclusiveTransfer() {
+    document.getElementById('online-group-transfer-type-modal')?.remove();
+    
+    const listHtml = currentOnlineGroupMembers.map(m => {
+        const avatarStyle = m.user_avatar ? `background-image:url(${m.user_avatar})` : 'background:#ccc';
+        const myWx = getMyOnlineWxAccount();
+        if (m.user_wx === myWx) return ''; // 不显示自己
+        
+        return `
+            <div onclick="selectOnlineGroupTransferTarget('${m.user_wx}', '${m.user_name}')" style="display:flex; align-items:center; padding:12px 16px; cursor:pointer; transition:background 0.2s; border-bottom:0.5px solid #f0f0f0;">
+                <div style="width:44px; height:44px; border-radius:6px; ${avatarStyle}; background-size:cover; background-position:center; margin-right:12px;"></div>
+                <div style="flex:1;">
+                    <div style="font-size:16px; color:#333;">${m.user_name}</div>
+                    ${m.character_name ? `<div style="font-size:12px; color:#999;">${m.character_name}</div>` : ''}
+                </div>
+            </div>
+        `;
+    }).filter(h => h).join('');
+    
+    const modal = document.createElement('div');
+    modal.id = 'online-group-exclusive-modal';
+    modal.className = 'modal-overlay';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    `;
+    
+    modal.innerHTML = `
+        <div style="background:#fff; border-radius:16px; width:85%; max-width:400px; max-height:70%; overflow:hidden; display:flex; flex-direction:column;">
+            <div style="padding:20px 16px; text-align:center; border-bottom:0.5px solid #f0f0f0;">
+                <div style="font-size:17px; font-weight:600; color:#333;">选择转账对象</div>
+            </div>
+            <div style="flex:1; overflow-y:auto;">
+                ${listHtml || '<div style="text-align:center; color:#999; padding:40px;">群内暂无其他成员</div>'}
+            </div>
+            <div onclick="document.getElementById('online-group-exclusive-modal').remove()" style="padding:14px 16px; text-align:center; border-top:0.5px solid #f0f0f0; color:#999; font-size:15px; cursor:pointer;">取消</div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// 选择联机群聊转账目标
+function selectOnlineGroupTransferTarget(targetWx, targetName) {
+    document.getElementById('online-group-exclusive-modal')?.remove();
+    
+    const modal = document.createElement('div');
+    modal.id = 'online-group-transfer-amount-modal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    `;
+    
+    modal.innerHTML = `
+        <div style="background:#fff; border-radius:16px; padding:24px; width:85%; max-width:360px;">
+            <h3 style="margin:0 0 16px 0; text-align:center; font-size:18px;">转账给 ${targetName}</h3>
+            
+            <div style="margin-bottom:16px;">
+                <label style="display:block; font-size:13px; color:#666; margin-bottom:8px;">转账金额</label>
+                <input type="number" id="online-group-transfer-amount" placeholder="输入金额" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px;">
+            </div>
+            
+            <div style="margin-bottom:20px;">
+                <label style="display:block; font-size:13px; color:#666; margin-bottom:8px;">转账说明</label>
+                <input type="text" id="online-group-transfer-note" placeholder="添加转账说明" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px;">
+            </div>
+            
+            <div style="display:flex; gap:12px;">
+                <button onclick="document.getElementById('online-group-transfer-amount-modal').remove()" style="flex:1; padding:12px; background:#f0f0f0; color:#666; border:none; border-radius:8px; font-size:15px;">取消</button>
+                <button onclick="sendOnlineGroupExclusiveTransfer('${targetWx}', '${targetName}')" style="flex:1; padding:12px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px; font-size:15px;">转账</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// 发送联机群聊专属转账
+function sendOnlineGroupExclusiveTransfer(targetWx, targetName) {
+    const amount = document.getElementById('online-group-transfer-amount').value.trim();
+    const note = document.getElementById('online-group-transfer-note').value.trim();
+    
+    if (!amount || parseFloat(amount) <= 0) {
+        alert('请输入有效的金额');
+        return;
+    }
+    
+    const myWx = getMyOnlineWxAccount();
+    const myChar = onlineCharacters.find(c => c.wx_account === myWx);
+    
+    // 使用和普通群聊一样的JSON格式
+    const transferData = {
+        amount: parseFloat(amount),
+        desc: note || '转账',
+        status: 'pending',
+        targetWx: targetWx,
+        targetName: targetName
+    };
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'send_group_message',
+        group_id: currentOnlineGroupId,
+        my_wx_account: myWx,
+        sender_type: 'user',
+        sender_name: myChar?.nickname || myWx,
+        content: JSON.stringify(transferData),
+        msg_type: 'transfer'
+    }));
+    
+    document.getElementById('online-group-transfer-amount-modal')?.remove();
+    showToast('转账已发送');
+}
+
+// 刷新群成员列表
+function refreshOnlineGroupMembers() {
+    const myWx = getMyOnlineWxAccount();
+    if (myWx && currentOnlineGroupId) {
+        onlineSocket.send(JSON.stringify({
+            type: 'get_group_members',
+            group_id: currentOnlineGroupId,
+            my_wx_account: myWx
+        }));
+    }
+}
+
+// 发送群消息
+function sendOnlineGroupMsg() {
+    const input = document.getElementById('online-group-input');
+    const content = input.value.trim();
+    if (!content || !currentOnlineGroupId) return;
+    
+    const myWx = getMyOnlineWxAccount();
+    const myChar = onlineCharacters.find(c => c.wx_account === myWx);
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'send_group_message',
+        group_id: currentOnlineGroupId,
+        my_wx_account: myWx,
+        sender_type: 'user',
+        sender_name: myChar?.nickname || myWx,
+        content: content
+    }));
+    
+    input.value = '';
+    // 触发input事件以更新发送按钮状态
+    input.dispatchEvent(new Event('input'));
+    // 关闭面板
+    closeOnlineGroupPanel();
+}
+
+// 让我的角色说话（调用API）
+async function letMyCharacterSpeak() {
+    console.log('[联机群聊] ⚡ 触发 AI 回复');
+    
+    if (!myOnlineGroupCharacter) {
+        alert('你没有在这个群聊中设置角色。请在群聊设置中选择要带入的角色。');
+        return;
+    }
+    
+    if (currentOnlineGroupMessages.length === 0) {
+        alert('群聊中还没有消息，角色无法回复');
+        return;
+    }
+    
+    const myWx = getMyOnlineWxAccount();
+    const myUserName = onlineCharacters.find(c => c.wx_account === myWx)?.nickname || myWx;
+    
+    console.log('[联机群聊] 角色名称:', myOnlineGroupCharacter.name);
+    console.log('[联机群聊] 我的微信号:', myWx);
+    console.log('[联机群聊] 我的昵称:', myUserName);
+    console.log('[联机群聊] 📚 群聊消息条数:', currentOnlineGroupMessages.length);
+    console.log('[联机群聊] 👥 群成员数量:', currentOnlineGroupMembers.length);
+    
+    // 打印最近的消息
+    if (currentOnlineGroupMessages.length > 0) {
+        console.log('[联机群聊] 最近5条消息:');
+        currentOnlineGroupMessages.slice(-5).forEach((msg, idx) => {
+            const isChar = msg.sender_type === 'character';
+            const prefix = isChar ? `[角色]${msg.character_name}(${msg.sender_name})` : `[真人]${msg.sender_name}`;
+            console.log(`  [${currentOnlineGroupMessages.length - 5 + idx}] ${prefix}: ${msg.content}`);
+        });
+    }
+    
+    // 修改标题为正在输入
+    const chatTitleEl = document.getElementById('online-group-chat-title');
+    const group = onlineGroups.find(g => g.id === currentOnlineGroupId);
+    const originalTitle = group?.name || '联机群聊';
+    
+    if (chatTitleEl) {
+        chatTitleEl.innerText = `${myOnlineGroupCharacter.name} 正在输入中...`;
+        console.log('[联机群聊] 修改标题为:', `${myOnlineGroupCharacter.name} 正在输入中...`);
+    }
+    
+    // 通知群里其他人：我的角色正在输入
+    onlineSocket.send(JSON.stringify({
+        type: 'group_typing_start',
+        group_id: currentOnlineGroupId,
+        my_wx_account: myWx,
+        character_name: myOnlineGroupCharacter.name
+    }));
+    
+    showToast('正在生成回复...');
+    
+    try {
+        // 构建群成员信息（只有名字，没有人设）
+        let membersInfo = '群聊成员：\n';
+        currentOnlineGroupMembers.forEach(m => {
+            if (m.character_name) {
+                membersInfo += `- ${m.user_name}（带着角色"${m.character_name}"）\n`;
+            } else {
+                membersInfo += `- ${m.user_name}\n`;
+            }
+        });
+        console.log('[联机群聊] 群成员信息:\n', membersInfo);
+        
+        // 收集未领完的红包信息
+        let pendingRedPackets = [];
+        currentOnlineGroupMessages.forEach(msg => {
+            if (msg.msg_type === 'redpacket') {
+                try {
+                    const rpData = JSON.parse(msg.content);
+                    const claimedCount = (rpData.claimed || []).length;
+                    const isAllClaimed = claimedCount >= rpData.count;
+                    const myWx = getMyOnlineWxAccount();
+                    const hasClaimed = rpData.claimed?.includes(myWx) || false;
+                    
+                    if (!isAllClaimed && !hasClaimed) {
+                        pendingRedPackets.push({
+                            id: msg.id || ('rp_' + msg.created_at),
+                            wish: rpData.wish || '恭喜发财',
+                            remaining: rpData.count - claimedCount,
+                            claimed: rpData.claimed || []
+                        });
+                    }
+                } catch(e) {}
+            }
+        });
+        
+        // 构建上下文
+        const context = currentOnlineGroupMessages.map(msg => {
+            const isChar = msg.sender_type === 'character';
+            if (msg.msg_type === 'redpacket') {
+                try {
+                    const rpData = JSON.parse(msg.content);
+                    const claimedCount = (rpData.claimed || []).length;
+                    const isAllClaimed = claimedCount >= rpData.count;
+                    return `[${msg.sender_name}]: [发送了红包] "${rpData.wish || '恭喜发财'}" (红包ID: ${msg.id || ('rp_' + msg.created_at)}, ${isAllClaimed ? '已领完' : `还剩${rpData.count - claimedCount}个可领`})`;
+                } catch(e) {
+                    return `[${msg.sender_name}]: [发送了红包]`;
+                }
+            } else if (isChar) {
+                // 角色消息：显示角色名和主人名
+                return `[${msg.character_name}（${msg.sender_name}的角色）]: ${msg.content}`;
+            } else {
+                // 真人消息
+                return `[${msg.sender_name}]: ${msg.content}`;
+            }
+        }).join('\n');
+        console.log('[联机群聊] 上下文消息（前300字）:', context.substring(0, 300));
+        
+        // 构建提示词
+        const systemPrompt = `你是"${myOnlineGroupCharacter.name}"，是"${myUserName}"带入群聊的AI角色。
+⚠️ 重要：你的名字是${myOnlineGroupCharacter.name}，你不是${myUserName}或其他群成员！你是独立的角色。
+
+【你的人设】
+${myOnlineGroupCharacter.desc || '（无特定人设）'}
+
+【${membersInfo}】
+
+${pendingRedPackets.length > 0 ? `
+🧧 群里有未领完的红包！
+${pendingRedPackets.map(rp => `- 红包ID: ${rp.id}, 祝福语: "${rp.wish}", 还剩 ${rp.remaining} 个可领`).join('\n')}
+提示：看到红包时，你可以积极去抢！使用 {"type": "claim_redpacket", "redpacketId": "红包ID"} 来领取红包。
+` : ''}
+
+【重要回复规则 - 必须严格遵守】
+1. **必须**模拟微信连发消息的习惯：请生成 ${myOnlineGroupCharacter.reply_min_count || 1} 到 ${myOnlineGroupCharacter.reply_max_count || 3} 条短消息${(myOnlineGroupCharacter.reply_min_count || 1) === 1 ? '' : '，不能只发一条'}！
+2. **必须**使用分隔符 "|||" 来隔开每一条消息。
+3. **严禁使用逗号**（包括中文逗号和英文逗号）。如果想表达停顿，请直接拆分成下一条消息，或者用空格代替。
+   - 错误示例：嘿在吗？刚刚看到个好玩的视频，发给你看看
+   - 正确示例：嘿在吗？|||刚刚看到个好玩的视频|||发给你看看
+4. 像真实微信聊天一样分多条发送。
+5. 严禁只发送标点符号。每一条消息都必须有实际文字内容。
+6. 语气要自然、口语化，符合人设。
+7. 你只知道其他成员和角色的名字，不知道他们角色的具体人设
+8. 请根据群聊上下文，以"${myOnlineGroupCharacter.name}"的身份自然地参与对话
+9. 只回复你要说的内容，不要加任何前缀如"${myOnlineGroupCharacter.name}:"
+10. 回复要符合你的人设性格
+11. **领取红包**：如果群聊中有红包消息（msg_type为'redpacket'），你可以积极去领取！使用 {"type": "claim_redpacket", "redpacketId": "红包ID"} 来领取红包。红包会记入你主人的钱包余额。
+12. **发送红包**：你可以在适当的场合发红包（比如：过节、生日、表达感谢、活跃气氛、玩梗等），使用 {"type": "send_redpacket", "redpacketType": "红包类型", "totalAmount": 总金额, "count": 红包个数, "wish": "祝福语"} 来发送红包。角色发红包不会扣除任何人的余额，可以自由发送！
+   - redpacketType可选值: "lucky"(拼手气红包), "normal"(普通红包)
+   - 拼手气红包：每个人领到的金额随机，增加趣味性
+   - 普通红包：每个人领到的金额相同，公平分配
+   - 示例1: {"type": "send_redpacket", "redpacketType": "lucky", "totalAmount": 10, "count": 5, "wish": "大家周末快乐！"}
+   - 示例2: {"type": "send_redpacket", "redpacketType": "normal", "totalAmount": 20, "count": 10, "wish": "恭喜发财"}
+
+请以JSON格式返回，格式如下：
+{
+  "reply": "你的回复内容|||第二条内容|||第三条内容"
+}
+
+**特殊指令**：
+1. 领取红包：
+{
+  "type": "claim_redpacket",
+  "redpacketId": "红包ID",
+  "reply": "你的回复内容（可选）"
+}
+
+2. 发送红包：
+{
+  "type": "send_redpacket",
+  "redpacketType": "lucky或normal",
+  "totalAmount": 金额数字,
+  "count": 红包个数,
+  "wish": "祝福语",
+  "reply": "你的回复内容（可选）"
+}
+
+提示：发送红包后，红包会立即出现在群聊中，其他成员和角色就可以抢红包了！你可以在适当的场合发红包活跃气氛，角色发红包不会扣除任何人的余额，可以自由发送！
+
+请严格返回JSON格式，不要包含Markdown代码块标记。`;
+        
+        console.log('[联机群聊] 系统提示词（前500字）:', systemPrompt.substring(0, 500));
+        
+        // 构建消息数组（与 callAI 函数的标准格式一致）
+        const messages = [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: `群聊记录：\n${context}\n\n请以角色身份回复：` }
+        ];
+        
+        console.log('[联机群聊] 📤 准备发送给 AI - 完整信息汇总');
+        console.log('[联机群聊] - System Prompt 长度:', systemPrompt.length);
+        console.log('[联机群聊] - 上下文长度:', context.length);
+        console.log('[联机群聊] 🚀 开始调用 API...');
+        
+        // 先添加一条系统消息作为分割线
+        const systemMsg = {
+            id: 'sys_' + Date.now(),
+            sender_type: 'system',
+            msg_type: 'system',
+            content: `———— ${myOnlineGroupCharacter.name} 开始回复 ————`,
+            created_at: Date.now()
+        };
+        currentOnlineGroupMessages.push(systemMsg);
+        renderOnlineGroupMessages();
+        console.log('[联机群聊] ✅ 已添加系统消息分割线');
+        
+        // 调用统一的 AI 接口
+        const aiResponse = await callAI(messages);
+        
+        console.log('[联机群聊] ✅ API 调用成功');
+        console.log('[联机群聊] 原始响应:', aiResponse);
+        
+        // 尝试解析 JSON 格式（如果AI返回了JSON）
+        let replyText = "";
+        try {
+            // 尝试解析为JSON
+            let cleanResponse = aiResponse.trim();
+            // 清理可能的markdown标记
+            if (cleanResponse.startsWith('```')) {
+                cleanResponse = cleanResponse.replace(/```json?\n?/g, '').replace(/```$/g, '').trim();
+            }
+            const parsed = JSON.parse(cleanResponse);
+            
+            // 检查是否是发送红包指令
+            if (parsed.type === 'send_redpacket' && parsed.totalAmount && parsed.count && parsed.redpacketType) {
+                console.log('[联机群聊] 🧧 角色尝试发送红包');
+                
+                const totalAmount = parseFloat(parsed.totalAmount);
+                const count = parseInt(parsed.count);
+                const wish = parsed.wish || '恭喜发财';
+                const redpacketType = parsed.redpacketType;
+                
+                // 验证金额和数量
+                if (totalAmount > 0 && count > 0 && totalAmount <= 200 && count <= 100) {
+                    // 生成红包ID
+                    const redpacketId = 'rp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                    
+                    // 构建红包数据
+                    const redpacketData = {
+                        id: redpacketId,
+                        totalAmount: totalAmount.toFixed(2),
+                        count: count,
+                        wish: wish,
+                        redpacketType: redpacketType,
+                        claimed: [],
+                        claimedAmounts: {}
+                    };
+                    
+                    // 发送红包消息到服务器
+                    onlineSocket.send(JSON.stringify({
+                        type: 'send_group_message',
+                        group_id: currentOnlineGroupId,
+                        my_wx_account: myWx,
+                        sender_type: 'character',
+                        sender_name: myUserName,
+                        character_name: myOnlineGroupCharacter.name,
+                        msg_type: 'redpacket',
+                        content: JSON.stringify(redpacketData)
+                    }));
+                    
+                    console.log('[联机群聊] ✅ 角色红包已发送，金额:', totalAmount, '个数:', count, '（不扣除用户余额）');
+                    
+                    // 如果有回复内容，也发送
+                    if (parsed.reply) {
+                        replyText = parsed.reply;
+                    } else {
+                        replyText = '';
+                    }
+                } else {
+                    // 参数无效
+                    console.log('[联机群聊] ⚠️ 红包参数无效');
+                    replyText = parsed.reply || '';
+                }
+            }
+            // 检查是否是领取红包指令
+            else if (parsed.type === 'claim_redpacket' && parsed.redpacketId) {
+                console.log('[联机群聊] 🧧 角色尝试领取红包:', parsed.redpacketId);
+                await claimOnlineGroupRedPacket(parsed.redpacketId, myWx, myOnlineGroupCharacter.name);
+                
+                // 如果有回复内容，也发送
+                if (parsed.reply) {
+                    replyText = parsed.reply;
+                } else {
+                    replyText = '';
+                }
+            } else {
+                replyText = parsed.reply || parsed.content || parsed.message || aiResponse;
+            }
+            console.log('[联机群聊] JSON解析成功，提取到回复内容:', replyText);
+        } catch (e) {
+            // 不是JSON格式，直接使用原始响应
+            replyText = aiResponse.trim();
+            console.log('[联机群聊] 不是JSON格式，使用原始响应');
+        }
+        
+        if (replyText) {
+            // 按照 ||| 分割成多条消息
+            const segments = replyText.split('|||').map(s => s.trim()).filter(s => s.length > 0);
+            console.log('[联机群聊] 分割成', segments.length, '条消息');
+            
+            // 依次发送每条消息，间隔100ms
+            for (let i = 0; i < segments.length; i++) {
+                const segment = segments[i];
+                console.log(`[联机群聊] 发送第 ${i+1}/${segments.length} 条消息:`, segment);
+                
+                onlineSocket.send(JSON.stringify({
+                    type: 'send_group_message',
+                    group_id: currentOnlineGroupId,
+                    my_wx_account: myWx,
+                    sender_type: 'character',
+                    sender_name: myUserName,
+                    character_name: myOnlineGroupCharacter.name,
+                    content: segment
+                }));
+                
+                // 等待一小段时间再发送下一条，避免消息顺序混乱
+                if (i < segments.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+            }
+            
+            console.log('[联机群聊] 📤 所有消息已发送到服务器');
+        } else {
+            console.warn('[联机群聊] ⚠️ 回复内容为空');
+            // 如果没有回复内容，移除刚添加的系统消息
+            currentOnlineGroupMessages.pop();
+            renderOnlineGroupMessages();
+        }
+        
+        // 恢复标题
+        if (chatTitleEl) {
+            chatTitleEl.innerText = originalTitle;
+            console.log('[联机群聊] 恢复标题为:', originalTitle);
+        }
+        
+        // 通知群里其他人：输入结束
+        onlineSocket.send(JSON.stringify({
+            type: 'group_typing_stop',
+            group_id: currentOnlineGroupId,
+            my_wx_account: myWx
+        }));
+    } catch (e) {
+        console.error('[联机群聊] ❌ 角色回复失败:', e);
+        console.error('[联机群聊] 错误堆栈:', e.stack);
+        alert('角色回复失败: ' + e.message);
+        
+        // 出错时也要恢复标题
+        if (chatTitleEl) {
+            chatTitleEl.innerText = originalTitle;
+            console.log('[联机群聊] （出错）恢复标题为:', originalTitle);
+        }
+        
+        // 通知群里其他人：输入结束
+        onlineSocket.send(JSON.stringify({
+            type: 'group_typing_stop',
+            group_id: currentOnlineGroupId,
+            my_wx_account: myWx
+        }));
+    }
+}
+
+// 显示群聊信息页面
+function showOnlineGroupInfo(groupId) {
+    const group = onlineGroups.find(g => g.id === groupId);
+    if (!group) return;
+    
+    const myWx = getMyOnlineWxAccount();
+    
+    const page = document.createElement('div');
+    page.id = 'online-group-info-page';
+    page.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:#f5f5f5; z-index:310; display:flex; flex-direction:column;`;
+    
+    page.innerHTML = `
+        <div class="wechat-header" style="background:#fff; border-bottom:1px solid #f0f0f0;">
+            <div class="back-btn" onclick="document.getElementById('online-group-info-page').remove()" style="margin:0; background:none; width:40px; justify-content:flex-start; color:#333;">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:24px; height:24px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="wechat-title">群聊资料</div>
+            <div style="width:40px;"></div>
+        </div>
+        
+        <div style="flex:1; overflow-y:auto;">
+            <div style="background:#fff; padding:20px; margin-bottom:10px; text-align:center;">
+                <div style="width:60px; height:60px; border-radius:12px; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); margin:0 auto 12px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:24px;">👥</div>
+                <div style="font-size:18px; font-weight:600;">${group.name}</div>
+            </div>
+            
+            <div style="background:#fff; padding:16px; margin-bottom:10px;">
+                <div style="font-size:14px; font-weight:500; margin-bottom:12px;">群成员 (${currentOnlineGroupMembers.length})</div>
+                <div id="og-info-members" style="display:flex; flex-wrap:wrap; gap:12px;">
+                    ${currentOnlineGroupMembers.map(m => `
+                        <div style="text-align:center; width:60px;">
+                            <div style="width:48px; height:48px; border-radius:8px; margin:0 auto 4px; background-image:url(${m.user_avatar}); background-size:cover; background-color:#e0e0e0;"></div>
+                            <div style="font-size:12px; color:#333; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${m.user_name}</div>
+                            ${m.character_name ? `<div style="font-size:10px; color:#667eea;">🎭${m.character_name}</div>` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+            
+            <div style="background:#fff; padding:16px; margin-bottom:10px;">
+                <div style="font-size:14px; font-weight:500; margin-bottom:12px;">我的群角色</div>
+                <div style="display:flex; align-items:center; justify-content:space-between;">
+                    <span style="color:#666;">${myOnlineGroupCharacter ? myOnlineGroupCharacter.name : '未设置角色'}</span>
+                    <button onclick="showChangeGroupCharacterModal('${groupId}')" style="padding:8px 16px; background:var(--ins-pink); color:#fff; border:none; border-radius:6px; font-size:13px;">
+                        ${myOnlineGroupCharacter ? '更换' : '设置'}角色
+                    </button>
+                </div>
+            </div>
+            
+            <div style="background:#fff; padding:16px; margin-bottom:10px;">
+                <div style="font-size:14px; font-weight:500; margin-bottom:12px;">聊天背景图</div>
+                <div style="display:flex; flex-direction:column; gap:12px;">
+                    <div style="display:flex; gap:8px;">
+                        <button onclick="document.getElementById('online-group-bg-input').setAttribute('data-group-id', '${groupId}'); document.getElementById('online-group-bg-input').click()" style="flex:1; padding:8px 12px; background:#f0f0f0; border:none; border-radius:6px; font-size:13px; color:#666; cursor:pointer;">上传背景</button>
+                        <button onclick="clearOnlineGroupBackground('${groupId}')" style="flex:1; padding:8px 12px; background:#f0f0f0; border:none; border-radius:6px; font-size:13px; color:#666; cursor:pointer;">清除背景</button>
+                    </div>
+                    <div id="online-group-bg-preview" style="width:100%; height:120px; border-radius:8px; background:#f5f5f5; background-size:cover; background-position:center; border:1px solid #e8e8e8; display:flex; align-items:center; justify-content:center; color:#999; font-size:12px;">
+                        暂无背景图
+                    </div>
+                </div>
+            </div>
+            
+            <div style="background:#fff; padding:16px;">
+                <button onclick="inviteFriendToGroup('${groupId}')" style="width:100%; padding:14px; background:#f5f5f5; color:#333; border:none; border-radius:8px; font-size:15px; margin-bottom:10px;">邀请好友</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(page);
+    
+    // 加载并显示背景图预览
+    loadOnlineGroupBackgroundPreview(groupId);
+}
+
+// 显示更换角色弹窗
+async function showChangeGroupCharacterModal(groupId) {
+    const chars = await db.characters.toArray();
+    const availableChars = chars.filter(c => c.type !== 'user' && c.type !== 'online_friend');
+    
+    const modal = document.createElement('div');
+    modal.id = 'change-char-modal';
+    modal.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; display:flex; align-items:center; justify-content:center;`;
+    
+    modal.innerHTML = `
+        <div style="background:#fff; border-radius:12px; padding:20px; width:80%; max-width:300px;">
+            <h3 style="margin:0 0 16px 0; text-align:center;">选择角色</h3>
+            <select id="change-char-select" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; margin-bottom:16px;">
+                <option value="">不使用角色</option>
+                ${availableChars.map(c => `<option value="${c.id}" ${myOnlineGroupCharacter?.name === c.name ? 'selected' : ''}>${c.name}</option>`).join('')}
+            </select>
+            <div style="display:flex; gap:10px;">
+                <button onclick="this.closest('#change-char-modal').remove()" style="flex:1; padding:12px; background:#f0f0f0; color:#666; border:none; border-radius:8px;">取消</button>
+                <button onclick="doChangeGroupCharacter('${groupId}')" style="flex:1; padding:12px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px;">确定</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// 执行更换角色
+async function doChangeGroupCharacter(groupId) {
+    const charId = document.getElementById('change-char-select').value;
+    
+    let myChar = null;
+    if (charId) {
+        const char = await db.characters.get(parseInt(charId));
+        if (char) {
+            myChar = {
+                name: char.name,
+                avatar: char.avatar || '',
+                desc: char.description?.substring(0, 200) || ''
+            };
+        }
+    }
+    
+    const myWx = getMyOnlineWxAccount();
+    onlineSocket.send(JSON.stringify({
+        type: 'update_group_character',
+        group_id: groupId,
+        my_wx_account: myWx,
+        character: myChar
+    }));
+    
+    myOnlineGroupCharacter = myChar;
+    document.getElementById('change-char-modal')?.remove();
+    document.getElementById('online-group-info-page')?.remove();
+    showOnlineGroupInfo(groupId);
+}
+
+// 邀请好友到群聊
+async function inviteFriendToGroup(groupId) {
+    const friends = await db.characters.where('type').equals('online_friend').toArray();
+    
+    if (friends.length === 0) {
+        alert('暂无联机好友可邀请');
+        return;
+    }
+    
+    const modal = document.createElement('div');
+    modal.id = 'invite-friend-modal';
+    modal.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; display:flex; align-items:center; justify-content:center;`;
+    
+    modal.innerHTML = `
+        <div style="background:#fff; border-radius:12px; padding:20px; width:80%; max-width:300px; max-height:60vh; display:flex; flex-direction:column;">
+            <h3 style="margin:0 0 16px 0; text-align:center;">邀请好友</h3>
+            <div style="flex:1; overflow-y:auto;">
+                ${friends.map(f => `
+                    <div onclick="doInviteFriend('${groupId}', '${f.onlineData?.wx_account}')" style="display:flex; align-items:center; padding:12px; border-bottom:1px solid #f5f5f5; cursor:pointer;">
+                        <div style="width:40px; height:40px; border-radius:8px; background-image:url(${f.avatar}); background-size:cover; background-color:#e0e0e0; margin-right:12px;"></div>
+                        <span>${f.name}</span>
+                    </div>
+                `).join('')}
+            </div>
+            <button onclick="this.closest('#invite-friend-modal').remove()" style="margin-top:12px; padding:12px; background:#f0f0f0; color:#666; border:none; border-radius:8px;">取消</button>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// 执行邀请好友
+function doInviteFriend(groupId, friendWx) {
+    const myWx = getMyOnlineWxAccount();
+    onlineSocket.send(JSON.stringify({
+        type: 'invite_to_group',
+        group_id: groupId,
+        my_wx_account: myWx,
+        invite_wx_account: friendWx
+    }));
+    
+    document.getElementById('invite-friend-modal')?.remove();
+    showToast('邀请已发送');
+}
+
+// 设置联机群聊背景图
+async function setOnlineGroupBackground(input) {
     if (!input.files || !input.files[0]) return;
+    
+    const groupId = input.getAttribute('data-group-id') || currentOnlineGroupId;
+    if (!groupId) {
+        showToast('无法获取群聊ID');
+        return;
+    }
     
     const file = input.files[0];
     const reader = new FileReader();
     
-    reader.onload = function(e) {
-        const preview = document.getElementById('profile-avatar-preview');
-        preview.style.backgroundImage = `url(${e.target.result})`;
-        preview.textContent = '';
-        preview.style.backgroundSize = 'cover';
-        preview.dataset.newAvatar = e.target.result;
+    reader.onload = async function(e) {
+        const base64 = e.target.result;
+        const accountId = getCurrentAccountId();
+        if (!accountId) return;
+        
+        try {
+            // 查找对应的本地群聊记录
+            const groups = await db.group_chats
+                .where('ownerAccountId').equals(accountId)
+                .filter(g => g.isOnlineGroup && g.onlineGroupId === groupId)
+                .toArray();
+            
+            if (groups.length > 0) {
+                const group = groups[0];
+                group.chat_background = base64;
+                await db.group_chats.put(group);
+                
+                // 应用背景图
+                applyOnlineGroupBackground(groupId);
+                
+                // 更新预览
+                loadOnlineGroupBackgroundPreview(groupId);
+                
+                showToast('背景图已设置');
+            }
+        } catch (e) {
+            console.error('保存联机群聊背景图失败:', e);
+            showToast('保存失败');
+        }
     };
     
     reader.readAsDataURL(file);
 }
 
-// 保存资料
-async function saveOnlineProfile() {
-    const nickname = document.getElementById('profile-nickname').value.trim();
-    const bio = document.getElementById('profile-bio').value.trim();
-    const preview = document.getElementById('profile-avatar-preview');
-    const newAvatar = preview.dataset.newAvatar;
+// 清除联机群聊背景图
+async function clearOnlineGroupBackground(groupId) {
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
     
     try {
-        const res = await fetch(`${ONLINE_API_BASE}/api/online/profile`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                user_id: onlineUser.id,
-                nickname: nickname || onlineUser.username,
-                bio: bio,
-                avatar: newAvatar || onlineUser.avatar
-            })
-        });
+        // 查找对应的本地群聊记录
+        const groups = await db.group_chats
+            .where('ownerAccountId').equals(accountId)
+            .filter(g => g.isOnlineGroup && g.onlineGroupId === groupId)
+            .toArray();
         
-        if (!res.ok) {
-            const data = await res.json();
-            alert(data.error || '保存失败');
-            return;
+        if (groups.length > 0) {
+            const group = groups[0];
+            group.chat_background = null;
+            await db.group_chats.put(group);
+            
+            // 应用背景图（清除）
+            applyOnlineGroupBackground(groupId);
+            
+            // 更新预览
+            loadOnlineGroupBackgroundPreview(groupId);
+            
+            showToast('背景图已清除');
         }
-        
-        // 更新本地数据
-        onlineUser.nickname = nickname || onlineUser.username;
-        onlineUser.bio = bio;
-        if (newAvatar) onlineUser.avatar = newAvatar;
-        
-        localStorage.setItem('onlineUser', JSON.stringify(onlineUser));
-        updateOnlineUI();
-        
-        hideOnlineProfileEdit();
-        alert('保存成功！');
-        
     } catch (e) {
-        alert('网络错误: ' + e.message);
+        console.error('清除联机群聊背景图失败:', e);
+        showToast('清除失败');
     }
 }
 
-// 页面加载时初始化联机功能
-document.addEventListener('DOMContentLoaded', function() {
-    initOnlineFeature();
-});
-
-// ========== 微信页面 - 添加真人好友功能 ==========
-
-// 获取当前角色档案的虚拟账号信息
-async function getCurrentAccountOnlineInfo() {
-    const accountId = getCurrentAccountId();
-    if (!accountId) return null;
+// 应用联机群聊背景图
+async function applyOnlineGroupBackground(groupId) {
+    const page = document.getElementById('online-group-chat-page');
+    if (!page) return;
     
-    // 获取当前用户角色
-    const users = await db.characters.where('type').equals('user').toArray();
-    for (const user of users) {
-        if (user.identity && user.identity.wechat_registered) {
-            // 检查是否是当前账号
-            if (user.id == accountId || (user.identity.account && user.identity.account === accountId)) {
-                return {
-                    account: user.identity.account,
-                    nickname: user.name,
-                    avatar: user.avatar,
-                    charId: user.id
-                };
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    try {
+        // 查找对应的本地群聊记录
+        const groups = await db.group_chats
+            .where('ownerAccountId').equals(accountId)
+            .filter(g => g.isOnlineGroup && g.onlineGroupId === groupId)
+            .toArray();
+        
+        if (groups.length > 0) {
+            const group = groups[0];
+            if (group.chat_background) {
+                page.style.backgroundImage = `url(${group.chat_background})`;
+                page.style.backgroundSize = 'cover';
+                page.style.backgroundPosition = 'center';
+                page.style.backgroundRepeat = 'no-repeat';
+                page.style.backgroundAttachment = 'fixed';
+            } else {
+                page.style.backgroundImage = '';
+                page.style.backgroundSize = '';
+                page.style.backgroundPosition = '';
+                page.style.backgroundRepeat = '';
+                page.style.backgroundAttachment = '';
+                page.style.backgroundColor = '#ffffff';
+            }
+        }
+    } catch (e) {
+        console.error('应用联机群聊背景图失败:', e);
+    }
+}
+
+// 加载联机群聊背景图预览
+async function loadOnlineGroupBackgroundPreview(groupId) {
+    const preview = document.getElementById('online-group-bg-preview');
+    if (!preview) return;
+    
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    try {
+        // 查找对应的本地群聊记录
+        const groups = await db.group_chats
+            .where('ownerAccountId').equals(accountId)
+            .filter(g => g.isOnlineGroup && g.onlineGroupId === groupId)
+            .toArray();
+        
+        if (groups.length > 0) {
+            const group = groups[0];
+            if (group.chat_background) {
+                preview.style.backgroundImage = `url(${group.chat_background})`;
+                preview.innerHTML = '';
+            } else {
+                preview.style.backgroundImage = '';
+                preview.innerHTML = '暂无背景图';
+            }
+        } else {
+            preview.style.backgroundImage = '';
+            preview.innerHTML = '暂无背景图';
+        }
+    } catch (e) {
+        console.error('加载联机群聊背景图预览失败:', e);
+    }
+}
+
+// ==================== 联机群聊功能结束 ====================
+
+// 将联机相关函数暴露到全局作用域
+window.toggleOnlineSettings = toggleOnlineSettings;
+window.loadOnlineSettings = loadOnlineSettings;
+window.saveOnlineSettings = saveOnlineSettings;
+window.testOnlineConnection = testOnlineConnection;
+window.connectToOnlineServer = connectToOnlineServer;
+window.showOnlineLoginModal = showOnlineLoginModal;
+window.showOnlineRegisterModal = showOnlineRegisterModal;
+window.doOnlineLogin = doOnlineLogin;
+window.doOnlineRegister = doOnlineRegister;
+window.onlineLogout = onlineLogout;
+window.showOnlineSearchModal = showOnlineSearchModal;
+window.doOnlineSearch = doOnlineSearch;
+window.sendOnlineFriendRequest = sendOnlineFriendRequest;
+window.goOnlineWithCharacter = goOnlineWithCharacter;
+window.goOfflineWithCharacter = goOfflineWithCharacter;
+window.showOnlineStatusPage = showOnlineStatusPage;
+window.hideOnlineStatusPage = hideOnlineStatusPage;
+window.updateOnlineFeatureSection = updateOnlineFeatureSection;
+window.refreshOnlineStatusPageContent = refreshOnlineStatusPageContent;
+window.renderOnlineCharList = renderOnlineCharList;
+window.updateOnlineConnectionStatus = updateOnlineConnectionStatus;
+window.manualSyncOnline = manualSyncOnline;
+
+// 联机群聊函数
+window.showCreateOnlineGroupModal = showCreateOnlineGroupModal;
+window.doCreateOnlineGroup = doCreateOnlineGroup;
+window.openOnlineGroup = openOnlineGroup;
+window.hideOnlineGroupChat = hideOnlineGroupChat;
+window.sendOnlineGroupMsg = sendOnlineGroupMsg;
+window.letMyCharacterSpeak = letMyCharacterSpeak;
+window.showOnlineGroupInfo = showOnlineGroupInfo;
+window.showChangeGroupCharacterModal = showChangeGroupCharacterModal;
+window.doChangeGroupCharacter = doChangeGroupCharacter;
+window.inviteFriendToGroup = inviteFriendToGroup;
+window.doInviteFriend = doInviteFriend;
+window.onlineGroupVoiceInput = onlineGroupVoiceInput;
+window.closeOnlineGroupVoiceModal = closeOnlineGroupVoiceModal;
+window.startOnlineGroupVoiceRecord = startOnlineGroupVoiceRecord;
+window.playOnlineGroupAudio = playOnlineGroupAudio;
+window.receiveOnlineGroupTransfer = receiveOnlineGroupTransfer;
+window.doJoinOnlineGroup = doJoinOnlineGroup;
+
+// ============================================
+// 饿美了外卖系统
+// ============================================
+
+// 饿美了数据存储
+let emeiData = {
+    myCoupons: [], // 我的优惠券
+    couponClaimCount: 3, // 今日剩余领取次数
+    lastClaimDate: null, // 上次领取日期
+    currentStore: null, // 当前选中的店铺
+    cart: [], // 购物车
+    selectedRecipient: 'self', // 选中的收货人
+    selectedCoupon: null, // 选中的优惠券
+    selectedPaymentMethod: null // 选中的支付方式
+};
+
+// 默认店铺数据（真实美团风格）
+const defaultStores = [
+    {
+        id: 1,
+        name: '肯德基',
+        description: '炸鸡汉堡 | 配送到家',
+        avatar: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect fill=%22%23E4002B%22 width=%22100%22 height=%22100%22/%3E%3Ctext x=%2250%22 y=%2265%22 font-size=%2240%22 text-anchor=%22middle%22 fill=%22%23fff%22%3EKFC%3C/text%3E%3C/svg%3E',
+        sales: 5234,
+        menu: [
+            { id: 101, name: '香辣鸡腿堡', price: 18, image: '🍔' },
+            { id: 102, name: '原味鸡块', price: 12, image: '🍗' },
+            { id: 103, name: '薯条（大）', price: 13, image: '🍟' },
+            { id: 104, name: '蛋挞（2个）', price: 10, image: '🥧' },
+            { id: 105, name: '可乐（大）', price: 9, image: '🥤' },
+            { id: 106, name: '鸡米花', price: 11, image: '🍿' }
+        ]
+    },
+    {
+        id: 2,
+        name: '麦当劳',
+        description: '汉堡薯条 | 24小时营业',
+        avatar: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect fill=%22%23FFC72C%22 width=%22100%22 height=%22100%22/%3E%3Ctext x=%2250%22 y=%2265%22 font-size=%2235%22 text-anchor=%22middle%22 fill=%22%23DA020E%22%3EM%3C/text%3E%3C/svg%3E',
+        sales: 4892,
+        menu: [
+            { id: 201, name: '巨无霸', price: 25, image: '🍔' },
+            { id: 202, name: '麦辣鸡腿堡', price: 19, image: '🍔' },
+            { id: 203, name: '麦乐鸡块（10块）', price: 20, image: '🍗' },
+            { id: 204, name: '薯条（大）', price: 13, image: '🍟' },
+            { id: 205, name: '麦旋风', price: 15, image: '🍦' },
+            { id: 206, name: '板烧鸡腿堡', price: 22, image: '🍔' }
+        ]
+    }
+];
+
+// 显示饿美了页面
+async function showEmeiPage() {
+    const page = document.getElementById('emei-page');
+    
+    if (page) {
+        page.style.display = 'flex';
+        page.offsetHeight;
+        page.classList.add('active');
+        
+        // 检查是否需要重置每日领取次数
+        resetDailyCouponCount();
+        
+        // 渲染页面
+        renderEmeiMain();
+    }
+}
+
+// 隐藏饿美了页面
+function hideEmeiPage() {
+    const page = document.getElementById('emei-page');
+    
+    if (page) {
+        page.classList.remove('active');
+        setTimeout(() => {
+            page.style.display = 'none';
+        }, 350);
+    }
+    
+    // 返回主视图
+    const mainView = document.getElementById('emei-main-view');
+    const storeView = document.getElementById('emei-store-detail-view');
+    const checkoutView = document.getElementById('emei-checkout-view');
+    
+    if (mainView) mainView.style.display = 'block';
+    if (storeView) storeView.style.display = 'none';
+    if (checkoutView) checkoutView.style.display = 'none';
+}
+
+// 重置每日优惠券领取次数
+function resetDailyCouponCount() {
+    const today = new Date().toDateString();
+    if (emeiData.lastClaimDate !== today) {
+        emeiData.couponClaimCount = 3;
+        emeiData.lastClaimDate = today;
+    }
+    
+    // 更新显示
+    const countEl = document.getElementById('emei-coupon-count');
+    if (countEl) countEl.innerText = emeiData.couponClaimCount;
+}
+
+// 渲染主页
+function renderEmeiMain() {
+    // 更新优惠券领取次数
+    resetDailyCouponCount();
+    
+    // 渲染已领取的优惠券
+    renderMyCoupons();
+    
+    // 渲染店铺列表
+    renderStoreList();
+}
+
+// 渲染已领取的优惠券
+function renderMyCoupons() {
+    const container = document.getElementById('emei-my-coupons');
+    if (!container) return;
+    
+    if (emeiData.myCoupons.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+    
+    container.style.display = 'block';
+    container.innerHTML = `
+        <div style="font-size: 12px; color: #666; margin-bottom: 8px;">我的优惠券</div>
+        <div style="display: flex; gap: 8px; overflow-x: auto;">
+            ${emeiData.myCoupons.map(coupon => `
+                <div style="flex-shrink: 0; padding: 8px 16px; background: linear-gradient(135deg, #fff 0%, #fff9fa 100%); border: 1px solid rgba(255,107,157,0.2); border-radius: 8px; display: flex; flex-direction: column; align-items: center;">
+                    <div style="font-size: 16px; font-weight: 600; color: var(--ins-pink);">${coupon.threshold}减${coupon.amount}</div>
+                    <div style="font-size: 10px; color: #999; margin-top: 2px;">满${coupon.threshold}可用</div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+// 领取优惠券
+function claimEmeiCoupon() {
+    if (emeiData.couponClaimCount <= 0) {
+        alert('今日领取次数已用完，明天再来吧！');
+        return;
+    }
+    
+    // 随机生成优惠券
+    const random = Math.random();
+    let coupon;
+    
+    if (random < 0.7) {
+        // 70%概率：小额优惠券 (20-5)
+        coupon = { threshold: 20, amount: 5, type: 'discount', expireDate: getExpireDate(7) };
+    } else if (random < 0.9) {
+        // 20%概率：中额优惠券 (30-15)
+        coupon = { threshold: 30, amount: 15, type: 'discount', expireDate: getExpireDate(7) };
+    } else {
+        // 10%概率：大额优惠券 (20-15)
+        coupon = { threshold: 20, amount: 15, type: 'discount', expireDate: getExpireDate(7) };
+    }
+    
+    emeiData.myCoupons.push(coupon);
+    emeiData.couponClaimCount--;
+    
+    // 更新显示
+    document.getElementById('emei-coupon-count').innerText = emeiData.couponClaimCount;
+    renderMyCoupons();
+    
+    // 提示
+    alert(`🎉 恭喜领取 ${coupon.threshold}减${coupon.amount} 优惠券！`);
+}
+
+// 获取过期日期
+function getExpireDate(days) {
+    const date = new Date();
+    date.setDate(date.getDate() + days);
+    return date.toLocaleDateString();
+}
+
+// 渲染店铺列表
+function renderStoreList() {
+    const container = document.getElementById('emei-store-list');
+    if (!container) return;
+    
+    container.innerHTML = defaultStores.map(store => `
+        <div onclick="openEmeiStore(${store.id})" style="background: #fff; border-radius: 16px; padding: 16px; margin-bottom: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.04); cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 16px rgba(0,0,0,0.08)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 12px rgba(0,0,0,0.04)'">
+            <div style="display: flex; gap: 12px;">
+                <div style="width: 80px; height: 80px; border-radius: 12px; background-image: url(${store.avatar}); background-size: cover; background-color: #f5f5f5; flex-shrink: 0;"></div>
+                <div style="flex: 1;">
+                    <div style="font-size: 16px; font-weight: 600; color: #333; margin-bottom: 4px;">${store.name}</div>
+                    <div style="font-size: 12px; color: #999; margin-bottom: 8px;">${store.description}</div>
+                    <div style="display: flex; gap: 12px; font-size: 11px; color: #666;">
+                        <span>⭐ 4.8</span>
+                        <span>月售 ${store.sales}+</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+
+// 打开店铺详情
+async function openEmeiStore(storeId) {
+    const store = defaultStores.find(s => s.id === storeId);
+    if (!store) return;
+    
+    emeiData.currentStore = store;
+    emeiData.cart = [];
+    
+    // 切换视图
+    document.getElementById('emei-main-view').style.display = 'none';
+    document.getElementById('emei-store-detail-view').style.display = 'flex';
+    
+    // 渲染店铺信息
+    document.getElementById('emei-store-name').innerText = store.name;
+    document.getElementById('emei-store-title').innerText = store.name;
+    document.getElementById('emei-store-desc').innerText = store.description;
+    document.getElementById('emei-store-sales').innerText = store.sales + '+';
+    document.getElementById('emei-store-avatar').style.backgroundImage = `url(${store.avatar})`;
+    
+    // 渲染菜单
+    renderEmeiMenu();
+    
+    // 渲染收货人选项
+    await renderRecipientOptions();
+    
+    // 更新购物车
+    updateEmeiCart();
+}
+
+// 返回主页
+function backToEmeiMain() {
+    const mainView = document.getElementById('emei-main-view');
+    const storeView = document.getElementById('emei-store-detail-view');
+    const checkoutView = document.getElementById('emei-checkout-view');
+    
+    if (mainView) mainView.style.display = 'block';
+    if (storeView) storeView.style.display = 'none';
+    if (checkoutView) checkoutView.style.display = 'none';
+    emeiData.cart = [];
+}
+
+// 渲染菜单
+function renderEmeiMenu() {
+    const container = document.getElementById('emei-menu-list');
+    if (!container || !emeiData.currentStore) return;
+    
+    container.innerHTML = emeiData.currentStore.menu.map(item => `
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px; background: #fff; border-radius: 12px; margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.04);">
+            <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
+                <div style="width: 60px; height: 60px; background: linear-gradient(135deg, #fff5f7 0%, #ffeef2 100%); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 32px;">${item.image}</div>
+                <div style="flex: 1;">
+                    <div style="font-size: 14px; font-weight: 500; color: #333; margin-bottom: 4px;">${item.name}</div>
+                    <div style="font-size: 16px; font-weight: 600; color: var(--ins-pink);">¥${item.price}</div>
+                </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <div onclick="decreaseEmeiItem(${item.id})" style="width: 28px; height: 28px; border: 1px solid #e5e5e5; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 18px; color: #666;">-</div>
+                <div id="emei-item-count-${item.id}" style="min-width: 20px; text-align: center; font-size: 14px; font-weight: 500;">0</div>
+                <div onclick="increaseEmeiItem(${item.id})" style="width: 28px; height: 28px; background: var(--ins-pink); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 18px; color: #fff;">+</div>
+            </div>
+        </div>
+    `).join('');
+}
+
+// 渲染收货人选项
+async function renderRecipientOptions() {
+    const select = document.getElementById('emei-recipient-select');
+    if (!select) {
+        console.warn('emei-recipient-select 元素不存在');
+        return;
+    }
+    
+    try {
+        // 获取所有角色
+        const characters = await db.characters.toArray();
+        console.log('数据库中所有角色:', characters.length);
+        
+        // 过滤掉系统角色和在线好友，只显示可以配送的角色
+        const availableChars = characters.filter(c => {
+            // 排除系统角色、在线好友等
+            if (c.type === 'system' || c.type === 'online_friend') return false;
+            // 只显示有名字的角色
+            if (!c.name || c.name.trim() === '') return false;
+            return true;
+        });
+        
+        console.log('可用角色:', availableChars.length, availableChars.map(c => c.name));
+        
+        let html = '<option value="self">我自己</option>';
+        availableChars.forEach(char => {
+            const safeName = (char.name || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            html += `<option value="${char.id}">${safeName}</option>`;
+        });
+        
+        select.innerHTML = html;
+        select.value = emeiData.selectedRecipient;
+        
+        console.log('已加载', availableChars.length, '个角色到配送列表');
+    } catch (err) {
+        console.error('加载角色列表失败:', err);
+        select.innerHTML = '<option value="self">我自己</option>';
+    }
+}
+
+// 增加商品数量
+function increaseEmeiItem(itemId) {
+    if (!emeiData.currentStore) return;
+    
+    const item = emeiData.currentStore.menu.find(m => m.id === itemId);
+    if (!item) return;
+    
+    const cartItem = emeiData.cart.find(c => c.id === itemId);
+    if (cartItem) {
+        cartItem.count++;
+    } else {
+        emeiData.cart.push({ ...item, count: 1 });
+    }
+    
+    updateEmeiCart();
+}
+
+// 减少商品数量
+function decreaseEmeiItem(itemId) {
+    const cartItem = emeiData.cart.find(c => c.id === itemId);
+    if (!cartItem) return;
+    
+    cartItem.count--;
+    if (cartItem.count <= 0) {
+        emeiData.cart = emeiData.cart.filter(c => c.id !== itemId);
+    }
+    
+    updateEmeiCart();
+}
+
+// 更新购物车显示
+function updateEmeiCart() {
+    // 更新数量显示
+    if (emeiData.currentStore) {
+        emeiData.currentStore.menu.forEach(item => {
+            const countEl = document.getElementById(`emei-item-count-${item.id}`);
+            if (countEl) {
+                const cartItem = emeiData.cart.find(c => c.id === item.id);
+                countEl.innerText = cartItem ? cartItem.count : 0;
+            }
+        });
+    }
+    
+    // 更新总价
+    const total = emeiData.cart.reduce((sum, item) => sum + item.price * item.count, 0);
+    const totalEl = document.getElementById('emei-total-price');
+    if (totalEl) totalEl.innerText = total.toFixed(2);
+}
+
+// 更新收货人
+function updateEmeiRecipient(value) {
+    emeiData.selectedRecipient = value;
+}
+
+
+// 显示结算页面
+async function showEmeiCheckout() {
+    if (emeiData.cart.length === 0) {
+        alert('购物车是空的，快去选点吃的吧！');
+        return;
+    }
+    
+    const recipientSelect = document.getElementById('emei-recipient-select');
+    emeiData.selectedRecipient = recipientSelect ? recipientSelect.value : 'self';
+    
+    // 切换视图
+    document.getElementById('emei-store-detail-view').style.display = 'none';
+    document.getElementById('emei-checkout-view').style.display = 'flex';
+    
+    // 渲染收货人信息
+    await renderCheckoutRecipient();
+    
+    // 渲染订单详情
+    renderCheckoutItems();
+    
+    // 计算价格
+    calculateCheckoutPrice();
+    
+    // 加载钱包余额
+    await loadEmeiWalletBalance();
+}
+
+// 返回店铺页面
+function backToEmeiStore() {
+    const storeView = document.getElementById('emei-store-detail-view');
+    const checkoutView = document.getElementById('emei-checkout-view');
+    
+    if (storeView) storeView.style.display = 'flex';
+    if (checkoutView) checkoutView.style.display = 'none';
+}
+
+// 渲染收货人信息
+async function renderCheckoutRecipient() {
+    const avatar = document.getElementById('emei-recipient-avatar');
+    const name = document.getElementById('emei-recipient-name');
+    
+    if (emeiData.selectedRecipient === 'self') {
+        name.innerText = '我自己';
+        avatar.style.backgroundImage = 'url(https://api.dicebear.com/7.x/avataaars/svg?seed=self)';
+    } else {
+        const char = await db.characters.get(parseInt(emeiData.selectedRecipient));
+        if (char) {
+            name.innerText = char.name;
+            avatar.style.backgroundImage = `url(${char.avatar})`;
+            avatar.style.backgroundSize = 'cover';
+        }
+    }
+}
+
+// 渲染订单详情
+function renderCheckoutItems() {
+    const container = document.getElementById('emei-checkout-items');
+    if (!container) return;
+    
+    container.innerHTML = emeiData.cart.map(item => `
+        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f5f5f5;">
+            <div style="flex: 1;">
+                <span style="font-size: 14px; color: #333;">${item.name}</span>
+                <span style="font-size: 12px; color: #999; margin-left: 8px;">x${item.count}</span>
+            </div>
+            <div style="font-size: 14px; color: #333;">¥${(item.price * item.count).toFixed(2)}</div>
+        </div>
+    `).join('');
+}
+
+// 计算价格
+function calculateCheckoutPrice() {
+    const subtotal = emeiData.cart.reduce((sum, item) => sum + item.price * item.count, 0);
+    const delivery = 3;
+    let discount = 0;
+    
+    // 计算优惠券折扣
+    if (emeiData.selectedCoupon) {
+        if (subtotal >= emeiData.selectedCoupon.threshold) {
+            discount = emeiData.selectedCoupon.amount;
+        } else {
+            emeiData.selectedCoupon = null;
+            document.getElementById('emei-selected-coupon-text').innerText = '未使用';
+        }
+    }
+    
+    const total = Math.max(subtotal + delivery - discount, 0.01);
+    
+    // 更新显示
+    document.getElementById('emei-checkout-subtotal').innerText = subtotal.toFixed(2);
+    document.getElementById('emei-checkout-delivery').innerText = delivery.toFixed(2);
+    document.getElementById('emei-checkout-total').innerText = total.toFixed(2);
+    
+    if (discount > 0) {
+        document.getElementById('emei-checkout-discount').innerText = discount.toFixed(2);
+        document.getElementById('emei-checkout-discount-row').style.display = 'flex';
+    } else {
+        document.getElementById('emei-checkout-discount-row').style.display = 'none';
+    }
+}
+
+// 选择优惠券
+function selectEmeiCoupon() {
+    const modal = document.getElementById('emei-coupon-modal');
+    const list = document.getElementById('emei-coupon-list');
+    
+    if (!modal || !list) return;
+    
+    const subtotal = emeiData.cart.reduce((sum, item) => sum + item.price * item.count, 0);
+    
+    if (emeiData.myCoupons.length === 0) {
+        alert('暂无可用优惠券');
+        return;
+    }
+    
+    list.innerHTML = emeiData.myCoupons.map((coupon, index) => {
+        const canUse = subtotal >= coupon.threshold;
+        return `
+            <div onclick="${canUse ? `useEmeiCoupon(${index})` : ''}" style="padding: 16px; background: ${canUse ? '#fff' : '#f5f5f5'}; border: 2px solid ${emeiData.selectedCoupon === coupon ? 'var(--ins-pink)' : '#e5e5e5'}; border-radius: 12px; margin-bottom: 12px; cursor: ${canUse ? 'pointer' : 'not-allowed'}; opacity: ${canUse ? '1' : '0.5'};">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <div style="font-size: 18px; font-weight: 600; color: var(--ins-pink);">${coupon.threshold}减${coupon.amount}</div>
+                        <div style="font-size: 12px; color: #999; margin-top: 4px;">满${coupon.threshold}可用 | 有效期至${coupon.expireDate}</div>
+                    </div>
+                    ${canUse ? `<svg width="20" height="20" fill="${emeiData.selectedCoupon === coupon ? 'var(--ins-pink)' : '#ccc'}" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>` : '<span style="font-size: 11px; color: #999;">不可用</span>'}
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    modal.style.display = 'flex';
+}
+
+// 使用优惠券
+function useEmeiCoupon(index) {
+    emeiData.selectedCoupon = emeiData.myCoupons[index];
+    document.getElementById('emei-selected-coupon-text').innerText = `${emeiData.selectedCoupon.threshold}减${emeiData.selectedCoupon.amount}`;
+    closeEmeiCouponModal();
+    calculateCheckoutPrice();
+}
+
+// 关闭优惠券弹窗
+function closeEmeiCouponModal() {
+    const modal = document.getElementById('emei-coupon-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+// 加载钱包余额
+async function loadEmeiWalletBalance() {
+    const accountId = getCurrentAccountId();
+    let balance = 0;
+    
+    try {
+        // 🔧 从当前登录角色的 identity.balance 获取余额
+        if (accountId) {
+            const myChar = await db.characters.get(parseInt(accountId));
+            if (myChar && myChar.identity) {
+                balance = parseFloat(myChar.identity.balance || 0);
+            }
+        }
+    } catch (err) {
+        console.error('加载钱包余额失败:', err);
+    }
+    
+    const balanceEl = document.getElementById('emei-wallet-balance');
+    if (balanceEl) balanceEl.innerText = balance.toFixed(2);
+    
+    // 加载亲属卡信息
+    await loadFamilyCardInfo();
+}
+
+// 加载亲属卡信息
+async function loadFamilyCardInfo() {
+    const info = document.getElementById('emei-family-card-info');
+    if (!info) return;
+    
+    try {
+        // 🔧 使用当前账号角色收到的亲属卡
+        const myCharId = parseInt(currentMyCharId);
+        const myChar = myCharId ? await db.characters.get(myCharId) : null;
+        const cards = myChar?.identity?.familyCardsReceived || [];
+        
+        if (cards.length > 0) {
+            const card = cards[0];
+            info.innerText = `来自 ${card.fromName}`;
+        } else {
+            info.innerText = '未绑定';
+        }
+    } catch (err) {
+        info.innerText = '未绑定';
+    }
+}
+
+
+// 显示支付方式弹窗
+async function showEmeiPaymentModal() {
+    const modal = document.getElementById('emei-payment-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+        emeiData.selectedPaymentMethod = null;
+        
+        // 清除所有选中状态
+        document.querySelectorAll('.emei-payment-option').forEach(opt => {
+            opt.style.borderColor = '#f0f0f0';
+        });
+        document.querySelectorAll('input[name="emei-payment"]').forEach(input => {
+            input.checked = false;
+        });
+        
+        // 🔧 获取当前账号的余额（从角色的identity.balance获取）
+        const accountId = getCurrentAccountId();
+        let balance = 0;
+        if (accountId) {
+            const myChar = await db.characters.get(parseInt(accountId));
+            if (myChar && myChar.identity) {
+                balance = parseFloat(myChar.identity.balance || 0);
+            }
+        }
+        const balanceEl = document.getElementById('emei-wallet-balance');
+        if (balanceEl) balanceEl.textContent = balance.toFixed(2);
+        
+        // 🔧 获取当前账号的亲属卡
+        const myCharId = parseInt(currentMyCharId);
+        const myChar = myCharId ? await db.characters.get(myCharId) : null;
+        const familyCards = myChar?.identity?.familyCardsReceived || [];
+        const familyCardEl = document.getElementById('emei-family-card-info');
+        if (familyCardEl) {
+            if (familyCards.length > 0) {
+                const card = familyCards[0]; // 使用第一张亲属卡
+                familyCardEl.textContent = `来自 ${card.fromName}`;
+            } else {
+                familyCardEl.textContent = '未绑定';
             }
         }
     }
-    
-    // 如果找不到，尝试直接用accountId查找
-    const char = await db.characters.get(parseInt(accountId));
-    if (char && char.identity && char.identity.account) {
-        return {
-            account: char.identity.account,
-            nickname: char.name,
-            avatar: char.avatar,
-            charId: char.id
-        };
-    }
-    
-    return null;
 }
 
-// 显示添加真人好友模态框
-async function showAddRealFriendModal() {
-    toggleWechatMenu(); // 关闭菜单
-    document.getElementById('add-real-friend-modal').style.display = 'flex';
+// 关闭支付方式弹窗
+function closeEmeiPaymentModal() {
+    const modal = document.getElementById('emei-payment-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+// 选择支付方式
+function selectEmeiPaymentMethod(method) {
+    emeiData.selectedPaymentMethod = method;
     
-    const loginCheck = document.getElementById('real-friend-login-check');
-    const searchArea = document.getElementById('real-friend-search-area');
+    // 更新选中状态
+    document.querySelectorAll('.emei-payment-option').forEach(opt => {
+        opt.style.borderColor = '#f0f0f0';
+    });
+    document.querySelectorAll('input[name="emei-payment"]').forEach(input => {
+        input.checked = input.value === method;
+        if (input.checked) {
+            input.closest('.emei-payment-option').style.borderColor = 'var(--ins-pink)';
+        }
+    });
+}
+
+// 确认支付
+async function confirmEmeiPayment() {
+    if (!emeiData.selectedPaymentMethod) {
+        alert('请选择支付方式');
+        return;
+    }
     
-    // 获取当前账号的虚拟账号信息
-    const currentAccountInfo = await getCurrentAccountOnlineInfo();
+    const subtotal = emeiData.cart.reduce((sum, item) => sum + item.price * item.count, 0);
+    const delivery = 3;
+    const discount = emeiData.selectedCoupon ? emeiData.selectedCoupon.amount : 0;
+    const total = subtotal + delivery - discount;
     
-    if (!currentAccountInfo || !currentAccountInfo.account) {
-        loginCheck.innerHTML = `
-            <div style="text-align:center; padding:20px;">
-                <div style="font-size:48px; margin-bottom:16px;">⚠️</div>
-                <div style="font-size:15px; color:#666; margin-bottom:16px;">当前角色档案未设置虚拟账号<br>请先在角色档案中设置虚拟账号</div>
-            </div>
-        `;
-        searchArea.style.display = 'none';
-    } else if (!onlineUser || onlineUser.wechat_id !== currentAccountInfo.account) {
-        // 当前账号未注册联机或不是当前登录的联机账号
-        loginCheck.innerHTML = `
-            <div style="text-align:center; padding:20px;">
-                <div style="font-size:48px; margin-bottom:16px;">🔐</div>
-                <div style="font-size:14px; color:#666; margin-bottom:8px;">当前账号：<strong>${currentAccountInfo.account}</strong></div>
-                <div style="font-size:15px; color:#666; margin-bottom:16px;">需要先为此账号开通联机功能</div>
-                <button onclick="hideAddRealFriendModal(); showSettingPage(); setTimeout(toggleOnlineSettings, 300);" 
-                        style="padding:12px 24px; border:none; border-radius:8px; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:#fff; font-size:15px; cursor:pointer;">
-                    去开通联机
-                </button>
-            </div>
-        `;
-        searchArea.style.display = 'none';
+    closeEmeiPaymentModal();
+    
+    // 根据不同支付方式处理
+    if (emeiData.selectedPaymentMethod === 'wallet') {
+        await payWithWallet(total);
+    } else if (emeiData.selectedPaymentMethod === 'family') {
+        await payWithFamilyCard(total);
+    } else if (emeiData.selectedPaymentMethod === 'request') {
+        await requestPayment(total);
+    }
+}
+
+// 零钱支付
+async function payWithWallet(amount) {
+    const accountId = getCurrentAccountId();
+    if (!accountId) {
+        alert('请先登录账号');
+        return;
+    }
+    
+    // 🔧 从当前登录角色的 identity.balance 获取余额
+    const myChar = await db.characters.get(parseInt(accountId));
+    if (!myChar) {
+        alert('账号数据异常');
+        return;
+    }
+    
+    if (!myChar.identity) myChar.identity = {};
+    const balance = parseFloat(myChar.identity.balance || 0);
+    
+    if (balance < amount) {
+        alert('余额不足，请选择其他支付方式');
+        return;
+    }
+    
+    // 扣款
+    myChar.identity.balance = (balance - amount).toFixed(2);
+    await db.characters.put(myChar);
+    
+    // 发送订单卡片
+    await sendEmeiOrderCard();
+    
+    alert('支付成功！');
+    
+    // 🔧 如果是给自己点单，询问是否分享给好友
+    if (emeiData.selectedRecipient === 'self') {
+        showShareOrderModal(amount);
     } else {
-        loginCheck.innerHTML = `
-            <div style="display:flex; align-items:center; padding:12px; background:#f5f5f5; border-radius:8px; margin-bottom:16px;">
-                <div style="width:36px; height:36px; border-radius:50%; background:${currentAccountInfo.avatar ? `url(${currentAccountInfo.avatar}) center/cover` : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'}; margin-right:10px; display:flex; align-items:center; justify-content:center; color:#fff;">${currentAccountInfo.avatar ? '' : '👤'}</div>
-                <div>
-                    <div style="font-size:14px; font-weight:500;">${currentAccountInfo.nickname}</div>
-                    <div style="font-size:12px; color:#667eea;">虚拟账号: ${currentAccountInfo.account}</div>
-                </div>
+        hideEmeiPage();
+    }
+}
+
+// 亲属卡支付
+async function payWithFamilyCard(amount) {
+    // 🔧 使用当前账号角色收到的亲属卡
+    const myCharId = parseInt(currentMyCharId);
+    const myChar = myCharId ? await db.characters.get(myCharId) : null;
+    const cards = myChar?.identity?.familyCardsReceived || [];
+    
+    if (cards.length === 0) {
+        alert('未绑定亲属卡，请先绑定');
+        return;
+    }
+    
+    // 使用第一张亲属卡
+    const card = cards[0];
+    
+    // 扣款逻辑（这里简化处理）
+    // 实际应该从卡主账户扣款
+    
+    // 发送订单卡片和通知
+    await sendEmeiOrderCard();
+    
+    alert('支付成功！已使用亲属卡支付');
+    hideEmeiPage();
+}
+
+// 申请代付
+async function requestPayment(amount) {
+    // 获取代付对象（可以选择任意角色）
+    const allCharacters = await db.characters.toArray();
+    const availableChars = allCharacters.filter(c => {
+        if (c.type === 'system' || c.type === 'online_friend') return false;
+        if (!c.name || c.name.trim() === '') return false;
+        return true;
+    });
+    
+    if (availableChars.length === 0) {
+        alert('没有可选择的代付对象');
+        return;
+    }
+    
+    // 弹出选择代付对象的弹窗
+    const modal = document.createElement('div');
+    modal.id = 'emei-payment-request-modal';
+    modal.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; display:flex; align-items:center; justify-content:center;';
+    
+    modal.innerHTML = `
+        <div style="background:#fff; border-radius:16px; padding:20px; width:80%; max-width:350px; max-height:60vh; display:flex; flex-direction:column;">
+            <h3 style="margin:0 0 16px 0; text-align:center; font-size:16px; font-weight:600;">选择代付对象</h3>
+            <div style="flex:1; overflow-y:auto; margin-bottom:16px;">
+                ${availableChars.map(char => `
+                    <div onclick="selectPaymentRequestTarget(${char.id}, '${char.name.replace(/'/g, "\\'")}')" style="display:flex; align-items:center; padding:12px; border-bottom:1px solid #f5f5f5; cursor:pointer; transition:background 0.2s;" onmouseover="this.style.background='#f8f8f8'" onmouseout="this.style.background='#fff'">
+                        <div style="width:40px; height:40px; border-radius:50%; background-image:url(${char.avatar || ''}); background-size:cover; background-color:#e0e0e0; margin-right:12px; flex-shrink:0;"></div>
+                        <span style="font-size:14px; color:#333;">${char.name}</span>
+                    </div>
+                `).join('')}
             </div>
-        `;
-        searchArea.style.display = 'block';
-        document.getElementById('real-friend-search-input').value = '';
-        document.getElementById('real-friend-search-result').innerHTML = '<div style="text-align:center; color:#999; font-size:14px; padding:20px;">输入对方角色档案的虚拟账号</div>';
-    }
-}
-
-function hideAddRealFriendModal() {
-    document.getElementById('add-real-friend-modal').style.display = 'none';
-}
-
-// 搜索真人好友
-async function searchRealFriend() {
-    const account = document.getElementById('real-friend-search-input').value.trim();
-    const resultDiv = document.getElementById('real-friend-search-result');
-    
-    if (!account) {
-        resultDiv.innerHTML = '<div style="text-align:center; color:#ff3b30; padding:20px;">请输入虚拟账号</div>';
-        return;
-    }
-    
-    if (!onlineUser) {
-        resultDiv.innerHTML = '<div style="text-align:center; color:#ff3b30; padding:20px;">请先登录联机账号</div>';
-        return;
-    }
-    
-    resultDiv.innerHTML = '<div style="text-align:center; color:#07c160; padding:20px;">搜索中...</div>';
-    
-    try {
-        const res = await fetch(`${ONLINE_API_BASE}/api/online/search?wechat_id=${encodeURIComponent(account)}&current_user_id=${onlineUser.id}`);
-        const data = await res.json();
-        
-        if (!res.ok) {
-            resultDiv.innerHTML = `<div style="text-align:center; color:#ff3b30; padding:20px;">${data.error || '未找到用户'}</div>`;
-            return;
-        }
-        
-        const user = data.user;
-        let actionBtn = '';
-        
-        // 检查是否是自己的账号
-        if (user.wechat_id === onlineUser.wechat_id) {
-            actionBtn = '<span style="color:#999;">这是你自己的账号</span>';
-        } else if (user.is_friend) {
-            const nickname = (user.nickname || user.username || '').replace(/'/g, "\\'").replace(/"/g, '\\"');
-            const avatar = (user.avatar || '').replace(/'/g, "\\'").replace(/"/g, '\\"');
-            actionBtn = `<button onclick="hideAddRealFriendModal(); openRealFriendChat(${user.id}, '${nickname}', '${avatar}')" style="padding:8px 16px; border:none; border-radius:6px; background:#07c160; color:#fff; cursor:pointer;">发消息</button>`;
-        } else if (user.has_pending_request) {
-            actionBtn = '<span style="color:#999;">已发送请求</span>';
-        } else {
-            actionBtn = `<button onclick="sendRealFriendRequest(${user.id})" style="padding:8px 16px; border:none; border-radius:6px; background:#07c160; color:#fff; cursor:pointer;">添加好友</button>`;
-        }
-        
-        resultDiv.innerHTML = `
-            <div style="display:flex; align-items:center; padding:14px; background:#f9f9f9; border-radius:10px;">
-                <div style="width:48px; height:48px; border-radius:50%; background:${user.avatar ? `url(${user.avatar}) center/cover` : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'}; display:flex; align-items:center; justify-content:center; color:#fff; margin-right:12px;">${user.avatar ? '' : '👤'}</div>
-                <div style="flex:1;">
-                    <div style="font-size:15px; font-weight:500;">${user.nickname || user.username}</div>
-                    <div style="font-size:12px; color:#667eea;">虚拟账号: ${user.wechat_id}</div>
-                </div>
-                <div>${actionBtn}</div>
-            </div>
-        `;
-        
-    } catch (e) {
-        console.error('搜索失败:', e);
-        resultDiv.innerHTML = `<div style="text-align:center; color:#ff3b30; padding:20px;">网络错误: ${e.message}</div>`;
-    }
-}
-
-// 发送真人好友请求
-async function sendRealFriendRequest(toUserId) {
-    if (!onlineUser) {
-        alert('请先登录联机账号');
-        return;
-    }
-    
-    try {
-        const res = await fetch(`${ONLINE_API_BASE}/api/online/friend_request`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ from_user_id: onlineUser.id, to_user_id: toUserId })
-        });
-        
-        const data = await res.json();
-        
-        if (!res.ok) {
-            alert(data.error || '发送失败');
-            return;
-        }
-        
-        if (data.status === 'accepted') {
-            alert(data.message);
-            hideAddRealFriendModal();
-            // 刷新聊天列表
-            const container = document.getElementById('wechat-content');
-            if (container) renderWechatList(container);
-        } else {
-            alert('好友请求已发送！等待对方同意');
-            searchRealFriend(); // 刷新显示
-        }
-        
-    } catch (e) {
-        alert('网络错误: ' + e.message);
-    }
-}
-
-// 当前真人聊天好友信息
-let currentRealFriendId = null;
-let currentRealFriendInfo = null;
-
-// 打开真人好友聊天（使用和AI聊天一样的窗口）
-async function openRealFriendChat(friendId, nickname, avatar) {
-    // 清除AI聊天状态
-    currentChatCharId = null;
-    window.currentGroupChatId = null;
-    
-    // 设置真人聊天状态
-    currentRealFriendId = friendId;
-    currentRealFriendInfo = { id: friendId, nickname, avatar };
-    
-    // 设置标题
-    const titleEl = document.getElementById('chat-title');
-    titleEl.innerText = nickname || '聊天';
-    titleEl.style.cursor = 'default';
-    titleEl.onclick = null;
-    
-    // 显示聊天窗口
-    document.getElementById('chat-window').style.display = 'flex';
-    
-    // 显示输入框
-    const chatFooter = document.getElementById('chat-footer');
-    chatFooter.style.display = 'flex';
-    
-    // 隐藏AI相关的按钮（魔法棒等）
-    const magicBtn = chatFooter.querySelector('.chat-icon-btn');
-    if (magicBtn) magicBtn.style.display = 'none';
-    
-    // 渲染真人聊天记录
-    await renderRealFriendChatBody();
-}
-
-// 渲染真人好友聊天记录
-async function renderRealFriendChatBody() {
-    const chatBody = document.getElementById('chat-body');
-    chatBody.innerHTML = '<div style="text-align:center; color:#999; padding:40px;">加载中...</div>';
-    
-    if (!currentRealFriendId || !onlineUser) {
-        chatBody.innerHTML = '<div style="text-align:center; color:#999; padding:40px;">加载失败</div>';
-        return;
-    }
-    
-    try {
-        const res = await fetch(`${ONLINE_API_BASE}/api/online/messages?user_id=${onlineUser.id}&friend_id=${currentRealFriendId}&limit=100`);
-        const data = await res.json();
-        
-        if (!data.messages || data.messages.length === 0) {
-            chatBody.innerHTML = '<div style="text-align:center; color:#999; padding:40px; font-size:14px;">暂无消息，发送第一条消息开始聊天吧！</div>';
-            return;
-        }
-        
-        chatBody.innerHTML = '';
-        
-        data.messages.forEach(msg => {
-            const isMe = msg.from_user_id == onlineUser.id;
-            const msgDiv = document.createElement('div');
-            msgDiv.className = `message-row ${isMe ? 'self' : 'other'}`;
-            
-            // 使用和AI聊天一样的样式
-            const avatarUrl = isMe ? (onlineUser.avatar || '') : (currentRealFriendInfo.avatar || '');
-            const avatarStyle = avatarUrl ? `background-image:url(${avatarUrl})` : 'background:linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
-            
-            msgDiv.innerHTML = `
-                <div class="message-avatar" style="${avatarStyle}; background-size:cover; background-position:center;"></div>
-                <div class="message-content ${isMe ? 'user-bubble' : 'ai-bubble'}">${msg.content}</div>
-            `;
-            
-            chatBody.appendChild(msgDiv);
-        });
-        
-        // 滚动到底部
-        chatBody.scrollTop = chatBody.scrollHeight;
-        
-    } catch (e) {
-        chatBody.innerHTML = `<div style="text-align:center; color:#ff3b30; padding:40px;">加载失败: ${e.message}</div>`;
-    }
-}
-
-// 发送真人聊天消息
-async function sendRealFriendMessage(content) {
-    if (!content || !currentRealFriendId || !onlineUser) return;
-    
-    // 立即显示到界面
-    const chatBody = document.getElementById('chat-body');
-    
-    // 移除空状态提示
-    const emptyTip = chatBody.querySelector('div[style*="暂无消息"]');
-    if (emptyTip) chatBody.innerHTML = '';
-    
-    const msgDiv = document.createElement('div');
-    msgDiv.className = 'message-row self';
-    
-    const avatarUrl = onlineUser.avatar || '';
-    const avatarStyle = avatarUrl ? `background-image:url(${avatarUrl})` : 'background:linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
-    
-    msgDiv.innerHTML = `
-        <div class="message-avatar" style="${avatarStyle}; background-size:cover; background-position:center;"></div>
-        <div class="message-content user-bubble">${content}</div>
+            <button onclick="this.closest('#emei-payment-request-modal').remove()" style="padding:12px; background:#f0f0f0; color:#666; border:none; border-radius:8px; font-size:14px; cursor:pointer;">取消</button>
+        </div>
     `;
     
-    chatBody.appendChild(msgDiv);
-    chatBody.scrollTop = chatBody.scrollHeight;
-    
-    // 发送到后端
-    try {
-        await fetch(`${ONLINE_API_BASE}/api/online/message`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                from_user_id: onlineUser.id,
-                to_user_id: currentRealFriendId,
-                content: content
-            })
-        });
-    } catch (e) {
-        console.error('发送消息失败:', e);
-    }
+    document.body.appendChild(modal);
 }
 
-// ========== 混合群聊功能 ==========
-
-// 当前混合群聊状态
-window.currentMixedGroupId = null;
-window.currentMixedGroupInfo = null;
-let mixedGroupStep = 1;
-let selectedMixedFriends = [];
-let selectedMixedChar = null;
-let pendingMixedGroupInvite = null;
-
-// 显示创建混合群聊弹窗
-async function showCreateMixedGroupModal() {
-    toggleWechatMenu(); // 关闭菜单
+// 选择代付对象
+async function selectPaymentRequestTarget(charId, charName) {
+    const modal = document.getElementById('emei-payment-request-modal');
+    if (modal) modal.remove();
     
-    // 检查是否登录联机账号
-    if (!onlineUser) {
-        alert('请先在设置中登录联机账号才能创建联机群聊');
+    const recipient = await db.characters.get(charId);
+    if (!recipient) {
+        alert('角色信息不存在');
         return;
     }
     
-    // 获取当前账号信息
-    const currentAccountInfo = await getCurrentAccountOnlineInfo();
-    if (!currentAccountInfo || !currentAccountInfo.account) {
-        alert('当前角色档案未设置虚拟账号');
-        return;
+    const subtotal = emeiData.cart.reduce((sum, item) => sum + item.price * item.count, 0);
+    const delivery = 3;
+    const discount = emeiData.selectedCoupon ? emeiData.selectedCoupon.amount : 0;
+    const total = subtotal + delivery - discount;
+    
+    // 发送代付请求卡片到聊天
+    await sendPaymentRequestCard(recipient, total);
+    
+    // 获取收货人信息用于显示
+    let recipientName = '我自己';
+    if (emeiData.selectedRecipient !== 'self') {
+        const recipientChar = await db.characters.get(parseInt(emeiData.selectedRecipient));
+        if (recipientChar) recipientName = recipientChar.name;
     }
     
-    if (onlineUser.wechat_id !== currentAccountInfo.account) {
-        alert('当前角色档案与联机账号不匹配，请切换到对应的角色档案');
-        return;
-    }
-    
-    // 重置状态
-    mixedGroupStep = 1;
-    selectedMixedFriends = [];
-    selectedMixedChar = null;
-    
-    document.getElementById('create-mixed-group-modal').style.display = 'flex';
-    document.getElementById('mixed-group-name-input').value = '';
-    document.getElementById('mixed-group-step1').style.display = 'flex';
-    document.getElementById('mixed-group-step2').style.display = 'none';
-    document.getElementById('mixed-step-1').style.background = 'var(--ins-pink)';
-    document.getElementById('mixed-step-2').style.background = '#ddd';
-    document.getElementById('mixed-group-next-btn').textContent = '下一步';
-    
-    // 加载真人好友列表
-    await loadMixedGroupFriends();
+    alert(`已向 ${charName} 发送代付请求\n订单详情：${emeiData.currentStore.name}，收货人：${recipientName}`);
+    hideEmeiPage();
 }
 
-// 加载真人好友列表
-async function loadMixedGroupFriends() {
-    const listEl = document.getElementById('mixed-group-friends-list');
-    
-    if (!onlineUser) {
-        listEl.innerHTML = '<div style="text-align:center; color:#999; padding:40px;">请先登录联机账号</div>';
+// 发送订单卡片到聊天
+async function sendEmeiOrderCard() {
+    // 如果是给自己点单，且没有打开聊天，不发送卡片
+    if (emeiData.selectedRecipient === 'self' && !currentChatCharId) {
         return;
     }
     
-    try {
-        const res = await fetch(`${ONLINE_API_BASE}/api/online/friends?user_id=${onlineUser.id}`);
-        const data = await res.json();
-        
-        if (!data.friends || data.friends.length === 0) {
-            listEl.innerHTML = `
-                <div style="text-align:center; color:#999; padding:40px;">
-                    暂无真人好友<br>
-                    <span style="font-size:12px;">请先添加真人好友再创建联机群聊</span>
-                </div>
-            `;
-            return;
-        }
-        
-        listEl.innerHTML = data.friends.map(friend => `
-            <div class="friend-select-item" data-id="${friend.id}" onclick="toggleMixedFriend(${friend.id}, this)" 
-                 style="display:flex; align-items:center; padding:12px; margin-bottom:8px; border-radius:10px; background:#f9f9f9; cursor:pointer; transition:all 0.2s;">
-                <div style="width:42px; height:42px; border-radius:50%; background:${friend.avatar ? `url(${friend.avatar}) center/cover` : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'}; margin-right:12px; display:flex; align-items:center; justify-content:center; color:#fff;">${friend.avatar ? '' : '👤'}</div>
-                <div style="flex:1;">
-                    <div style="font-size:15px; font-weight:500;">${friend.nickname || friend.username}</div>
-                    <div style="font-size:12px; color:#667eea;">${friend.wechat_id || ''}</div>
-                </div>
-                <div class="check-mark" style="width:24px; height:24px; border-radius:50%; border:2px solid #ddd; display:flex; align-items:center; justify-content:center; transition:all 0.2s;">
-                    <svg style="width:14px; height:14px; stroke:#fff; stroke-width:3; fill:none; opacity:0;" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                </div>
-            </div>
-        `).join('');
-        
-    } catch (e) {
-        console.error('加载好友列表失败:', e);
-        listEl.innerHTML = '<div style="text-align:center; color:#ff3b30; padding:40px;">加载失败</div>';
-    }
-}
-
-// 切换选中好友
-function toggleMixedFriend(friendId, el) {
-    const index = selectedMixedFriends.indexOf(friendId);
-    const checkMark = el.querySelector('.check-mark');
-    const svg = checkMark.querySelector('svg');
+    const accountId = getCurrentAccountId();
+    let chatCharId;
     
-    if (index > -1) {
-        selectedMixedFriends.splice(index, 1);
-        el.style.background = '#f9f9f9';
-        checkMark.style.background = 'transparent';
-        checkMark.style.borderColor = '#ddd';
-        svg.style.opacity = '0';
+    // 如果是给角色点单，发送到该角色的聊天
+    if (emeiData.selectedRecipient !== 'self') {
+        chatCharId = parseInt(emeiData.selectedRecipient);
     } else {
-        selectedMixedFriends.push(friendId);
-        el.style.background = '#fff5f7';
-        checkMark.style.background = 'var(--ins-pink)';
-        checkMark.style.borderColor = 'var(--ins-pink)';
-        svg.style.opacity = '1';
+        // 给自己点单，发送到当前打开的聊天
+        chatCharId = currentChatCharId;
+    }
+    
+    if (!chatCharId) return;
+    
+    const char = await db.characters.get(chatCharId);
+    if (!char) return;
+    
+    // 构建订单信息
+    const orderInfo = {
+        store: emeiData.currentStore.name,
+        items: emeiData.cart.map(item => `${item.name} x${item.count}`).join('、'),
+        total: (emeiData.cart.reduce((sum, item) => sum + item.price * item.count, 0) + 3 - (emeiData.selectedCoupon ? emeiData.selectedCoupon.amount : 0)).toFixed(2),
+        recipient: emeiData.selectedRecipient === 'self' ? '我自己' : char.name
+    };
+    
+    // 🔧 紧凑卡片样式（无换行，避免white-space问题）
+    const cardHtml = `<div style="width:100%;background:linear-gradient(135deg,#fff5f7 0%,#ffeef2 100%);border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,0.06);box-sizing:border-box;"><div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;"><span style="font-size:16px;">🍔</span><span style="font-size:13px;font-weight:600;color:#333;">饿美了订单</span></div><div style="font-size:12px;color:#666;line-height:1.5;"><div style="margin-bottom:4px;"><span style="color:#999;">店铺：</span>${orderInfo.store}</div><div style="margin-bottom:4px;"><span style="color:#999;">商品：</span>${orderInfo.items}</div><div style="margin-top:6px;"><span style="color:#999;">总计：</span><span style="font-size:14px;font-weight:600;color:#FF6B9D;">¥${orderInfo.total}</span></div></div></div>`;
+    
+    // 🔧 使用按账号隔离的聊天记录（accountId 已在函数开头声明）
+    let history = getChatHistory(char, accountId);
+    history.push({
+        role: 'user',
+        content: `[emei_order]${cardHtml}`,
+        time: Date.now()
+    });
+    await setChatHistory(char, accountId, history);
+    
+    // 如果当前在该聊天窗口，刷新显示
+    if (currentChatCharId === chatCharId) {
+        renderChatBody(char);
+    } else if (emeiData.selectedRecipient !== 'self') {
+        // 给角色点单，即使没打开聊天窗口也提示用户
+        alert(`订单已发送给 ${char.name}！可以在聊天中查看订单详情。`);
     }
 }
 
-// 下一步/创建
-async function mixedGroupNextStep() {
-    if (mixedGroupStep === 1) {
-        // 验证是否选择了好友
-        if (selectedMixedFriends.length === 0) {
-            alert('请至少选择一个真人好友');
-            return;
-        }
-        
-        // 切换到步骤2
-        mixedGroupStep = 2;
-        document.getElementById('mixed-group-step1').style.display = 'none';
-        document.getElementById('mixed-group-step2').style.display = 'flex';
-        document.getElementById('mixed-step-1').style.background = '#ddd';
-        document.getElementById('mixed-step-2').style.background = 'var(--ins-pink)';
-        document.getElementById('mixed-group-next-btn').textContent = '创建群聊';
-        
-        // 加载角色列表
-        await loadMixedGroupChars();
-        
-    } else {
-        // 验证是否选择了角色
-        if (!selectedMixedChar) {
-            alert('请选择一个角色');
-            return;
-        }
-        
-        // 创建群聊
-        await createMixedGroup();
+// 发送代付请求卡片
+async function sendPaymentRequestCard(recipient, amount) {
+    if (!recipient) return;
+    
+    // 获取收货人信息
+    let recipientName = '我自己';
+    if (emeiData.selectedRecipient !== 'self') {
+        const recipientChar = await db.characters.get(parseInt(emeiData.selectedRecipient));
+        if (recipientChar) recipientName = recipientChar.name;
+    }
+    
+    // 🔧 紧凑卡片样式（无换行，避免white-space问题）
+    const storeName = emeiData.currentStore.name;
+    const itemNames = emeiData.cart.map(i => i.name).join('、');
+    const cardHtml = `<div style="width:100%;background:linear-gradient(135deg,#fff9e6 0%,#fff5e6 100%);border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,0.06);box-sizing:border-box;"><div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;"><span style="font-size:16px;">💰</span><span style="font-size:13px;font-weight:600;color:#333;">代付请求</span></div><div style="font-size:12px;color:#666;line-height:1.5;"><div style="margin-bottom:6px;color:#888;">帮我付一下外卖~</div><div style="padding:10px;background:rgba(255,255,255,0.8);border-radius:6px;"><div style="margin-bottom:4px;"><span style="color:#999;">店铺：</span>${storeName}</div><div style="margin-bottom:4px;"><span style="color:#999;">商品：</span>${itemNames}</div><div style="margin-top:6px;font-size:14px;font-weight:600;color:#ff9500;">¥${amount.toFixed(2)}</div></div></div><div onclick="handlePaymentRequest(this)" style="margin-top:10px;padding:10px;background:linear-gradient(135deg,#ff9500 0%,#ffb300 100%);color:#fff;text-align:center;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">立即支付</div></div>`;
+    
+    // 🔧 使用按账号隔离的聊天记录
+    const accountId = getCurrentAccountId();
+    let history = getChatHistory(recipient, accountId);
+    history.push({
+        role: 'user',
+        content: `[payment_request]${cardHtml}`,
+        time: Date.now()
+    });
+    await setChatHistory(recipient, accountId, history);
+    
+    if (currentChatCharId === recipient.id) {
+        renderChatBody(recipient);
     }
 }
 
-// 加载角色列表（排除user类型）
-async function loadMixedGroupChars() {
-    const listEl = document.getElementById('mixed-group-char-list');
+// 处理代付请求（角色点击支付按钮）
+async function handlePaymentRequest(btn) {
+    // 这里可以添加角色支付的逻辑
+    alert('该功能需要角色确认支付');
+    btn.innerText = '已支付';
+    btn.style.background = '#ccc';
+    btn.onclick = null;
+}
+
+// 🔧 显示分享订单弹窗（给自己点单后可以分享给好友）
+async function showShareOrderModal(amount) {
+    const allCharacters = await db.characters.toArray();
+    const accountId = getCurrentAccountId();
     
-    // 获取所有非user类型的角色
-    const chars = await db.characters.where('type').notEqual('user').toArray();
+    // 过滤可分享的角色（有好友关系的角色）
+    const availableChars = allCharacters.filter(c => {
+        if (c.type === 'system' || c.type === 'user') return false;
+        if (!c.name || c.name.trim() === '') return false;
+        // 检查是否是好友
+        const status = getFriendStatus(c, accountId);
+        return status === 'friend';
+    });
     
-    if (chars.length === 0) {
-        listEl.innerHTML = `
-            <div style="text-align:center; color:#999; padding:40px;">
-                暂无可选角色<br>
-                <span style="font-size:12px;">请先创建角色档案</span>
+    if (availableChars.length === 0) {
+        hideEmeiPage();
+        return;
+    }
+    
+    const modal = document.createElement('div');
+    modal.id = 'emei-share-modal';
+    modal.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; display:flex; align-items:center; justify-content:center;';
+    
+    modal.innerHTML = `
+        <div style="background:#fff; border-radius:16px; padding:20px; width:85%; max-width:350px; max-height:70vh; display:flex; flex-direction:column;">
+            <h3 style="margin:0 0 8px 0; text-align:center; font-size:16px; font-weight:600;">分享订单给好友</h3>
+            <p style="margin:0 0 16px 0; text-align:center; font-size:12px; color:#999;">选择想要分享的好友（可多选）</p>
+            <div id="share-char-list" style="flex:1; overflow-y:auto; margin-bottom:16px; max-height:300px;">
+                ${availableChars.map(char => `
+                    <label style="display:flex; align-items:center; padding:12px; border-bottom:1px solid #f5f5f5; cursor:pointer;">
+                        <input type="checkbox" value="${char.id}" style="width:18px; height:18px; margin-right:12px; accent-color:var(--ins-pink);">
+                        <div style="width:40px; height:40px; border-radius:50%; background-image:url(${char.avatar || ''}); background-size:cover; background-color:#e0e0e0; margin-right:12px; flex-shrink:0;"></div>
+                        <span style="font-size:14px; color:#333;">${char.name}</span>
+                    </label>
+                `).join('')}
             </div>
+            <div style="display:flex; gap:12px;">
+                <button onclick="closeShareOrderModal()" style="flex:1; padding:12px; background:#f0f0f0; color:#666; border:none; border-radius:8px; font-size:14px; cursor:pointer;">跳过</button>
+                <button onclick="confirmShareOrder()" style="flex:1; padding:12px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px; font-size:14px; cursor:pointer;">分享</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// 关闭分享弹窗
+function closeShareOrderModal() {
+    const modal = document.getElementById('emei-share-modal');
+    if (modal) modal.remove();
+    hideEmeiPage();
+}
+
+// 确认分享订单
+async function confirmShareOrder() {
+    const checkboxes = document.querySelectorAll('#share-char-list input[type="checkbox"]:checked');
+    const selectedIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+    
+    if (selectedIds.length === 0) {
+        closeShareOrderModal();
+        return;
+    }
+    
+    const accountId = getCurrentAccountId();
+    
+    // 向每个选中的好友发送分享卡片
+    for (const charId of selectedIds) {
+        await sendShareOrderCard(charId, accountId);
+    }
+    
+    showToast(`已分享给 ${selectedIds.length} 位好友`);
+    closeShareOrderModal();
+}
+
+// 发送分享订单卡片
+async function sendShareOrderCard(charId, accountId) {
+    const char = await db.characters.get(charId);
+    if (!char) return;
+    
+    const orderInfo = {
+        store: emeiData.currentStore.name,
+        items: emeiData.cart.map(item => `${item.name} x${item.count}`).join('、'),
+        total: (emeiData.cart.reduce((sum, item) => sum + item.price * item.count, 0) + 3 - (emeiData.selectedCoupon ? emeiData.selectedCoupon.amount : 0)).toFixed(2)
+    };
+    
+    // 创建分享卡片HTML（紧凑格式，避免white-space问题）
+    const cardHtml = `<div style="width:100%;background:linear-gradient(135deg,#e8f5e9 0%,#f1f8e9 100%);border-radius:12px;padding:14px;box-shadow:0 2px 8px rgba(0,0,0,0.08);box-sizing:border-box;"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><div style="font-size:18px;">🛵</div><div style="font-size:14px;font-weight:600;color:#333;">外卖分享</div></div><div style="font-size:13px;color:#666;line-height:1.5;"><div style="margin-bottom:8px;">我刚点了外卖，分享给你看看~</div><div style="padding:10px;background:rgba(255,255,255,0.8);border-radius:8px;"><div style="margin-bottom:4px;"><span style="color:#999;">店铺：</span>${orderInfo.store}</div><div style="margin-bottom:4px;"><span style="color:#999;">商品：</span>${orderInfo.items}</div><div style="margin-top:6px;font-size:12px;color:#4caf50;">💰 ¥${orderInfo.total}</div></div></div><div style="margin-top:10px;font-size:11px;color:#999;text-align:center;">🍔 一起点外卖呀~</div></div>`;
+    
+    // 添加到聊天记录
+    let history = getChatHistory(char, accountId);
+    history.push({
+        role: 'user',
+        content: `[emei_share]${cardHtml}`,
+        time: Date.now()
+    });
+    await setChatHistory(char, accountId, history);
+    
+    // 如果当前在该聊天窗口，刷新显示
+    if (currentChatCharId === charId) {
+        renderChatBody(char);
+    }
+}
+
+// 注册全局函数
+window.showEmeiPage = showEmeiPage;
+window.hideEmeiPage = hideEmeiPage;
+window.claimEmeiCoupon = claimEmeiCoupon;
+window.openEmeiStore = openEmeiStore;
+window.backToEmeiMain = backToEmeiMain;
+window.increaseEmeiItem = increaseEmeiItem;
+window.decreaseEmeiItem = decreaseEmeiItem;
+window.updateEmeiRecipient = updateEmeiRecipient;
+window.showEmeiCheckout = showEmeiCheckout;
+window.backToEmeiStore = backToEmeiStore;
+window.selectEmeiCoupon = selectEmeiCoupon;
+window.useEmeiCoupon = useEmeiCoupon;
+window.closeEmeiCouponModal = closeEmeiCouponModal;
+window.showEmeiPaymentModal = showEmeiPaymentModal;
+window.closeEmeiPaymentModal = closeEmeiPaymentModal;
+window.selectEmeiPaymentMethod = selectEmeiPaymentMethod;
+window.confirmEmeiPayment = confirmEmeiPayment;
+window.handlePaymentRequest = handlePaymentRequest;
+window.selectPaymentRequestTarget = selectPaymentRequestTarget;
+window.showShareOrderModal = showShareOrderModal;
+window.closeShareOrderModal = closeShareOrderModal;
+window.confirmShareOrder = confirmShareOrder;
+
+// ==================== icity 日记应用 ====================
+
+// icity 当前选中的账号ID和角色信息
+window.icityCurrentAccountId = null;
+window.icityCurrentAccountName = '';
+
+function openIcityApp() {
+    document.getElementById('icityAppPage').classList.add('active');
+    // 重置到账号选择页面
+    document.getElementById('icitySelectAccountPage').style.display = 'flex';
+    document.getElementById('icityMainContent').style.display = 'none';
+    window.icityCurrentAccountId = null;
+    window.icityCurrentAccountName = '';
+    window.icitySelectedRole = null;
+    // 加载账号列表
+    loadIcityAccountList();
+}
+
+function closeIcityApp() {
+    document.getElementById('icityAppPage').classList.remove('active');
+    window.icityCurrentAccountId = null;
+    window.icityCurrentAccountName = '';
+    window.icitySelectedRole = null;
+}
+
+// 退出icity主界面，回到账号选择
+function exitIcityToSelect() {
+    document.getElementById('icityMainContent').style.display = 'none';
+    document.getElementById('icitySelectAccountPage').style.display = 'flex';
+    window.icityCurrentAccountId = null;
+    window.icityCurrentAccountName = '';
+    window.icitySelectedRole = null;
+    window.icityInitialized = false;
+    loadIcityAccountList();
+}
+
+// 加载微信账号列表（user类型的角色）
+async function loadIcityAccountList() {
+    const accounts = await db.characters.where('type').equals('user').toArray();
+    const listContainer = document.getElementById('icityAccountList');
+    listContainer.innerHTML = '';
+    
+    if (accounts.length === 0) {
+        listContainer.innerHTML = '<div class="icity-select-empty">暂无微信账号<div class="empty-hint">请先创建 User 档案并注册微信</div></div>';
+        return;
+    }
+    
+    accounts.forEach(account => {
+        const item = document.createElement('div');
+        item.className = 'icity-account-item';
+        item.onclick = () => selectIcityAccount(account.id, account.name);
+        
+        const avatarHtml = account.avatar 
+            ? `<img src="${account.avatar}" alt="">` 
+            : account.name.charAt(0);
+        
+        item.innerHTML = `
+            <div class="icity-account-avatar">${avatarHtml}</div>
+            <div class="icity-account-info">
+                <div class="icity-account-name">${account.name}</div>
+                <div class="icity-account-desc">${account.identity?.phone || account.identity?.wechat_id || 'WeChat用户'}</div>
+            </div>
+            <div class="icity-account-arrow">›</div>
         `;
-        return;
-    }
-    
-    listEl.innerHTML = chars.map(char => `
-        <div class="char-select-item" data-id="${char.id}" onclick="selectMixedChar(${char.id}, this)" 
-             style="display:flex; align-items:center; padding:12px; margin-bottom:8px; border-radius:10px; background:#f9f9f9; cursor:pointer; transition:all 0.2s;">
-            <div style="width:48px; height:48px; border-radius:50%; background:${char.avatar ? `url(${char.avatar}) center/cover` : '#eee'}; margin-right:12px;"></div>
-            <div style="flex:1;">
-                <div style="font-size:15px; font-weight:500;">${char.name || '未命名'}</div>
-                <div style="font-size:12px; color:#999;">${char.type || 'char'}</div>
-            </div>
-            <div class="check-mark" style="width:24px; height:24px; border-radius:50%; border:2px solid #ddd; display:flex; align-items:center; justify-content:center; transition:all 0.2s;">
-                <svg style="width:14px; height:14px; stroke:#fff; stroke-width:3; fill:none; opacity:0;" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
-            </div>
-        </div>
-    `).join('');
-}
-
-// 选择角色（单选）
-function selectMixedChar(charId, el) {
-    // 清除之前的选择
-    document.querySelectorAll('#mixed-group-char-list .char-select-item').forEach(item => {
-        item.style.background = '#f9f9f9';
-        const cm = item.querySelector('.check-mark');
-        cm.style.background = 'transparent';
-        cm.style.borderColor = '#ddd';
-        cm.querySelector('svg').style.opacity = '0';
+        
+        listContainer.appendChild(item);
     });
-    
-    // 选中当前
-    selectedMixedChar = charId;
-    el.style.background = '#fff5f7';
-    const checkMark = el.querySelector('.check-mark');
-    checkMark.style.background = 'var(--ins-pink)';
-    checkMark.style.borderColor = 'var(--ins-pink)';
-    checkMark.querySelector('svg').style.opacity = '1';
 }
 
-// 创建混合群聊
-async function createMixedGroup() {
-    const groupName = document.getElementById('mixed-group-name-input').value.trim();
+// 选择微信账号 → 直接进入日记主界面
+async function selectIcityAccount(accountId, accountName) {
+    window.icityCurrentAccountId = accountId;
+    window.icityCurrentAccountName = accountName;
+    window.icitySelectedRole = null;
     
-    // 获取选中角色的信息
-    const char = await db.characters.get(selectedMixedChar);
-    if (!char) {
-        alert('角色信息获取失败');
-        return;
+    // 直接进入主界面
+    await enterIcityMainPage();
+}
+
+// 进入 icity 主界面
+async function enterIcityMainPage() {
+    document.getElementById('icitySelectAccountPage').style.display = 'none';
+    document.getElementById('icityMainContent').style.display = '';
+    
+    // 更新页面标题显示当前账号
+    const pageTitle = document.querySelector('#icityListPage .page-title');
+    if (pageTitle && window.icityCurrentAccountName) {
+        pageTitle.textContent = `${window.icityCurrentAccountName} · 日记`;
     }
     
-    // 获取用户人设和角色人设
-    const currentAccountInfo = await getCurrentAccountOnlineInfo();
-    const userPersona = currentAccountInfo ? `用户名: ${currentAccountInfo.nickname}` : '';
-    const charPersona = char.persona || char.description || '';
-    
-    try {
-        const res = await fetch(`${ONLINE_API_BASE}/api/mixed_group/create`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                creator_id: onlineUser.id,
-                invited_user_ids: selectedMixedFriends,
-                name: groupName || `联机群聊`,
-                creator_char_id: char.id,
-                creator_char_name: char.name,
-                creator_char_avatar: char.avatar,
-                creator_user_persona: userPersona,
-                creator_char_persona: charPersona
-            })
-        });
-        
-        const data = await res.json();
-        
-        if (!res.ok) {
-            alert(data.error || '创建失败');
-            return;
-        }
-        
-        alert('联机群聊创建成功！等待好友加入并选择角色');
-        closeMixedGroupModal();
-        
-        // 刷新聊天列表
-        const container = document.getElementById('wechat-content');
-        if (container) renderWechatList(container);
-        
-    } catch (e) {
-        console.error('创建群聊失败:', e);
-        alert('网络错误: ' + e.message);
-    }
-}
-
-// 关闭混合群聊弹窗
-function closeMixedGroupModal() {
-    document.getElementById('create-mixed-group-modal').style.display = 'none';
-    mixedGroupStep = 1;
-    selectedMixedFriends = [];
-    selectedMixedChar = null;
-}
-
-// 处理群聊邀请
-function handleMixedGroupInvite(data) {
-    pendingMixedGroupInvite = data;
-    
-    document.getElementById('invite-creator-name').textContent = data.creator_name || '某人';
-    document.getElementById('invite-group-name').textContent = data.group_name || '联机群聊';
-    document.getElementById('mixed-group-invite-modal').style.display = 'flex';
-}
-
-// 接受邀请
-async function acceptMixedGroupInvite() {
-    document.getElementById('mixed-group-invite-modal').style.display = 'none';
-    
-    if (!pendingMixedGroupInvite) return;
-    
-    // 显示选择角色弹窗
-    document.getElementById('bind-char-group-name').textContent = pendingMixedGroupInvite.group_name || '联机群聊';
-    document.getElementById('bind-char-modal').style.display = 'flex';
-    
-    // 加载角色列表
-    await loadBindCharList();
-}
-
-// 拒绝邀请
-function rejectMixedGroupInvite() {
-    document.getElementById('mixed-group-invite-modal').style.display = 'none';
-    pendingMixedGroupInvite = null;
-}
-
-// 加载绑定角色列表
-async function loadBindCharList() {
-    const listEl = document.getElementById('bind-char-list');
-    
-    const chars = await db.characters.where('type').notEqual('user').toArray();
-    
-    if (chars.length === 0) {
-        listEl.innerHTML = '<div style="text-align:center; color:#999; padding:40px;">暂无可选角色</div>';
-        return;
-    }
-    
-    listEl.innerHTML = chars.map(char => `
-        <div class="char-select-item" data-id="${char.id}" onclick="selectBindChar(${char.id}, this)" 
-             style="display:flex; align-items:center; padding:12px; margin-bottom:8px; border-radius:10px; background:#f9f9f9; cursor:pointer; transition:all 0.2s;">
-            <div style="width:48px; height:48px; border-radius:50%; background:${char.avatar ? `url(${char.avatar}) center/cover` : '#eee'}; margin-right:12px;"></div>
-            <div style="flex:1;">
-                <div style="font-size:15px; font-weight:500;">${char.name || '未命名'}</div>
-            </div>
-            <div class="check-mark" style="width:24px; height:24px; border-radius:50%; border:2px solid #ddd; display:flex; align-items:center; justify-content:center;">
-                <svg style="width:14px; height:14px; stroke:#fff; stroke-width:3; fill:none; opacity:0;" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
-            </div>
-        </div>
-    `).join('');
-}
-
-// 选择绑定角色
-let selectedBindChar = null;
-function selectBindChar(charId, el) {
-    document.querySelectorAll('#bind-char-list .char-select-item').forEach(item => {
-        item.style.background = '#f9f9f9';
-        const cm = item.querySelector('.check-mark');
-        cm.style.background = 'transparent';
-        cm.style.borderColor = '#ddd';
-        cm.querySelector('svg').style.opacity = '0';
-    });
-    
-    selectedBindChar = charId;
-    el.style.background = '#fff5f7';
-    const checkMark = el.querySelector('.check-mark');
-    checkMark.style.background = 'var(--ins-pink)';
-    checkMark.style.borderColor = 'var(--ins-pink)';
-    checkMark.querySelector('svg').style.opacity = '1';
-}
-
-// 确认绑定角色
-async function confirmBindChar() {
-    if (!selectedBindChar || !pendingMixedGroupInvite) {
-        alert('请选择一个角色');
-        return;
-    }
-    
-    const char = await db.characters.get(selectedBindChar);
-    if (!char) {
-        alert('角色信息获取失败');
-        return;
-    }
-    
-    // 获取用户人设
-    const currentAccountInfo = await getCurrentAccountOnlineInfo();
-    const userPersona = currentAccountInfo ? `用户名: ${currentAccountInfo.nickname}` : '';
-    const charPersona = char.persona || char.description || '';
-    
-    try {
-        const res = await fetch(`${ONLINE_API_BASE}/api/mixed_group/${pendingMixedGroupInvite.group_id}/bind_char`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                user_id: onlineUser.id,
-                char_id: char.id,
-                char_name: char.name,
-                char_avatar: char.avatar,
-                user_persona: userPersona,
-                char_persona: charPersona
-            })
-        });
-        
-        const data = await res.json();
-        
-        if (!res.ok) {
-            alert(data.error || '绑定失败');
-            return;
-        }
-        
-        alert('成功加入群聊！');
-        document.getElementById('bind-char-modal').style.display = 'none';
-        pendingMixedGroupInvite = null;
-        selectedBindChar = null;
-        
-        // 刷新聊天列表
-        const container = document.getElementById('wechat-content');
-        if (container) renderWechatList(container);
-        
-    } catch (e) {
-        console.error('绑定角色失败:', e);
-        alert('网络错误: ' + e.message);
-    }
-}
-
-// 打开混合群聊
-async function openMixedGroupChat(groupId) {
-    // 清除其他聊天状态
-    currentChatCharId = null;
-    window.currentGroupChatId = null;
-    currentRealFriendId = null;
-    currentRealFriendInfo = null;
-    
-    // 设置混合群聊ID（使用window确保全局可访问）
-    window.currentMixedGroupId = groupId;
-    
-    try {
-        // 获取群聊详情
-        const res = await fetch(`${ONLINE_API_BASE}/api/mixed_group/${groupId}?user_id=${onlineUser.id}`);
-        const data = await res.json();
-        
-        if (!res.ok) {
-            alert(data.error || '获取群聊信息失败');
-            return;
-        }
-        
-        const group = data.group;
-        const members = data.members;
-        
-        // 存储群聊信息供后续使用
-        window.currentMixedGroupInfo = { group, members };
-        
-        // 检查是否已绑定角色
-        const myMember = members.find(m => m.user_id == onlineUser.id);
-        if (!myMember || !myMember.char_id) {
-            // 需要先绑定角色
-            pendingMixedGroupInvite = { group_id: groupId, group_name: group.name };
-            document.getElementById('bind-char-group-name').textContent = group.name || '联机群聊';
-            document.getElementById('bind-char-modal').style.display = 'flex';
-            await loadBindCharList();
-            return;
-        }
-        
-        // 显示聊天窗口
-        const chatWindow = document.getElementById('chat-window');
-        chatWindow.style.display = 'flex';
-        
-        // 设置标题
-        document.getElementById('chat-title').textContent = group.name || '联机群聊';
-        
-        // 显示魔法棒按钮（用于触发角色回复）
-        const magicWandBtn = document.getElementById('btn-magic-wand');
-        if (magicWandBtn) {
-            magicWandBtn.style.display = 'flex';
-            // 修改点击事件为触发混合群聊角色回复
-            magicWandBtn.onclick = () => triggerMixedGroupCharReply();
-        }
-        
-        // 隐藏其他按钮（表情、菜单等）
-        const otherButtons = document.querySelectorAll('.chat-icon-btn:not(#btn-magic-wand)');
-        otherButtons.forEach(btn => {
-            btn.style.display = 'none';
-        });
-        
-        // 清空并加载消息
-        await loadMixedGroupMessages(groupId);
-        
-        // 加入WebSocket房间
-        if (window.onlineSocket) {
-            window.onlineSocket.emit('join_mixed_group', { group_id: groupId, user_id: onlineUser.id });
-        }
-        
-    } catch (e) {
-        console.error('打开群聊失败:', e);
-        alert('网络错误: ' + e.message);
-    }
-}
-
-// 加载混合群聊消息
-async function loadMixedGroupMessages(groupId) {
-    const chatBody = document.getElementById('chat-body');
-    chatBody.innerHTML = '';
-    
-    try {
-        const res = await fetch(`${ONLINE_API_BASE}/api/mixed_group/${groupId}/messages?limit=100`);
-        const data = await res.json();
-        
-        if (!data.messages || data.messages.length === 0) {
-            chatBody.innerHTML = `
-                <div style="text-align:center; color:#999; padding:40px; font-size:14px;">
-                    开始联机聊天吧！<br>
-                    <span style="font-size:12px;">点击魔法棒可以让你的角色说话</span>
-                </div>
-            `;
-            return;
-        }
-        
-        // 获取群聊成员信息
-        const groupRes = await fetch(`${ONLINE_API_BASE}/api/mixed_group/${groupId}?user_id=${onlineUser.id}`);
-        const groupData = await groupRes.json();
-        const myMember = groupData.members.find(m => m.user_id == onlineUser.id);
-        
-        data.messages.forEach(msg => {
-            // 只有自己发的用户消息才显示在右边，角色A、用户B、角色B都在左边
-            const isSelf = msg.sender_type === 'user' && msg.sender_user_id == onlineUser.id;
-            
-            const msgEl = document.createElement('div');
-            msgEl.style.cssText = `display:flex; margin-bottom:8px; align-items:flex-start; ${isSelf ? 'flex-direction:row-reverse; padding-left:50px;' : 'padding-right:50px;'}`;
-            
-            // 区分角色和用户的名字颜色
-            let senderLabel;
-            if (msg.sender_type === 'char') {
-                senderLabel = `<span style="font-size:10px; color:#e74c3c; display:block; margin-bottom:2px;">🤖 ${msg.sender_name}</span>`;
-            } else {
-                senderLabel = `<span style="font-size:10px; color:#667eea; display:block; margin-bottom:2px;">👤 ${msg.sender_name}</span>`;
+    // 更新"我的"页面的用户信息为当前账号
+    if (window.icityCurrentAccountId) {
+        try {
+            const accountChar = await db.characters.get(window.icityCurrentAccountId);
+            if (accountChar) {
+                const profileName = document.querySelector('#icityMyPage .profile-name');
+                const profileId = document.querySelector('#icityMyPage .profile-id');
+                const profileAvatar = document.querySelector('#icityMyPage .profile-avatar');
+                if (profileName) profileName.textContent = accountChar.nick || accountChar.name || 'user';
+                if (profileId) profileId.textContent = `@${accountChar.identity?.wechat_id || accountChar.name || 'user'}`;
+                if (profileAvatar && accountChar.avatar) {
+                    profileAvatar.style.backgroundImage = `url(${accountChar.avatar})`;
+                    profileAvatar.style.backgroundSize = 'cover';
+                    profileAvatar.style.backgroundPosition = 'center';
+                }
             }
-            
-            msgEl.innerHTML = `
-                <div style="width:32px; height:32px; min-width:32px; border-radius:50%; background:${msg.sender_avatar ? `url(${msg.sender_avatar}) center/cover` : '#ddd'}; flex-shrink:0; margin:${isSelf ? '0 0 0 8px' : '0 8px 0 0'};"></div>
-                <div style="display:flex; flex-direction:column; ${isSelf ? 'align-items:flex-end;' : 'align-items:flex-start;'}">
-                    ${senderLabel}
-                    <span style="display:inline-block; padding:8px 12px; border-radius:18px; background:${isSelf ? '#ffe4e8' : '#f2f2f7'}; font-size:14px; line-height:1.4; ${isSelf ? 'border-bottom-right-radius:4px;' : 'border-bottom-left-radius:4px;'}">
-                        ${msg.content}
-                    </span>
-                </div>
-            `;
-            
-            chatBody.appendChild(msgEl);
-        });
-        
-        chatBody.scrollTop = chatBody.scrollHeight;
-        
-    } catch (e) {
-        console.error('加载消息失败:', e);
+        } catch(e) { console.warn(e); }
+    }
+    
+    // 初始化或刷新 icity 功能
+    if (!window.icityInitialized) {
+        initIcityApp();
+        window.icityInitialized = true;
+    } else {
+        // 重新加载当前账号的日记
+        loadIcityDiariesFromStorage().catch(console.error);
+        updateIcityMyDiaryList();
     }
 }
 
-// 发送混合群聊消息（用户消息）
-async function sendMixedGroupUserMessage(inputContent) {
-    if (!window.currentMixedGroupId || !onlineUser) return;
-    
-    const input = document.getElementById('chat-input-box');
-    const content = inputContent || input.value.trim();
-    if (!content) return;
-    
-    if (!inputContent) input.value = '';
-    
-    // 获取当前用户信息
-    const currentAccountInfo = await getCurrentAccountOnlineInfo();
-    
-    try {
-        await fetch(`${ONLINE_API_BASE}/api/mixed_group/${window.currentMixedGroupId}/message`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                sender_type: 'user',
-                sender_user_id: onlineUser.id,
-                sender_name: currentAccountInfo?.nickname || onlineUser.nickname,
-                sender_avatar: currentAccountInfo?.avatar || onlineUser.avatar,
-                content: content
-            })
-        });
-        
-    } catch (e) {
-        console.error('发送消息失败:', e);
-    }
-}
+function initIcityApp() {
+    // DOM元素获取
+    const listPage = document.getElementById('icityListPage');
+    const detailPage = document.getElementById('icityDetailPage');
+    const publishPage = document.getElementById('icityPublishPage');
+    const myPage = document.getElementById('icityMyPage');
+    const detailBackBtn = document.getElementById('icityDetailBackBtn');
+    const detailContent = document.getElementById('icityDetailContent');
+    const detailTime = document.getElementById('icityDetailTime');
+    const tabPublishBtn = document.getElementById('icityTabPublishBtn');
+    const publishCloseBtn = document.getElementById('icityPublishCloseBtn');
+    const publishSubmit = document.getElementById('icityPublishSubmit');
+    const tabDiary = document.getElementById('icityTabDiary');
+    const tabMy = document.getElementById('icityTabMy');
+    const myTabDiary = document.getElementById('icityMyTabDiary');
+    const myTabPublishBtn = document.getElementById('icityMyTabPublishBtn');
+    const myTabMy = document.getElementById('icityMyTabMy');
+    const commentInput = document.querySelector('#icityContent .comment-input');
+    const sendBtn = document.getElementById('icitySendBtn');
+    const likeBtn = document.getElementById('icityLikeBtn');
+    const profileEdit = document.getElementById('icityProfileEdit');
 
-// 触发角色说话（调用AI）
-async function triggerMixedGroupCharReply() {
-    if (!window.currentMixedGroupId || !onlineUser) return;
-    
-    // 获取群聊信息
-    const groupRes = await fetch(`${ONLINE_API_BASE}/api/mixed_group/${window.currentMixedGroupId}?user_id=${onlineUser.id}`);
-    const groupData = await groupRes.json();
-    const myMember = groupData.members.find(m => m.user_id == onlineUser.id);
-    
-    if (!myMember || !myMember.char_id) {
-        alert('你还没有绑定角色');
-        return;
-    }
-    
-    // 本地立即显示输入状态（不等WebSocket）
-    showMixedGroupTypingStatus({
-        group_id: window.currentMixedGroupId,
-        sender_name: myMember.char_name,
-        is_generating: true
-    });
-    
-    // 广播输入状态给其他用户
-    if (window.onlineSocket) {
-        window.onlineSocket.emit('mixed_group_typing_status', {
-            group_id: window.currentMixedGroupId,
-            sender_name: myMember.char_name,
-            is_generating: true
-        });
-    }
-    
-    try {
-        // 获取所有人设
-        const personasRes = await fetch(`${ONLINE_API_BASE}/api/mixed_group/${window.currentMixedGroupId}/personas?user_id=${onlineUser.id}`);
-        const personasData = await personasRes.json();
-        
-        // 获取消息历史
-        const messagesRes = await fetch(`${ONLINE_API_BASE}/api/mixed_group/${window.currentMixedGroupId}/messages?limit=20`);
-        const messagesData = await messagesRes.json();
-        
-        // 获取我的角色信息
-        const myChar = await db.characters.get(parseInt(myMember.char_id));
-        
-        // 构建AI提示
-        let systemPrompt = `你现在扮演"${myMember.char_name}"这个角色在一个多人群聊中回复。\n\n`;
-        systemPrompt += `## 你的角色设定:\n${myChar?.persona || myChar?.description || '一个友好的角色'}\n\n`;
-        
-        // 添加其他人的人设信息（不显示具体内容给用户，但AI可以读取）
-        systemPrompt += `## 群聊背景:\n`;
-        personasData.personas.forEach(p => {
-            if (p.user_id != onlineUser.id) {
-                systemPrompt += `- ${p.char_name}: 另一位群成员的角色\n`;
+    // 1. 日记列表 -> 详情页（使用事件委托，因为列表是动态的）
+    const diaryList = document.getElementById('icityDiaryList');
+    if (diaryList) {
+        diaryList.addEventListener('click', (e) => {
+            const diaryItem = e.target.closest('.diary-item');
+            if (diaryItem) {
+                detailPage.dataset.fromPage = 'list';
+                listPage.classList.remove('active');
+                detailPage.classList.add('active');
+                renderDiaryContentWithAnnotations(diaryItem.dataset.id, diaryItem.dataset.content).catch(console.error);
+                detailTime.textContent = diaryItem.dataset.time;
+                detailPage.dataset.currentDiaryId = diaryItem.dataset.id;
+                detailPage.dataset.isUserPublished = diaryItem.dataset.isUserPublished;
+                const roleName = diaryItem.querySelector('.user-name')?.textContent || 'user';
+                const wechatId = diaryItem.querySelector('.user-id')?.textContent?.replace('@', '') || 'user';
+                const avatarImg = diaryItem.querySelector('.avatar');
+                const avatarUrl = avatarImg?.src || '';
+                document.querySelector('#icityDetailPage .page-title').textContent = `${roleName} · 日记`;
+                const detailAvatar = document.querySelector('#icityDetailPage .detail-avatar');
+                const detailUsername = document.querySelector('#icityDetailPage .detail-username');
+                const detailUserid = document.querySelector('#icityDetailPage .detail-userid');
+                if (detailAvatar) {
+                    if (avatarUrl && !avatarUrl.includes('data:image/svg')) {
+                        detailAvatar.style.backgroundImage = `url(${avatarUrl})`;
+                        detailAvatar.style.backgroundSize = 'cover';
+                        detailAvatar.style.backgroundPosition = 'center';
+                    } else {
+                        detailAvatar.style.backgroundImage = '';
+                        detailAvatar.textContent = roleName.charAt(0);
+                    }
+                }
+                if (detailUsername) detailUsername.textContent = roleName;
+                if (detailUserid) detailUserid.textContent = `@${wechatId}`;
             }
         });
-        
-        systemPrompt += `\n## 回复要求:\n`;
-        systemPrompt += `- 保持角色性格一致\n`;
-        systemPrompt += `- 像真人聊天一样，把回复拆成多条短消息\n`;
-        systemPrompt += `- 每条消息用|||分隔，比如: "嗯？|||怎么了|||有什么事吗"\n`;
-        systemPrompt += `- 每条消息要简短自然，可以是几个字到一句话\n`;
-        systemPrompt += `- 不要有动作描述、括号、引号，只要纯对话\n`;
-        systemPrompt += `- 输出2-5条消息\n`;
-        
-        // 构建消息历史
-        const messages = [{ role: 'system', content: systemPrompt }];
-        
-        messagesData.messages.forEach(msg => {
-            const role = msg.sender_user_id == onlineUser.id ? 'assistant' : 'user';
-            messages.push({
-                role: role,
-                content: `${msg.sender_name}: ${msg.content}`
-            });
+    }
+
+    // 2. 我的日记列表 -> 详情页
+    const myDiaryList = document.querySelector('#icityMyPage .my-diary-list');
+    if (myDiaryList) {
+        myDiaryList.addEventListener('click', (e) => {
+            const myDiaryItem = e.target.closest('.my-diary-item');
+            if (myDiaryItem) {
+                detailPage.dataset.fromPage = 'my';
+                const diaryId = myDiaryItem.dataset.id;
+                const diaryItem = document.querySelector(`#icityDiaryList .diary-item[data-id="${diaryId}"]`);
+                myPage.classList.remove('active');
+                detailPage.classList.add('active');
+                renderDiaryContentWithAnnotations(myDiaryItem.dataset.id, myDiaryItem.dataset.content).catch(console.error);
+                detailTime.textContent = myDiaryItem.dataset.time;
+                detailPage.dataset.currentDiaryId = myDiaryItem.dataset.id;
+                detailPage.dataset.isUserPublished = myDiaryItem.dataset.isUserPublished;
+                if (diaryItem) {
+                    const roleName = diaryItem.querySelector('.user-name')?.textContent || 'user';
+                    const wechatId = diaryItem.querySelector('.user-id')?.textContent?.replace('@', '') || 'user';
+                    const avatarImg = diaryItem.querySelector('.avatar');
+                    const avatarUrl = avatarImg?.src || '';
+                    document.querySelector('#icityDetailPage .page-title').textContent = `${roleName} · 日记`;
+                    const detailAvatar = document.querySelector('#icityDetailPage .detail-avatar');
+                    const detailUsername = document.querySelector('#icityDetailPage .detail-username');
+                    const detailUserid = document.querySelector('#icityDetailPage .detail-userid');
+                    if (detailAvatar) {
+                        if (avatarUrl && !avatarUrl.includes('data:image/svg')) {
+                            detailAvatar.style.backgroundImage = `url(${avatarUrl})`;
+                            detailAvatar.style.backgroundSize = 'cover';
+                            detailAvatar.style.backgroundPosition = 'center';
+                        } else {
+                            detailAvatar.style.backgroundImage = '';
+                            detailAvatar.textContent = roleName.charAt(0);
+                        }
+                    }
+                    if (detailUsername) detailUsername.textContent = roleName;
+                    if (detailUserid) detailUserid.textContent = `@${wechatId}`;
+                }
+            }
         });
-        
-        messages.push({ role: 'user', content: '请以你的角色身份回复' });
-        
-        // 调用AI - 直接前端调用，不经过后端
-        const apiConfig = await getApiConfig();
-        console.log('[MixedGroup] API配置:', {
-            apiUrl: apiConfig.apiUrl,
-            apiKey: apiConfig.apiKey ? '***已设置***' : '未设置',
-            model: apiConfig.model
-        });
-        
-        if (!apiConfig || !apiConfig.apiKey) {
-            alert('请先在设置中配置API Key');
+    }
+
+    // 3. 详情页 -> 列表页/我的页
+    detailBackBtn.addEventListener('click', () => {
+        detailPage.classList.remove('active');
+        if (detailPage.dataset.fromPage === 'my') {
+            myPage.classList.add('active');
+        } else {
+            listPage.classList.add('active');
+        }
+    });
+
+    // 4. 列表页底部Tab切换
+    tabDiary.addEventListener('click', () => {
+        listPage.classList.add('active');
+        myPage.classList.remove('active');
+        tabDiary.classList.add('active');
+        tabMy.classList.remove('active');
+        myTabDiary.classList.add('active');
+        myTabMy.classList.remove('active');
+    });
+
+    tabMy.addEventListener('click', () => {
+        listPage.classList.remove('active');
+        myPage.classList.add('active');
+        tabDiary.classList.remove('active');
+        tabMy.classList.add('active');
+        myTabDiary.classList.remove('active');
+        myTabMy.classList.add('active');
+    });
+
+    // 5. 我的页面底部Tab切换
+    myTabDiary.addEventListener('click', () => {
+        myPage.classList.remove('active');
+        listPage.classList.add('active');
+        myTabDiary.classList.add('active');
+        myTabMy.classList.remove('active');
+        tabDiary.classList.add('active');
+        tabMy.classList.remove('active');
+    });
+
+    myTabMy.addEventListener('click', () => {
+        listPage.classList.remove('active');
+        myPage.classList.add('active');
+        myTabDiary.classList.remove('active');
+        myTabMy.classList.add('active');
+        tabDiary.classList.remove('active');
+        tabMy.classList.add('active');
+    });
+
+    // 6. 发布按钮点击
+    tabPublishBtn.addEventListener('click', () => {
+        listPage.classList.remove('active');
+        publishPage.classList.add('active');
+    });
+
+    myTabPublishBtn.addEventListener('click', () => {
+        myPage.classList.remove('active');
+        publishPage.classList.add('active');
+    });
+
+    // 7. 关闭发布页
+    publishCloseBtn.addEventListener('click', () => {
+        publishPage.classList.remove('active');
+        if (listPage.classList.contains('active')) {
+            listPage.classList.add('active');
+        } else {
+            myPage.classList.add('active');
+        }
+    });
+
+    // 8. 发布日记功能
+    publishSubmit.addEventListener('click', async () => {
+        const title = document.getElementById('icityTitleInput').value;
+        const content = document.getElementById('icityContentInput').value.trim();
+        if (content === '') {
+            alert('请输入日记内容～');
             return;
         }
         
-        if (!apiConfig.apiUrl) {
-            alert('请先在设置中配置API地址');
-            return;
+        // 获取当前账号信息
+        let userName = 'user';
+        let userWechatId = 'user';
+        let userAvatar = '';
+        if (window.icityCurrentAccountId) {
+            try {
+                const accountChar = await db.characters.get(window.icityCurrentAccountId);
+                if (accountChar) {
+                    userName = accountChar.nick || accountChar.name || 'user';
+                    userWechatId = accountChar.identity?.wechat_id || accountChar.name || 'user';
+                    userAvatar = accountChar.avatar || '';
+                }
+            } catch(e) {
+                console.warn('获取账号信息失败:', e);
+            }
+        }
+        const currentPersona = JSON.parse(localStorage.getItem('currentMyPersona') || 'null');
+        if (!window.icityCurrentAccountId && currentPersona) {
+            userName = currentPersona.nickname || userName;
+            userWechatId = currentPersona.wechatId || userWechatId;
+            userAvatar = currentPersona.avatarUrl || userAvatar;
         }
         
-        // 确保URL格式正确（移除末尾的斜杠）
-        let fullApiUrl = apiConfig.apiUrl.replace(/\/+$/, '') + '/v1/chat/completions';
-        console.log('[MixedGroup] 完整API URL:', fullApiUrl);
-        console.log('[MixedGroup] 消息数量:', messages.length);
+        const today = new Date();
+        const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        const timeStr = `${String(today.getHours()).padStart(2, '0')}:${String(today.getMinutes()).padStart(2, '0')}`;
         
-        // 直接前端调用API
-        const aiRes = await fetch(fullApiUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiConfig.apiKey}`
+        const diaryId = Date.now();
+        const fullContent = title ? `${title}\n\n${content}` : content;
+        
+        addIcityDiary({
+            id: diaryId,
+            content: fullContent,
+            time: `${dateStr} ${timeStr}`,
+            roleName: userName,
+            role: {
+                name: userName,
+                realName: currentPersona?.realName || userName,
+                wechatId: userWechatId,
+                friend: {
+                    avatar: userAvatar
+                }
             },
-            body: JSON.stringify({
-                model: apiConfig.model,
-                messages: messages,
-                temperature: apiConfig.temperature || 0.7
-            })
+            isUserPublished: true
         });
         
-        console.log('[MixedGroup] AI响应状态:', aiRes.status);
-        
-        if (!aiRes.ok) {
-            const errorText = await aiRes.text();
-            console.error('[MixedGroup] AI请求失败:', errorText);
-            alert('AI请求失败: ' + aiRes.status + '\n' + errorText.substring(0, 200));
+        document.getElementById('icityTitleInput').value = '';
+        document.getElementById('icityContentInput').value = '';
+        publishPage.classList.remove('active');
+        listPage.classList.add('active');
+        showIcityGenerateStatus('日记发布成功！', 'success');
+    });
+
+    // 9. 评论发送功能
+    sendBtn.addEventListener('click', () => {
+        const comment = commentInput.value.trim();
+        if (comment === '') {
+            alert('请输入评论内容～');
             return;
         }
-        
-        const aiData = await aiRes.json();
-        console.log('[MixedGroup] AI响应:', aiData);
-        
-        if (aiData.choices && aiData.choices[0]) {
-            let reply = aiData.choices[0].message.content;
-            
-            // 清理回复内容
-            reply = reply.replace(new RegExp(`^${myMember.char_name}:\\s*`, 'i'), '');
-            reply = reply.replace(/^["'「]|["'」]$/g, ''); // 移除引号
-            
-            // 按|||分割成多条消息
-            let messages = reply.split('|||').map(m => m.trim()).filter(m => m.length > 0);
-            
-            // 如果没有分隔符，尝试按换行或句号分割
-            if (messages.length <= 1 && reply.length > 10) {
-                messages = reply.split(/[。！？\n]+/).map(m => m.trim()).filter(m => m.length > 0);
+        alert(`评论发送成功：${comment}`);
+        commentInput.value = '';
+    });
+
+    // 10. 详情页点赞交互
+    let isLiked = false;
+    likeBtn.addEventListener('click', () => {
+        isLiked = !isLiked;
+        if (isLiked) {
+            likeBtn.style.color = '#ff4d6d';
+            likeBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5 22 12.28 18.6 15.36 13.45 20.04L12 21.35z"/></svg> 已喜欢';
+        } else {
+            likeBtn.style.color = '#999';
+            likeBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zM12.1 18.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z"/></svg> 喜欢';
+        }
+    });
+
+    // 11. 我的页面编辑资料点击
+    if (profileEdit) {
+        profileEdit.addEventListener('click', () => {
+            openIcityEditProfileModal();
+        });
+    }
+    
+    // 12. 删除日记按钮点击
+    const deleteBtn = document.getElementById('icityDeleteBtn');
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', async () => {
+            const diaryId = detailPage.dataset.currentDiaryId;
+            if (!diaryId) {
+                alert('无法获取日记ID');
+                return;
             }
             
-            // 确保至少有一条消息
-            if (messages.length === 0) {
-                messages = [reply];
+            if (confirm('确定要删除这篇日记吗？删除后无法恢复！')) {
+                try {
+                    await icityDb.diaries.delete(parseInt(diaryId));
+                    await icityDb.annotations.where('diaryId').equals(parseInt(diaryId)).delete();
+                    
+                    const diaryItem = document.querySelector(`#icityDiaryList .diary-item[data-id="${diaryId}"]`);
+                    if (diaryItem) diaryItem.remove();
+                    
+                    const myDiaryItem2 = document.querySelector(`.my-diary-item[data-id="${diaryId}"]`);
+                    if (myDiaryItem2) myDiaryItem2.remove();
+                    
+                    updateIcityMyDiaryList();
+                    
+                    const remainingDiaries = document.querySelectorAll('#icityDiaryList .diary-item');
+                    if (remainingDiaries.length === 0) {
+                        document.getElementById('icityDiaryList').innerHTML = '<div style="text-align: center; padding: 40px 20px; color: #999; font-size: 14px;">还没有日记<br><div style="font-size: 12px; margin-top: 8px; color: #ccc;">点击右上角发布或生成日记</div></div>';
+                    }
+                    
+                    showIcityGenerateStatus('日记已删除', 'success');
+                    
+                    detailPage.classList.remove('active');
+                    if (detailPage.dataset.fromPage === 'my') {
+                        myPage.classList.add('active');
+                    } else {
+                        listPage.classList.add('active');
+                    }
+                } catch (error) {
+                    console.error('删除日记失败:', error);
+                    showIcityGenerateStatus('删除失败: ' + error.message, 'error');
+                }
+            }
+        });
+    }
+
+    // 从Dexie加载日记
+    loadIcityDiariesFromStorage().catch(console.error);
+    
+    // 初始化"我的日记"列表
+    updateIcityMyDiaryList();
+    
+    // 初始化文本标注功能
+    initIcityAnnotation();
+
+    // 13. 角色选择按钮点击
+    const selectRoleBtn = document.getElementById('icitySelectRoleBtn');
+    selectRoleBtn.addEventListener('click', () => {
+        openIcityRoleModal();
+    });
+
+    // 14. 生成日记按钮点击
+    const generateBtn = document.getElementById('icityGenerateBtn');
+    generateBtn.addEventListener('click', () => {
+        generateIcityDiary();
+    });
+}
+
+// icity 角色选择模态框（在app内切换角色，按账号过滤好友）
+async function openIcityRoleModal() {
+    // 从数据库获取角色列表，按当前账号过滤好友
+    const allChars = await db.characters.toArray();
+    const currentAccountId = window.icityCurrentAccountId;
+    const friends = allChars.filter(c => {
+        if (c.type === 'user') return false;
+        if (currentAccountId) {
+            const status = getFriendStatus(c, currentAccountId);
+            return status === 'friend';
+        }
+        return c.type === 'char' || c.type === 'npc';
+    });
+    const roleList = document.getElementById('icityRoleList');
+    
+    if (friends.length === 0) {
+        roleList.innerHTML = '<div style="text-align: center; padding: 40px 20px; color: #999; font-size: 14px;">还没有创建角色<br><div style="font-size: 12px; margin-top: 8px; color: #ccc;">请先创建角色</div></div>';
+    } else {
+        roleList.innerHTML = '';
+        friends.forEach((friend, index) => {
+            const roleItem = document.createElement('div');
+            roleItem.className = 'icity-role-item';
+            roleItem.setAttribute('data-index', index);
+            
+            const friendName = friend.nick || friend.name;
+            const friendPersona = friend.description || friend.personality || '暂无详细人设';
+            
+            const prompt = `你是一个真实的人，名字叫${friendName}。${friendPersona}`;
+            
+            roleItem.setAttribute('data-role', friendName);
+            roleItem.setAttribute('data-prompt', prompt);
+            roleItem.setAttribute('data-name', friend.name);
+            
+            roleItem.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    ${friend.avatar ? `<img src="${friend.avatar}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;" alt="">` : `<div style="width: 40px; height: 40px; border-radius: 50%; background: #eee; display: flex; align-items: center; justify-content: center; color: #999; font-size: 16px;">${friendName.charAt(0)}</div>`}
+                    <div style="flex: 1;">
+                        <div class="icity-role-name">${friendName}</div>
+                        <div class="icity-role-desc">${friendPersona.length > 50 ? friendPersona.substring(0, 50) + '...' : friendPersona}</div>
+                    </div>
+                </div>
+            `;
+            
+            roleItem.addEventListener('click', () => {
+                document.querySelectorAll('.icity-role-item').forEach(r => r.classList.remove('selected'));
+                roleItem.classList.add('selected');
+                window.icitySelectedRole = {
+                    name: friendName,
+                    realName: friendName,
+                    wechatId: friend.id || friendName.toLowerCase().replace(/\s/g, ''),
+                    prompt: prompt,
+                    persona: friendPersona,
+                    friend: friend
+                };
+                setTimeout(() => {
+                    closeIcityRoleModal();
+                }, 300);
+            });
+            
+            roleList.appendChild(roleItem);
+        });
+    }
+    
+    document.getElementById('icityRoleModal').style.display = 'flex';
+}
+
+function closeIcityRoleModal() {
+    document.getElementById('icityRoleModal').style.display = 'none';
+}
+
+// 打开编辑资料模态框
+async function openIcityEditProfileModal() {
+    const modal = document.getElementById('icityEditProfileModal');
+    
+    let nickname = '';
+    let wechatId = '';
+    if (window.icityCurrentAccountId) {
+        try {
+            const accountChar = await db.characters.get(window.icityCurrentAccountId);
+            if (accountChar) {
+                nickname = accountChar.nick || accountChar.name || '';
+                wechatId = accountChar.identity?.wechat_id || '';
+            }
+        } catch(e) { console.warn(e); }
+    } else {
+        const currentPersona = JSON.parse(localStorage.getItem('currentMyPersona') || 'null');
+        nickname = currentPersona?.nickname || '';
+        wechatId = currentPersona?.wechatId || '';
+    }
+    
+    document.getElementById('icityEditUsername').value = nickname;
+    document.getElementById('icityEditWechatId').value = wechatId;
+    
+    modal.style.display = 'flex';
+}
+
+function closeIcityEditProfileModal() {
+    document.getElementById('icityEditProfileModal').style.display = 'none';
+}
+
+function saveIcityProfile() {
+    const username = document.getElementById('icityEditUsername').value.trim();
+    const wechatId = document.getElementById('icityEditWechatId').value.trim();
+    
+    if (!username) {
+        alert('请输入用户名');
+        return;
+    }
+    
+    if (!wechatId) {
+        alert('请输入微信ID');
+        return;
+    }
+    
+    const currentPersona = JSON.parse(localStorage.getItem('currentMyPersona') || '{}');
+    currentPersona.nickname = username;
+    currentPersona.wechatId = wechatId;
+    localStorage.setItem('currentMyPersona', JSON.stringify(currentPersona));
+    
+    const profileName = document.querySelector('#icityMyPage .profile-name');
+    const profileId = document.querySelector('#icityMyPage .profile-id');
+    if (profileName) profileName.textContent = username;
+    if (profileId) profileId.textContent = `@${wechatId}`;
+    
+    closeIcityEditProfileModal();
+    showIcityGenerateStatus('资料保存成功！', 'success');
+}
+
+// 显示生成进度提示
+function showIcityGenerateStatus(message, type = 'info') {
+    const oldToast = document.getElementById('icityGenerateToast');
+    if (oldToast) oldToast.remove();
+    
+    const toast = document.createElement('div');
+    toast.id = 'icityGenerateToast';
+    toast.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: ${type === 'error' ? '#ff4d4f' : type === 'success' ? '#52c41a' : 'rgba(0,0,0,0.8)'};
+        color: white;
+        padding: 20px 30px;
+        border-radius: 10px;
+        z-index: 10002;
+        font-size: 14px;
+        max-width: 300px;
+        text-align: center;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    `;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    
+    if (type === 'success' || type === 'error') {
+        setTimeout(() => {
+            toast.remove();
+        }, 3000);
+    }
+}
+
+// 获取AI API配置（从Dexie）
+async function getIcityApiConfig() {
+    const urlItem = await db.dexiData.get('aiBaseUrl');
+    const keyItem = await db.dexiData.get('aiApiKey');
+    const modelItem = await db.dexiData.get('aiCurrentModel');
+    const tempItem = await db.dexiData.get('aiTemperature');
+    
+    let baseUrl = (urlItem?.value || 'https://api.openai.com/v1').trim();
+    if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
+    if (!baseUrl.includes('/v1')) baseUrl += '/v1';
+    const apiUrl = baseUrl + '/chat/completions';
+    
+    return {
+        apiUrl: apiUrl,
+        apiKey: keyItem?.value || '',
+        model: modelItem?.value || 'gpt-3.5-turbo',
+        temperature: parseFloat(tempItem?.value) || 0.8
+    };
+}
+
+// 生成 icity 日记
+async function generateIcityDiary() {
+    if (!window.icitySelectedRole) {
+        showIcityGenerateStatus('请先选择角色', 'error');
+        openIcityRoleModal();
+        return;
+    }
+
+    const config = await getIcityApiConfig();
+
+    if (!config.apiKey) {
+        showIcityGenerateStatus('请先在设置中配置 API 密钥', 'error');
+        return;
+    }
+
+    const generateBtn = document.getElementById('icityGenerateBtn');
+    const originalHTML = generateBtn.innerHTML;
+    generateBtn.innerHTML = '<svg class="icon-svg" viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>';
+    generateBtn.style.pointerEvents = 'none';
+    showIcityGenerateStatus('正在生成日记并处理任务...', 'info');
+
+    try {
+        const today = new Date();
+        const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        const timeStr = `${String(today.getHours()).padStart(2, '0')}:${String(today.getMinutes()).padStart(2, '0')}`;
+
+        // 获取聊天记录
+        let recentChatHistory = '';
+        try {
+            const friendChar = window.icitySelectedRole.friend;
+            if (friendChar) {
+                const accountId = typeof getCurrentAccountId === 'function' ? getCurrentAccountId() : null;
+                const chatHistory = typeof getChatHistory === 'function' ? getChatHistory(friendChar, accountId) : [];
+                if (chatHistory && chatHistory.length > 0) {
+                    const recentMessages = chatHistory.slice(-10).map(msg => {
+                        const sender = msg.isSelf ? '我' : (friendChar.nick || friendChar.name);
+                        return `${sender}: ${msg.content || msg.text || ''}`;
+                    }).join('\n');
+                    if (recentMessages) {
+                        recentChatHistory = `\n\n最近的聊天记录：\n${recentMessages}`;
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('获取聊天记录失败:', e);
+        }
+        
+        // 收集任务信息
+        let myLastDiaryWithAnnotations = null;
+        let userRecentDiary = null;
+        
+        try {
+            const currentAccountId = window.icityCurrentAccountId || 0;
+            let allDiaries;
+            if (currentAccountId) {
+                allDiaries = await icityDb.diaries.where('accountId').equals(currentAccountId).reverse().sortBy('createdAt');
+                allDiaries = allDiaries.slice(0, 10);
+            } else {
+                allDiaries = await icityDb.diaries.orderBy('createdAt').reverse().limit(10).toArray();
             }
             
-            console.log('[MixedGroup] 分割后的消息:', messages);
+            const myLastDiary = allDiaries.find(d => d.isUserPublished === 0 || d.isUserPublished === false);
+            if (myLastDiary) {
+                const annotations = await icityDb.annotations.where('diaryId').equals(myLastDiary.id).toArray();
+                const userAnnotations = annotations.filter(ann => !ann.isAI && !ann.isReply);
+                if (userAnnotations.length > 0) {
+                    myLastDiaryWithAnnotations = {
+                        content: myLastDiary.content,
+                        annotations: userAnnotations
+                    };
+                }
+            }
             
-            // 逐条发送消息，每条间隔300-800ms模拟打字
-            for (let i = 0; i < messages.length; i++) {
-                const msgContent = messages[i].replace(/^["'「]|["'」]$/g, '').trim();
-                if (!msgContent) continue;
-                
-                await fetch(`${ONLINE_API_BASE}/api/mixed_group/${window.currentMixedGroupId}/message`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        sender_type: 'char',
-                        sender_user_id: onlineUser.id,
-                        sender_char_id: myMember.char_id,
-                        sender_name: myMember.char_name,
-                        sender_avatar: myMember.char_avatar,
-                        content: msgContent
-                    })
+            userRecentDiary = allDiaries.find(d => d.isUserPublished === 1 || d.isUserPublished === true);
+        } catch (e) {
+            console.warn('获取日记数据失败:', e);
+        }
+
+        const roleName = window.icitySelectedRole.name || window.icitySelectedRole.realName || '角色';
+        const rolePersona = window.icitySelectedRole.persona || '';
+
+        // 构建自然的 system prompt
+        const systemPrompt = `你现在是${roleName}，一个真实存在的人。以下是关于你的信息：
+${rolePersona}
+
+你正在写自己的私人日记。要求：
+- 完全以${roleName}的第一人称视角书写，像真人在手机备忘录里随手写的日记
+- 语气自然随意，可以有口语化表达、语气词、省略号、感叹号
+- 不要写得像作文或文学作品，要像真人的碎碎念、流水账、心情记录
+- 可以写今天发生的小事、突然想到的事、对某件事的吐槽、纠结、开心、难过等等
+- 内容要有细节和画面感，比如具体吃了什么、看到了什么、和谁说了什么话
+- 可以有前后跳跃、想到哪写到哪的感觉，不需要严格的逻辑结构
+- 可以夹杂一些内心独白、自问自答
+- 字数在800-2000字左右，不要太短也不要刻意凑字数`;
+
+        // 构建 user prompt
+        let userPromptParts = [];
+        
+        userPromptParts.push(`请以${roleName}的身份写一篇今天的日记。`);
+        
+        if (recentChatHistory) {
+            userPromptParts.push(`\n参考最近和别人的聊天内容，可以在日记里自然地提到相关的事（不要照搬聊天记录，用日记的口吻去写感受和想法）：${recentChatHistory}`);
+        }
+
+        // 标注任务
+        let hasExtraTasks = false;
+        if (myLastDiaryWithAnnotations || userRecentDiary) {
+            hasExtraTasks = true;
+            userPromptParts.push(`\n除了日记之外，还有额外任务：`);
+            if (myLastDiaryWithAnnotations) {
+                userPromptParts.push(`- 用户对你上一篇日记进行了标注评论，请以${roleName}的口吻对每条给出简短回应（像朋友之间回复留言一样自然，15-30字）：`);
+                myLastDiaryWithAnnotations.annotations.forEach(ann => {
+                    userPromptParts.push(`  · 标注内容："${ann.text}" → 用户评论：${ann.comment}`);
                 });
-                
-                // 间隔一下再发下一条
-                if (i < messages.length - 1) {
-                    await new Promise(r => setTimeout(r, 300 + Math.random() * 500));
+            }
+            if (userRecentDiary) {
+                userPromptParts.push(`- 用户写了一篇日记，请以${roleName}的口吻对其中2-4处内容进行标注评论（像朋友在旁边写批注一样，真实自然，15-40字）：`);
+                userPromptParts.push(`  用户的日记内容：${userRecentDiary.content.substring(0, 1500)}`);
+            }
+        }
+
+        userPromptParts.push(`\n请严格按以下JSON格式输出，不要输出其他任何内容：
+{
+  "diary": "日记正文（纯文本，用\\n换行）",
+  "repliesToUserAnnotations": ${myLastDiaryWithAnnotations ? '[{"text": "你日记中被标注的原文片段", "comment": "你的回应"}]' : '[]'},
+  "annotationsForUserDiary": ${userRecentDiary ? '[{"text": "用户日记中的原文片段", "comment": "你的标注评论"}]' : '[]'}
+}`);
+
+        const userPrompt = userPromptParts.join('\n');
+
+        const response = await fetch(config.apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
+            body: JSON.stringify({
+                model: config.model,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userPrompt }
+                ],
+                temperature: config.temperature || 0.9,
+                max_tokens: 8000
+            })
+        });
+
+        if (!response.ok) throw new Error(`API请求失败: ${response.status}`);
+
+        const data = await response.json();
+        const responseContent = data.choices?.[0]?.message?.content?.trim() || '';
+        
+        let jsonStr = responseContent;
+        if (jsonStr.startsWith('```json')) {
+            jsonStr = jsonStr.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+        } else if (jsonStr.startsWith('```')) {
+            jsonStr = jsonStr.replace(/^```\s*/, '').replace(/\s*```$/, '');
+        }
+        
+        const parsed = JSON.parse(jsonStr);
+        const diaryContent = parsed.diary || '';
+        const replies = parsed.repliesToUserAnnotations || [];
+        const annotationsFromAI = parsed.annotationsForUserDiary || [];
+        
+        if (!diaryContent || diaryContent.length < 50) throw new Error('生成的日记内容过短');
+        
+        const diaryId = Date.now();
+        addIcityDiary({
+            id: diaryId,
+            content: diaryContent,
+            time: `${dateStr} ${timeStr}`,
+            roleName: window.icitySelectedRole.name || window.icitySelectedRole.realName || 'user',
+            role: window.icitySelectedRole,
+            isUserPublished: false
+        });
+        
+        // 保存对我上一篇日记的回复标注
+        if (replies.length > 0 && myLastDiaryWithAnnotations) {
+            const currentAccId = window.icityCurrentAccountId || 0;
+            let allDiariesForReply;
+            if (currentAccId) {
+                allDiariesForReply = await icityDb.diaries.where('accountId').equals(currentAccId).reverse().sortBy('createdAt');
+                allDiariesForReply = allDiariesForReply.slice(0, 10);
+            } else {
+                allDiariesForReply = await icityDb.diaries.orderBy('createdAt').reverse().limit(10).toArray();
+            }
+            const myLastDiary = allDiariesForReply.find(d => d.isUserPublished === 0 || d.isUserPublished === false);
+            if (myLastDiary && myLastDiary.id !== diaryId) {
+                const replyAnnotations = replies.map((reply, idx) => ({
+                    id: Date.now() + idx + 1000,
+                    diaryId: myLastDiary.id,
+                    text: reply.text,
+                    comment: reply.comment,
+                    createdAt: new Date().toISOString(),
+                    isAI: true,
+                    aiRole: window.icitySelectedRole.name,
+                    isReply: true,
+                    accountId: window.icityCurrentAccountId || 0
+                }));
+                for (const ann of replyAnnotations) {
+                    await icityDb.annotations.put(ann);
                 }
             }
         }
         
-    } catch (e) {
-        console.error('AI生成失败:', e);
-        alert('生成回复失败: ' + e.message);
+        // 保存对用户日记的标注
+        if (annotationsFromAI.length > 0 && userRecentDiary) {
+            const annotationsToSave = annotationsFromAI.map((ann, idx) => ({
+                id: Date.now() + idx + 2000,
+                diaryId: userRecentDiary.id,
+                text: ann.text,
+                comment: ann.comment,
+                createdAt: new Date().toISOString(),
+                isAI: true,
+                aiRole: window.icitySelectedRole.name,
+                accountId: window.icityCurrentAccountId || 0
+            }));
+            for (const ann of annotationsToSave) {
+                await icityDb.annotations.put(ann);
+            }
+        }
+        
+        showIcityGenerateStatus(`完成！${replies.length > 0 ? `回复了${replies.length}条标注，` : ''}${annotationsFromAI.length > 0 ? `标注了你的日记${annotationsFromAI.length}处` : ''}`, 'success');
+        
+    } catch (error) {
+        console.error('生成失败:', error);
+        showIcityGenerateStatus(`生成失败：${error.message}`, 'error');
     } finally {
-        // 本地立即清除输入状态
-        showMixedGroupTypingStatus({
-            group_id: window.currentMixedGroupId,
-            sender_name: myMember?.char_name || '',
-            is_generating: false
+        generateBtn.innerHTML = originalHTML;
+        generateBtn.style.pointerEvents = 'auto';
+    }
+}
+
+// 添加日记到列表
+function addIcityDiary(diary) {
+    const diaryList = document.getElementById('icityDiaryList');
+    const date = new Date(diary.time);
+    const monthNames = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
+    const weekDays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+    const dateStr = `${monthNames[date.getMonth()]}${date.getDate()}日 · ${weekDays[date.getDay()]} ${date.getFullYear()}`;
+    const timeStr = diary.time.split(' ')[1] || '00:00';
+    
+    const role = diary.role || window.icitySelectedRole || {};
+    const avatarUrl = role.friend?.avatar || `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Crect width='40' height='40' fill='%23ddd'/%3E%3Ccircle cx='20' cy='20' r='15' fill='%23ccc'/%3E%3C/svg%3E`;
+    const wechatId = role.wechatId || role.friend?.id || 'user';
+    const roleName = diary.roleName || role.name || role.realName || 'user';
+    
+    const preview = diary.content.replace(/\n/g, ' ').substring(0, 50) + (diary.content.length > 50 ? '...' : '');
+
+    const diaryItem = document.createElement('div');
+    diaryItem.className = 'diary-item';
+    diaryItem.setAttribute('data-id', diary.id);
+    diaryItem.setAttribute('data-content', diary.content);
+    diaryItem.setAttribute('data-time', diary.time);
+    diaryItem.setAttribute('data-role-name', roleName);
+    diaryItem.setAttribute('data-wechat-id', wechatId);
+    diaryItem.setAttribute('data-avatar-url', avatarUrl);
+    diaryItem.setAttribute('data-is-user-published', diary.isUserPublished ? 'true' : 'false');
+    
+    diaryItem.innerHTML = `
+        <div class="diary-header">
+            <div class="user-info">
+                <img src="${avatarUrl}" alt="头像" class="avatar" style="border-radius: 50%; object-fit: cover;">
+                <div class="user-name-box">
+                    <div class="user-name">${roleName}</div>
+                    <div class="user-id">@${wechatId}</div>
+                </div>
+            </div>
+            <div class="diary-date">${dateStr}</div>
+        </div>
+        <div class="diary-content">${preview}</div>
+        <div class="diary-actions">
+            <div class="action-item">
+                <svg viewBox="0 0 24 24"><path d="M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zM12.1 18.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z"/></svg>
+                0
+            </div>
+            <div class="action-item">
+                <svg viewBox="0 0 24 24"><path d="M21.99 4c0-1.1-.89-2-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14l4 4-.01-18zM18 14H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/></svg>
+                0
+            </div>
+            <div class="action-item">
+                <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
+                ${timeStr}
+            </div>
+            <div class="more-btn">
+                <svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+            </div>
+        </div>
+    `;
+
+    const firstChild = diaryList.firstElementChild;
+    if (firstChild && firstChild.style && firstChild.style.textAlign === 'center') {
+        diaryList.innerHTML = '';
+    }
+    
+    if (diaryList.firstChild) {
+        diaryList.insertBefore(diaryItem, diaryList.firstChild);
+    } else {
+        diaryList.appendChild(diaryItem);
+    }
+
+    updateIcityMyDiaryList();
+    
+    saveIcityDiaryToDexie(diary.id, {
+        content: diary.content,
+        time: diary.time,
+        roleName: roleName,
+        wechatId: wechatId,
+        avatarUrl: avatarUrl,
+        isUserPublished: diary.isUserPublished ? 1 : 0,
+        createdAt: new Date().toISOString(),
+        accountId: window.icityCurrentAccountId || 0
+    });
+}
+
+// 保存单个日记到Dexie
+async function saveIcityDiaryToDexie(diaryId, diaryData) {
+    try {
+        await icityDb.diaries.put({
+            id: diaryId,
+            accountId: window.icityCurrentAccountId || 0,
+            ...diaryData
+        });
+    } catch (error) {
+        console.error('保存日记到Dexie失败:', error);
+    }
+}
+
+// 从Dexie加载所有日记（按accountId过滤）
+async function loadIcityDiariesFromStorage() {
+    const diaryList = document.getElementById('icityDiaryList');
+    if (!diaryList) return;
+    
+    const currentAccountId = window.icityCurrentAccountId || 0;
+    
+    try {
+        const savedDiaries = localStorage.getItem('icity_diaries');
+        if (savedDiaries) {
+            try {
+                const diaries = JSON.parse(savedDiaries);
+                for (const diary of diaries) {
+                    await icityDb.diaries.put({
+                        id: diary.id,
+                        content: diary.content,
+                        time: diary.time,
+                        roleName: diary.roleName || 'user',
+                        wechatId: diary.wechatId || 'user',
+                        avatarUrl: diary.avatarUrl || '',
+                        isUserPublished: diary.isUserPublished ? 1 : 0,
+                        createdAt: new Date().toISOString(),
+                        accountId: currentAccountId
+                    });
+                }
+                localStorage.removeItem('icity_diaries');
+            } catch (e) {
+                console.error('迁移localStorage数据失败:', e);
+            }
+        }
+        
+        // 按 accountId 过滤日记
+        let diaries;
+        if (currentAccountId) {
+            diaries = (await icityDb.diaries.where('accountId').equals(currentAccountId).reverse().toArray());
+        } else {
+            diaries = await icityDb.diaries.orderBy('id').reverse().toArray();
+        }
+        
+        if (diaries.length === 0) {
+            diaryList.innerHTML = '<div style="text-align: center; padding: 40px 20px; color: #999; font-size: 14px;">还没有日记<br><div style="font-size: 12px; margin-top: 8px; color: #ccc;">点击右上角发布或生成日记</div></div>';
+            return;
+        }
+        
+        diaryList.innerHTML = '';
+        
+        diaries.sort((a, b) => {
+            const timeA = new Date(a.time.replace(/-/g, '/'));
+            const timeB = new Date(b.time.replace(/-/g, '/'));
+            return timeB - timeA;
         });
         
-        // 广播取消输入状态给其他用户
-        if (window.onlineSocket && myMember) {
-            window.onlineSocket.emit('mixed_group_typing_status', {
-                group_id: window.currentMixedGroupId,
-                sender_name: myMember.char_name,
-                is_generating: false
-            });
-        }
-    }
-}
-
-// 获取API配置（从IndexedDB读取，与设置页面一致）
-async function getApiConfig() {
-    try {
-        // 使用与设置页面一致的key名称
-        const urlItem = await db.dexiData.get('aiBaseUrl');
-        const keyItem = await db.dexiData.get('aiApiKey');
-        const modelItem = await db.dexiData.get('aiCurrentModel');
-        const tempItem = await db.dexiData.get('aiTemperature');
+        diaries.forEach(diary => {
+            const diaryItem = document.createElement('div');
+            diaryItem.className = 'diary-item';
+            diaryItem.setAttribute('data-id', diary.id);
+            diaryItem.setAttribute('data-content', diary.content);
+            diaryItem.setAttribute('data-time', diary.time);
+            diaryItem.setAttribute('data-role-name', diary.roleName || 'user');
+            diaryItem.setAttribute('data-wechat-id', diary.wechatId || 'user');
+            diaryItem.setAttribute('data-avatar-url', diary.avatarUrl || '');
+            diaryItem.setAttribute('data-is-user-published', diary.isUserPublished ? 'true' : 'false');
+            
+            const date = new Date(diary.time.replace(/-/g, '/'));
+            const monthNames = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
+            const weekDays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+            const dateStr = `${monthNames[date.getMonth()]}${date.getDate()}日 · ${weekDays[date.getDay()]} ${date.getFullYear()}`;
+            const timeStr = diary.time.split(' ')[1] || '00:00';
+            const preview = diary.content.replace(/\n/g, ' ').substring(0, 50) + (diary.content.length > 50 ? '...' : '');
+            
+            diaryItem.innerHTML = `
+                <div class="diary-header">
+                    <div class="user-info">
+                        <img src="${diary.avatarUrl || ''}" alt="头像" class="avatar" style="border-radius: 50%; object-fit: cover;">
+                        <div class="user-name-box">
+                            <div class="user-name">${diary.roleName || 'user'}</div>
+                            <div class="user-id">@${diary.wechatId || 'user'}</div>
+                        </div>
+                    </div>
+                    <div class="diary-date">${dateStr}</div>
+                </div>
+                <div class="diary-content">${preview}</div>
+                <div class="diary-actions">
+                    <div class="action-item">
+                        <svg viewBox="0 0 24 24"><path d="M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zM12.1 18.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z"/></svg>
+                        0
+                    </div>
+                    <div class="action-item">
+                        <svg viewBox="0 0 24 24"><path d="M21.99 4c0-1.1-.89-2-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14l4 4-.01-18zM18 14H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/></svg>
+                        0
+                    </div>
+                    <div class="action-item">
+                        <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
+                        ${timeStr}
+                    </div>
+                    <div class="more-btn">
+                        <svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+                    </div>
+                </div>
+            `;
+            
+            diaryList.appendChild(diaryItem);
+        });
         
-        return {
-            apiUrl: urlItem?.value || '',
-            apiKey: keyItem?.value || '',
-            model: modelItem?.value || 'gpt-3.5-turbo',
-            temperature: parseFloat(tempItem?.value || '0.7')
-        };
-    } catch (e) {
-        console.error('获取API配置失败:', e);
-        return { apiUrl: '', apiKey: '', model: 'gpt-3.5-turbo', temperature: 0.7 };
+        updateIcityMyDiaryList();
+    } catch (error) {
+        console.error('加载日记失败:', error);
+        diaryList.innerHTML = '<div style="text-align: center; padding: 40px 20px; color: #999; font-size: 14px;">加载日记失败</div>';
     }
 }
 
-// 监听混合群聊WebSocket事件
-function initMixedGroupSocket() {
-    if (!window.onlineSocket) return;
+// 更新"我的日记"列表
+function updateIcityMyDiaryList() {
+    const allDiaryItems = document.querySelectorAll('#icityContent .diary-item');
+    const userPublishedItems = Array.from(allDiaryItems).filter(item => 
+        item.dataset.isUserPublished === 'true'
+    );
+    const myDiaryList = document.querySelector('#icityMyPage .my-diary-list');
     
-    // 收到群聊邀请
-    window.onlineSocket.on('mixed_group_invite', (data) => {
-        console.log('[MixedGroup] Received invite:', data);
-        handleMixedGroupInvite(data);
-    });
+    if (!myDiaryList) return;
     
-    // 收到群聊消息
-    window.onlineSocket.on('mixed_group_message', (data) => {
-        console.log('[MixedGroup] Received message:', data);
-        if (window.currentMixedGroupId == data.group_id) {
-            appendMixedGroupMessage(data);
-        }
-    });
+    myDiaryList.innerHTML = '';
     
-    // 输入状态
-    window.onlineSocket.on('mixed_group_typing', (data) => {
-        if (window.currentMixedGroupId == data.group_id) {
-            showMixedGroupTypingStatus(data);
-        }
-    });
-    
-    // 成员绑定角色
-    window.onlineSocket.on('mixed_group_member_bound', (data) => {
-        console.log('[MixedGroup] Member bound char:', data);
-        // 可以刷新群聊列表或显示通知
-    });
-}
-
-// 追加消息到聊天界面
-function appendMixedGroupMessage(msg) {
-    const chatBody = document.getElementById('chat-body');
-    if (!chatBody) return;
-    
-    // 移除空状态提示
-    const emptyState = chatBody.querySelector('div[style*="text-align:center"]');
-    if (emptyState && emptyState.textContent.includes('开始联机聊天')) {
-        emptyState.remove();
-    }
-    
-    // 只有自己发的用户消息才显示在右边，角色A、用户B、角色B都在左边
-    const isSelf = msg.sender_type === 'user' && msg.sender_user_id == onlineUser.id;
-    
-    const msgEl = document.createElement('div');
-    msgEl.style.cssText = `display:flex; margin-bottom:8px; align-items:flex-start; ${isSelf ? 'flex-direction:row-reverse; padding-left:50px;' : 'padding-right:50px;'}`;
-    
-    // 区分角色和用户的名字颜色
-    let senderLabel;
-    if (msg.sender_type === 'char') {
-        senderLabel = `<span style="font-size:10px; color:#e74c3c; display:block; margin-bottom:2px;">🤖 ${msg.sender_name}</span>`;
+    if (userPublishedItems.length === 0) {
+        myDiaryList.innerHTML = '<div style="text-align: center; padding: 40px 20px; color: #999; font-size: 14px;">还没有日记<br><div style="font-size: 12px; margin-top: 8px; color: #ccc;">在发布页面发布日记后才会显示在这里</div></div>';
     } else {
-        senderLabel = `<span style="font-size:10px; color:#667eea; display:block; margin-bottom:2px;">👤 ${msg.sender_name}</span>`;
+        userPublishedItems.forEach(item => {
+            const myDiaryItem = document.createElement('div');
+            myDiaryItem.className = 'my-diary-item';
+            myDiaryItem.setAttribute('data-id', item.dataset.id);
+            myDiaryItem.setAttribute('data-content', item.dataset.content);
+            myDiaryItem.setAttribute('data-time', item.dataset.time);
+            myDiaryItem.setAttribute('data-role-name', item.dataset.roleName || '');
+            myDiaryItem.setAttribute('data-wechat-id', item.dataset.wechatId || '');
+            myDiaryItem.setAttribute('data-avatar-url', item.dataset.avatarUrl || '');
+            
+            const preview = item.dataset.content.replace(/\n/g, ' ').substring(0, 100) + (item.dataset.content.length > 100 ? '...' : '');
+            
+            myDiaryItem.innerHTML = `
+                <div class="my-diary-time">${item.dataset.time}</div>
+                <div class="my-diary-content">${preview}</div>
+            `;
+            
+            myDiaryList.appendChild(myDiaryItem);
+        });
+    }
+
+    const statElement = document.querySelector('#icityMyPage .my-diary-stat');
+    if (statElement) {
+        statElement.textContent = `我的日记（${userPublishedItems.length}篇）`;
+    }
+}
+
+// ==================== icity 文本标注功能 ====================
+
+function initIcityAnnotation() {
+    // 防止重复初始化
+    if (window._icityAnnotationInited) return;
+    window._icityAnnotationInited = true;
+
+    let selectionTimer = null;
+
+    // 检测选中文字并弹出标注框
+    function checkSelection() {
+        if (selectionTimer) clearTimeout(selectionTimer);
+        selectionTimer = setTimeout(() => {
+            const detailContentEl = document.getElementById('icityDetailContent');
+            if (!detailContentEl) return;
+            // 确保详情页是可见的
+            const detailPage = document.getElementById('icityDetailPage');
+            if (!detailPage || !detailPage.classList.contains('active')) return;
+
+            const selection = window.getSelection();
+            if (!selection || selection.rangeCount === 0) return;
+            const text = selection.toString().trim();
+            if (text.length === 0) return;
+
+            const range = selection.getRangeAt(0);
+            if (detailContentEl.contains(range.startContainer) || 
+                detailContentEl.contains(range.endContainer) ||
+                detailContentEl.contains(range.commonAncestorContainer)) {
+                showAnnotationPopup(range, text);
+            }
+        }, 400);
     }
     
-    msgEl.innerHTML = `
-        <div style="width:32px; height:32px; min-width:32px; border-radius:50%; background:${msg.sender_avatar ? `url(${msg.sender_avatar}) center/cover` : '#ddd'}; flex-shrink:0; margin:${isSelf ? '0 0 0 8px' : '0 8px 0 0'};"></div>
-        <div style="display:flex; flex-direction:column; ${isSelf ? 'align-items:flex-end;' : 'align-items:flex-start;'}">
-            ${senderLabel}
-            <span style="display:inline-block; padding:8px 12px; border-radius:18px; background:${isSelf ? '#ffe4e8' : '#f2f2f7'}; font-size:14px; line-height:1.4; ${isSelf ? 'border-bottom-right-radius:4px;' : 'border-bottom-left-radius:4px;'}">
-                ${msg.content}
-            </span>
+    // 鼠标选中：mouseup 时检测
+    document.addEventListener('mouseup', function(e) {
+        const detailContentEl = document.getElementById('icityDetailContent');
+        if (detailContentEl && detailContentEl.contains(e.target)) {
+            checkSelection();
+        }
+    });
+
+    // 触屏长按选中：selectionchange + touchend
+    document.addEventListener('selectionchange', function() {
+        const detailPage = document.getElementById('icityDetailPage');
+        if (detailPage && detailPage.classList.contains('active')) {
+            checkSelection();
+        }
+    });
+
+    // 点击其他地方关闭弹窗
+    document.addEventListener('mousedown', function(e) {
+        const popup = document.getElementById('icityAnnotationPopup');
+        if (!popup) return;
+        if (popup.contains(e.target)) return;
+        if (e.target.closest('.annotation-highlight')) return;
+        const detailContentEl = document.getElementById('icityDetailContent');
+        if (detailContentEl && detailContentEl.contains(e.target)) return;
+        closeAnnotationPopup();
+    });
+    
+    // 触屏点击关闭弹窗
+    document.addEventListener('touchstart', function(e) {
+        const popup = document.getElementById('icityAnnotationPopup');
+        if (!popup) return;
+        if (popup.contains(e.target)) return;
+        if (e.target.closest('.annotation-highlight')) return;
+        const detailContentEl = document.getElementById('icityDetailContent');
+        if (detailContentEl && detailContentEl.contains(e.target)) return;
+        closeAnnotationPopup();
+    }, { passive: true });
+}
+
+function showAnnotationPopup(range, selectedText) {
+    const oldPopup = document.getElementById('icityAnnotationPopup');
+    if (oldPopup) oldPopup.remove();
+    
+    const popup = document.createElement('div');
+    popup.id = 'icityAnnotationPopup';
+    popup.className = 'icity-annotation-popup';
+    popup.dataset.selectedText = selectedText;
+    
+    popup.innerHTML = `
+        <div class="annotation-text">已选择：${selectedText.length > 30 ? selectedText.substring(0, 30) + '...' : selectedText}</div>
+        <textarea class="annotation-input" id="icityAnnotationInput" placeholder="添加标注评论..."></textarea>
+        <div class="annotation-buttons">
+            <button class="annotation-btn annotation-btn-cancel" onclick="closeAnnotationPopup()">取消</button>
+            <button class="annotation-btn annotation-btn-save" onclick="saveIcityAnnotation()">保存</button>
         </div>
     `;
     
-    chatBody.appendChild(msgEl);
-    chatBody.scrollTop = chatBody.scrollHeight;
+    document.body.appendChild(popup);
+    
+    let rect;
+    if (range instanceof Range) {
+        rect = range.getBoundingClientRect();
+    } else if (range && range.target) {
+        rect = range.target.getBoundingClientRect();
+    } else {
+        return;
+    }
+
+    popup.style.left = (rect.left + rect.width / 2 - 150) + 'px';
+    popup.style.top = (rect.bottom + 10) + 'px';
+    
+    const popupRect = popup.getBoundingClientRect();
+    if (popupRect.left < 10) popup.style.left = '10px';
+    if (popupRect.right > window.innerWidth - 10) popup.style.left = (window.innerWidth - popupRect.width - 10) + 'px';
+    
+    if (popupRect.bottom > window.innerHeight - 10) {
+        popup.style.top = (rect.top - popupRect.height - 10) + 'px';
+    }
+    
+    setTimeout(() => {
+        document.getElementById('icityAnnotationInput')?.focus();
+    }, 100);
 }
 
-// 显示输入状态
-function showMixedGroupTypingStatus(data) {
-    console.log('[MixedGroup] Typing status:', data);
+function closeAnnotationPopup() {
+    const popup = document.getElementById('icityAnnotationPopup');
+    if (popup) popup.remove();
+    window.getSelection().removeAllRanges();
+}
+
+async function saveIcityAnnotation() {
+    const input = document.getElementById('icityAnnotationInput');
+    const comment = input?.value.trim() || '';
+    const detailContentEl = document.getElementById('icityDetailContent');
+    const diaryId = detailContentEl?.dataset.diaryId;
+    const popup = document.getElementById('icityAnnotationPopup');
     
-    const chatTitleEl = document.getElementById('chat-title');
+    if (!diaryId) {
+        closeAnnotationPopup();
+        return;
+    }
     
-    if (data.is_generating) {
-        // 保存原始标题
-        if (!window._mixedGroupOriginalTitle) {
-            window._mixedGroupOriginalTitle = chatTitleEl?.textContent || '联机群聊';
+    let selectedText = popup?.dataset.selectedText;
+    
+    if (!selectedText) {
+        const selection = window.getSelection();
+        if (selection.rangeCount > 0) {
+            selectedText = selection.toString().trim();
         }
+    }
+    
+    if (!selectedText) {
+        closeAnnotationPopup();
+        return;
+    }
+    
+    showIcityGenerateStatus('正在保存标注...', 'info');
+    
+    try {
+        const annotations = await getIcityAnnotations(diaryId);
+        const annotation = {
+            id: Date.now(),
+            text: selectedText,
+            comment: comment,
+            createdAt: new Date().toISOString(),
+            isAI: false
+        };
         
-        // 显示正在输入状态
-        if (chatTitleEl) {
-            chatTitleEl.innerHTML = `<span style="color:#e74c3c;">🤖 ${data.sender_name} 正在输入...</span>`;
-        }
+        annotations.push(annotation);
+        await saveIcityAnnotations(diaryId, annotations);
         
-        // 同时在聊天区域底部显示提示
-        let typingIndicator = document.getElementById('mixed-typing-indicator');
-        if (!typingIndicator) {
-            typingIndicator = document.createElement('div');
-            typingIndicator.id = 'mixed-typing-indicator';
-            typingIndicator.style.cssText = 'text-align:center; padding:10px; color:#e74c3c; font-size:13px; background:rgba(231,76,60,0.05); border-radius:8px; margin:8px 16px;';
-            document.getElementById('chat-body')?.appendChild(typingIndicator);
-        }
-        typingIndicator.innerHTML = `🤖 ${data.sender_name} 正在输入<span class="typing-dots">...</span>`;
-        typingIndicator.style.display = 'block';
+        const originalContent = detailContentEl.dataset.originalContent || detailContentEl.textContent;
+        await renderDiaryContentWithAnnotations(diaryId, originalContent);
         
-        // 滚动到底部
-        const chatBody = document.getElementById('chat-body');
-        if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
-    } else {
-        // 恢复原始标题
-        if (chatTitleEl && window._mixedGroupOriginalTitle) {
-            chatTitleEl.textContent = window._mixedGroupOriginalTitle;
-        }
-        
-        // 隐藏输入指示器
-        const typingIndicator = document.getElementById('mixed-typing-indicator');
-        if (typingIndicator) {
-            typingIndicator.style.display = 'none';
-        }
+        closeAnnotationPopup();
+        showIcityGenerateStatus('标注已保存', 'success');
+    } catch (error) {
+        console.error('保存标注失败:', error);
+        showIcityGenerateStatus('保存标注失败: ' + error.message, 'error');
+        closeAnnotationPopup();
     }
 }
 
-// 在connectOnlineSocket后初始化混合群聊WebSocket
-const originalConnectOnlineSocket = connectOnlineSocket;
-connectOnlineSocket = function() {
-    originalConnectOnlineSocket();
-    setTimeout(initMixedGroupSocket, 500);
-};
+// 获取标注数据（从Dexie）
+async function getIcityAnnotations(diaryId) {
+    try {
+        const key = `icity_annotations_${diaryId}`;
+        const oldData = localStorage.getItem(key);
+        if (oldData) {
+            try {
+                const annotations = JSON.parse(oldData);
+                for (const ann of annotations) {
+                    await icityDb.annotations.put({
+                        id: ann.id,
+                        diaryId: diaryId,
+                        text: ann.text,
+                        comment: ann.comment || '',
+                        createdAt: ann.createdAt || new Date().toISOString(),
+                        accountId: window.icityCurrentAccountId || 0
+                    });
+                }
+                localStorage.removeItem(key);
+            } catch (e) {
+                console.error('迁移标注数据失败:', e);
+            }
+        }
+        
+        const annotations = await icityDb.annotations.where('diaryId').equals(diaryId).toArray();
+        return annotations;
+    } catch (error) {
+        console.error('获取标注失败:', error);
+        return [];
+    }
+}
+
+// 保存标注数据（到Dexie）
+async function saveIcityAnnotations(diaryId, annotations) {
+    try {
+        await icityDb.annotations.where('diaryId').equals(diaryId).delete();
+        for (const ann of annotations) {
+            await icityDb.annotations.put({
+                id: ann.id,
+                diaryId: diaryId,
+                text: ann.text,
+                comment: ann.comment || '',
+                createdAt: ann.createdAt || new Date().toISOString(),
+                accountId: window.icityCurrentAccountId || 0
+            });
+        }
+    } catch (error) {
+        console.error('保存标注失败:', error);
+    }
+}
+
+// 渲染带标注的日记内容
+async function renderDiaryContentWithAnnotations(diaryId, content) {
+    const detailContentEl = document.getElementById('icityDetailContent');
+    if (!detailContentEl) return;
+    
+    detailContentEl.dataset.diaryId = diaryId;
+    detailContentEl.dataset.originalContent = content;
+    
+    const annotations = await getIcityAnnotations(diaryId);
+    const annotationsArray = Array.isArray(annotations) ? annotations : [];
+    
+    if (annotationsArray.length === 0) {
+        detailContentEl.textContent = content;
+    } else {
+        let html = icityEscapeHtml(content);
+        
+        const sortedAnnotations = [...annotationsArray].sort((a, b) => {
+            return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+        });
+        
+        for (let i = sortedAnnotations.length - 1; i >= 0; i--) {
+            const ann = sortedAnnotations[i];
+            const escapedText = icityEscapeHtml(ann.text);
+            const highlightHtml = `<span class="annotation-highlight" data-annotation-id="${ann.id}" title="${icityEscapeHtml(ann.comment || '无评论')}">${escapedText}</span>`;
+            const lastIndex = html.lastIndexOf(escapedText);
+            if (lastIndex !== -1) {
+                html = html.substring(0, lastIndex) + highlightHtml + html.substring(lastIndex + escapedText.length);
+            }
+        }
+        
+        detailContentEl.innerHTML = html;
+        
+        detailContentEl.querySelectorAll('.annotation-highlight').forEach(highlight => {
+            highlight.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const annId = this.dataset.annotationId;
+                const annotation = annotationsArray.find(a => a.id == annId);
+                if (annotation) {
+                    showIcityAnnotationTooltip(e, annotation);
+                }
+            });
+        });
+    }
+    
+    await updateIcityAnnotationList(diaryId);
+}
+
+// 更新标注列表
+async function updateIcityAnnotationList(diaryId) {
+    const annotationList = document.getElementById('icityAnnotationList');
+    if (!annotationList) return;
+    
+    const annotations = await getIcityAnnotations(diaryId);
+    
+    if (annotations.length === 0) {
+        annotationList.style.display = 'none';
+    } else {
+        annotationList.style.display = 'block';
+        annotationList.innerHTML = '';
+        
+        annotations.forEach(ann => {
+            const item = document.createElement('div');
+            item.className = 'icity-annotation-item';
+            item.innerHTML = `
+                <div class="annotation-quote">"${icityEscapeHtml(ann.text)}"</div>
+                <div class="annotation-comment">${icityEscapeHtml(ann.comment || '无评论')}</div>
+                <div style="font-size: 11px; color: #999; margin-top: 6px;">${new Date(ann.createdAt).toLocaleString('zh-CN')}</div>
+            `;
+            annotationList.appendChild(item);
+        });
+    }
+}
+
+// 显示标注提示
+function showIcityAnnotationTooltip(event, annotation) {
+    const oldTooltip = document.getElementById('icityAnnotationTooltip');
+    if (oldTooltip) oldTooltip.remove();
+    
+    const tooltip = document.createElement('div');
+    tooltip.id = 'icityAnnotationTooltip';
+    tooltip.className = 'icity-annotation-tooltip';
+    tooltip.textContent = annotation.comment || '无评论';
+    
+    document.body.appendChild(tooltip);
+    
+    const rect = event.target.getBoundingClientRect();
+    tooltip.style.left = (rect.left + rect.width / 2 - tooltip.offsetWidth / 2) + 'px';
+    tooltip.style.top = (rect.top - tooltip.offsetHeight - 8) + 'px';
+    
+    setTimeout(() => {
+        tooltip.remove();
+    }, 3000);
+}
+
+// icity HTML转义（使用不同名称避免冲突）
+function icityEscapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// 暴露 icity 全局函数
+window.openIcityApp = openIcityApp;
+window.closeIcityApp = closeIcityApp;
+window.exitIcityToSelect = exitIcityToSelect;
+window.openIcityRoleModal = openIcityRoleModal;
+window.closeIcityRoleModal = closeIcityRoleModal;
+window.openIcityEditProfileModal = openIcityEditProfileModal;
+window.closeIcityEditProfileModal = closeIcityEditProfileModal;
+window.saveIcityProfile = saveIcityProfile;
+window.closeAnnotationPopup = closeAnnotationPopup;
+window.saveIcityAnnotation = saveIcityAnnotation;

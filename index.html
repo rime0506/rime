@@ -16,19 +16,17 @@
     <!-- iOS 图标 -->
     <link rel="apple-touch-icon" href="https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png">
     
-    <!-- 引入外部样式表 -->
-    <link rel="stylesheet" href="style.css">
+    <!-- 引入外部样式表 - 添加版本号防止缓存 -->
+    <link rel="stylesheet" href="style.css?v=2.0">
     
     <!-- Font Awesome 图标库 -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css">
     
-    <!-- 注意：内嵌的 style 标签已删除，样式已移至 style.css -->
-    <!-- 如需保留内嵌样式作为备用，可以取消下面的注释 -->
- 
+    <!-- 预加载关键资源 -->
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/dexie@3.2.4/dist/dexie.min.js" as="script">
+    
     <script src="https://cdn.jsdelivr.net/npm/dexie@3.2.4/dist/dexie.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <!-- Socket.IO 客户端 用于实时推送 -->
-    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
     <!-- SortableJS 用于拖拽排序 -->
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 </head>
@@ -107,7 +105,7 @@
                     </div>
                 </div>
 
-                <div class="app-icon" id="icon-photo" onclick="showMusicAppPage()" style="display:none;">
+                <div class="app-icon" id="icon-photo" onclick="showMusicAppPage()">
                     <div class="icon"></div>
                     <div class="name">网易云</div>
                 </div>
@@ -118,6 +116,10 @@
                 <div class="app-icon" id="icon-cabin" onclick="showCabinPage()">
                     <div class="icon"></div>
                     <div class="name">小屋</div>
+                </div>
+                <div class="app-icon" id="icon-icity" onclick="openIcityApp()">
+                    <div class="icon"></div>
+                    <div class="name">icity</div>
                 </div>
             </div>
         </div>
@@ -340,6 +342,29 @@
             <div class="custom-edit-tip" style="margin-top: 16px;">头像气泡背景色</div>
             <input type="color" class="custom-edit-input" id="bubble-color-input" value="#FFF7FA" style="height: 50px; cursor: pointer;">
         </div>
+
+        <!-- 折叠项8：全局字体设置 -->
+        <div class="custom-item" onclick="toggleExpand('expand8')">
+            <div class="custom-item-text">全局字体设置</div>
+            <div class="custom-item-arrow" id="arrow8">→</div>
+        </div>
+        <div class="custom-expand" id="expand8">
+            <div class="custom-edit-tip">粘贴在线字体链接（如 Google Fonts）</div>
+            <input type="text" class="custom-edit-input" id="custom-font-input" placeholder="如：https://fonts.googleapis.com/css2?family=...">
+            <div class="custom-edit-tip" style="margin-top: 12px;">输入字体名称（family name）</div>
+            <input type="text" class="custom-edit-input" id="custom-font-name-input" placeholder="如：Noto Sans SC、Ma Shan Zheng">
+            <div class="custom-item" onclick="previewCustomFont()" style="margin-top: 12px; background: #FFF7FA;">
+                <div class="custom-item-text">预览字体效果</div>
+                <div class="custom-item-arrow">👁</div>
+            </div>
+            <div class="font-preview-box" id="font-preview-box">
+                <div class="font-preview-text" id="font-preview-text">这是字体预览效果 ABC 123</div>
+            </div>
+            <div class="custom-item" onclick="clearCustomFont()" style="margin-top: 8px; background: #fff0f0;">
+                <div class="custom-item-text" style="color: #e57373;">恢复默认字体</div>
+                <div class="custom-item-arrow" style="color: #e57373;">↺</div>
+            </div>
+        </div>
     </div>
 
     <!-- 系统设置页面 -->
@@ -401,6 +426,16 @@
                     <div class="api-arrow" id="api-setting-arrow">▼</div>
                 </div>
                 <div class="api-body" id="api-setting-body">
+                    
+                    <!-- API 预设选择 -->
+                    <div class="api-label">API 预设</div>
+                    <div style="display:flex; gap:8px; margin-bottom:16px;">
+                        <select class="api-input" id="api-preset-select" onchange="loadApiPreset(this.value)" style="flex:1;">
+                            <option value="">-- 选择预设 --</option>
+                        </select>
+                        <button onclick="saveApiPreset()" style="padding:8px 12px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px; font-size:12px; white-space:nowrap; cursor:pointer;">保存预设</button>
+                        <button onclick="deleteApiPreset()" style="padding:8px 12px; background:#f0f0f0; color:#666; border:none; border-radius:8px; font-size:12px; white-space:nowrap; cursor:pointer;">删除</button>
+                    </div>
                     
                     <div class="api-label">反代地址</div>
                     <div class="api-input-group">
@@ -551,77 +586,67 @@
                 </div>
             </div>
             
-            <!-- 联机社交 折叠卡片 -->
+            <!-- 联机设置 折叠卡片 -->
             <div class="api-setting-card">
                 <div class="api-header" onclick="toggleOnlineSettings()">
-                    <div class="api-title">🌐 联机社交</div>
+                    <div class="api-title">🌐 联机设置</div>
                     <div class="api-arrow" id="online-setting-arrow">▼</div>
                 </div>
                 <div class="api-body" id="online-setting-body" style="display: none;">
                     
-                    <!-- 未登录状态 -->
-                    <div id="online-logged-out">
-                        <div style="text-align: center; padding: 20px 0;">
-                            <div style="font-size: 48px; margin-bottom: 16px;">👥</div>
-                            <div style="font-size: 14px; color: #666; margin-bottom: 20px;">登录后可与其他用户互加好友、实时聊天</div>
-                        </div>
-                        
-                        <div class="api-label">用户名</div>
-                        <div class="api-input-group">
-                            <input type="text" class="api-input" id="online-username" placeholder="3-20个字符">
-                        </div>
-                        
-                        <div class="api-label">密码</div>
-                        <div class="api-input-group">
-                            <input type="password" class="api-input" id="online-password" placeholder="至少6个字符">
-                        </div>
-                        
-                        <div style="display: flex; gap: 12px; margin-top: 16px;">
-                            <button class="test-btn" onclick="onlineLogin()" style="flex: 1;">登录</button>
-                            <button class="test-btn" onclick="showOnlineRegisterModal()" style="flex: 1; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">注册</button>
-                        </div>
-                        
-                        <div id="online-login-result" style="margin-top: 12px; font-size: 12px; text-align: center; color: #999;"></div>
+                    <!-- 服务器地址 -->
+                    <div class="api-label">服务器地址</div>
+                    <div class="api-input-group">
+                        <input type="text" class="api-input" id="online-server-url" placeholder="wss://your-server.com 或 ws://localhost:3000" onchange="saveOnlineSettings()">
+                    </div>
+                    <div style="font-size: 11px; color: #999; margin-top: 4px; padding: 0 4px;">
+                        填写自部署的后端服务器WebSocket地址
                     </div>
                     
-                    <!-- 已登录状态 -->
-                    <div id="online-logged-in" style="display: none;">
-                        <div style="display: flex; align-items: center; padding: 16px; background: linear-gradient(135deg, #f5f7fa 0%, #e4e8eb 100%); border-radius: 12px; margin-bottom: 16px;">
-                            <div id="online-user-avatar" style="width: 56px; height: 56px; border-radius: 50%; background: linear-gradient(135deg, #FFB6C1 0%, #FF69B4 100%); display: flex; align-items: center; justify-content: center; font-size: 24px; color: #fff; margin-right: 14px;">👤</div>
-                            <div style="flex: 1;">
-                                <div id="online-user-nickname" style="font-size: 17px; font-weight: 600; color: #333;"></div>
-                                <div style="display: flex; align-items: center; margin-top: 4px;">
-                                    <span style="font-size: 12px; color: #999;">虚拟账号：</span>
-                                    <span id="online-user-wechat-id" style="font-size: 13px; color: #667eea; font-weight: 600;"></span>
-                                    <button onclick="copyOnlineWechatId()" style="margin-left: 8px; padding: 2px 8px; font-size: 11px; border: 1px solid #ddd; border-radius: 4px; background: #fff; cursor: pointer;">复制</button>
-                                </div>
-                            </div>
+                    <div style="display:flex; gap:8px; margin-top:12px;">
+                        <button class="test-btn" onclick="testOnlineConnection()" style="flex:1;">
+                            <span id="test-online-btn-text">测试连接</span>
+                        </button>
+                    </div>
+                    <div id="online-connection-status" style="margin-top:8px; font-size:12px; color:#999; text-align:center;"></div>
+                    
+                    <!-- 分割线 -->
+                    <div style="height:1px; background:#e0e0e0; margin:20px 0;"></div>
+                    
+                    <!-- 账号状态 -->
+                    <div class="api-label">账号状态</div>
+                    <div id="online-account-status" style="padding:12px; background:#f5f5f5; border-radius:8px; margin-bottom:12px;">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <div id="online-status-dot" style="width:8px; height:8px; border-radius:50%; background:#ccc;"></div>
+                            <span id="online-status-text" style="font-size:14px; color:#666;">未连接</span>
                         </div>
-                        
-                        <div class="setting-group" style="margin: 0;">
-                            <div class="setting-item" onclick="showOnlineSearchModal()">
-                                <div class="setting-item-text">🔍 搜索用户</div>
-                                <div style="color: #999; font-size: 12px;">通过社交ID添加好友</div>
-                                <div class="setting-arrow">›</div>
-                            </div>
-                            <div class="setting-item" onclick="showOnlineFriendRequests()">
-                                <div class="setting-item-text">📬 好友请求</div>
-                                <div style="color: #999; font-size: 12px;" id="online-request-count">查看待处理请求</div>
-                                <div class="setting-arrow">›</div>
-                            </div>
-                            <div class="setting-item" onclick="showOnlineFriendList()">
-                                <div class="setting-item-text">👥 好友列表</div>
-                                <div style="color: #999; font-size: 12px;" id="online-friend-count">管理在线好友</div>
-                                <div class="setting-arrow">›</div>
-                            </div>
-                            <div class="setting-item" onclick="showOnlineProfileEdit()">
-                                <div class="setting-item-text">✏️ 编辑资料</div>
-                                <div style="color: #999; font-size: 12px;">修改昵称、头像、简介</div>
-                                <div class="setting-arrow">›</div>
-                            </div>
+                        <div id="online-user-info" style="display:none; margin-top:8px; font-size:13px; color:#333;">
+                            用户名：<span id="online-username-display">-</span>
                         </div>
-                        
-                        <button class="test-btn" onclick="onlineLogout()" style="margin-top: 16px; background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%);">退出登录</button>
+                    </div>
+                    
+                    <!-- 登录/注册按钮 -->
+                    <div id="online-auth-buttons" style="display:flex; gap:10px;">
+                        <button onclick="showOnlineLoginModal()" style="flex:1; padding:12px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px; font-size:14px; cursor:pointer;">登录</button>
+                        <button onclick="showOnlineRegisterModal()" style="flex:1; padding:12px; background:#f0f0f0; color:#333; border:none; border-radius:8px; font-size:14px; cursor:pointer;">注册</button>
+                    </div>
+                    
+                    <!-- 已登录时显示 -->
+                    <div id="online-logged-in-actions" style="display:none;">
+                        <button onclick="onlineLogout()" style="width:100%; padding:12px; background:#f0f0f0; color:#ff3b30; border:none; border-radius:8px; font-size:14px; cursor:pointer;">退出登录</button>
+                    </div>
+                    
+                    <!-- 分割线 -->
+                    <div style="height:1px; background:#e0e0e0; margin:20px 0;"></div>
+                    
+                    <!-- 使用说明 -->
+                    <div style="padding:12px; background:#fff5f7; border-radius:8px; font-size:12px; color:#666; line-height:1.6;">
+                        <div style="font-weight:600; color:#333; margin-bottom:6px;">📖 使用说明</div>
+                        <div>1. 自己或朋友部署后端服务器</div>
+                        <div>2. 填入服务器地址并测试连接</div>
+                        <div>3. 注册/登录主账号</div>
+                        <div>4. 在「微信-我」页面上线你的User角色</div>
+                        <div>5. 通过虚拟微信号搜索添加联机好友</div>
                     </div>
                 </div>
             </div>
@@ -650,132 +675,107 @@
     <!-- 隐藏的数据导入文件选择器 -->
     <input type="file" id="import-data-input" style="display:none;" accept=".json" onchange="importAllData(this)">
 
-    <!-- 联机注册模态框 -->
-    <div id="online-register-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center;">
-        <div style="background:#fff; border-radius:16px; max-width:400px; width:90%; max-height:90vh; overflow-y:auto;">
-            <div style="padding:16px; text-align:center; font-size:17px; font-weight:600; border-bottom:1px solid #eee;">注册联机账号</div>
-            <div style="padding: 20px;">
-                <!-- 选择角色档案 -->
-                <div style="margin-bottom: 16px;">
-                    <label style="display: block; font-size: 14px; color: #666; margin-bottom: 8px;">选择要绑定的角色档案</label>
-                    <div id="register-user-list" style="max-height: 200px; overflow-y: auto; border: 1px solid #eee; border-radius: 10px;">
-                        <!-- 动态填充用户角色列表 -->
+    <!-- 联机登录弹窗 -->
+    <div class="modal-overlay" id="online-login-modal" style="display:none;">
+        <div class="modal-box" style="max-width:340px;">
+            <div class="modal-title">🔐 联机登录</div>
+            <div style="margin-bottom:16px;">
+                <label style="font-size:13px; color:#666; display:block; margin-bottom:6px;">用户名或邮箱</label>
+                <input type="text" class="modal-input" id="online-login-username" placeholder="输入用户名或邮箱">
+            </div>
+            <div style="margin-bottom:20px;">
+                <label style="font-size:13px; color:#666; display:block; margin-bottom:6px;">密码</label>
+                <input type="password" class="modal-input" id="online-login-password" placeholder="输入密码">
+            </div>
+            <div class="modal-btns">
+                <button class="modal-btn btn-cancel" onclick="closeModal('online-login-modal')">取消</button>
+                <button class="modal-btn btn-confirm" onclick="doOnlineLogin()">登录</button>
+            </div>
+            <div style="text-align:center; margin-top:12px;">
+                <span style="font-size:12px; color:#999;">还没有账号？</span>
+                <span style="font-size:12px; color:var(--ins-pink); cursor:pointer;" onclick="closeModal('online-login-modal');showOnlineRegisterModal();">立即注册</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 联机注册弹窗 -->
+    <div class="modal-overlay" id="online-register-modal" style="display:none;">
+        <div class="modal-box" style="max-width:340px;">
+            <div class="modal-title">📝 联机注册</div>
+            <div style="margin-bottom:12px;">
+                <label style="font-size:13px; color:#666; display:block; margin-bottom:6px;">用户名</label>
+                <input type="text" class="modal-input" id="online-register-username" placeholder="3-20位字母数字下划线">
+            </div>
+            <div style="margin-bottom:12px;">
+                <label style="font-size:13px; color:#666; display:block; margin-bottom:6px;">邮箱</label>
+                <input type="email" class="modal-input" id="online-register-email" placeholder="用于找回密码（可选）">
+            </div>
+            <div style="margin-bottom:12px;">
+                <label style="font-size:13px; color:#666; display:block; margin-bottom:6px;">密码</label>
+                <input type="password" class="modal-input" id="online-register-password" placeholder="至少6位">
+            </div>
+            <div style="margin-bottom:20px;">
+                <label style="font-size:13px; color:#666; display:block; margin-bottom:6px;">确认密码</label>
+                <input type="password" class="modal-input" id="online-register-password2" placeholder="再次输入密码">
+            </div>
+            <div class="modal-btns">
+                <button class="modal-btn btn-cancel" onclick="closeModal('online-register-modal')">取消</button>
+                <button class="modal-btn btn-confirm" onclick="doOnlineRegister()">注册</button>
+            </div>
+            <div style="text-align:center; margin-top:12px;">
+                <span style="font-size:12px; color:#999;">已有账号？</span>
+                <span style="font-size:12px; color:var(--ins-pink); cursor:pointer;" onclick="closeModal('online-register-modal');showOnlineLoginModal();">去登录</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 联机搜索好友弹窗 -->
+    <div class="modal-overlay" id="online-search-modal" style="display:none;">
+        <div class="modal-box" style="max-width:360px; max-height:80vh; display:flex; flex-direction:column;">
+            <div class="modal-title">🌐 联机搜索</div>
+            <div style="margin-bottom:16px;">
+                <label style="font-size:13px; color:#666; display:block; margin-bottom:6px;">搜索虚拟微信号</label>
+                <div style="display:flex; gap:8px;">
+                    <input type="text" class="modal-input" id="online-search-input" placeholder="输入对方的虚拟微信号" style="flex:1;">
+                    <button onclick="doOnlineSearch()" style="padding:10px 16px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px; font-size:14px; cursor:pointer; white-space:nowrap;">搜索</button>
+                </div>
+            </div>
+            
+            <!-- 搜索结果 -->
+            <div id="online-search-result" style="display:none; padding:16px; background:#f9f9f9; border-radius:12px; margin-bottom:16px;">
+                <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
+                    <div id="online-search-avatar" style="width:50px; height:50px; border-radius:8px; background-size:cover; background-position:center; background-color:#e0e0e0;"></div>
+                    <div style="flex:1;">
+                        <div id="online-search-nickname" style="font-size:16px; font-weight:600; color:#333;"></div>
+                        <div id="online-search-wxid" style="font-size:12px; color:#999; margin-top:2px;"></div>
                     </div>
+                    <div id="online-search-online-status" style="font-size:11px; padding:3px 8px; border-radius:10px; background:#e8f5e9; color:#4caf50;">在线</div>
+                </div>
+                <div id="online-search-bio" style="font-size:13px; color:#666; margin-bottom:12px; padding:8px; background:#fff; border-radius:6px;"></div>
+                
+                <!-- 选择用哪个身份添加 -->
+                <div style="margin-bottom:12px;">
+                    <label style="font-size:13px; color:#666; display:block; margin-bottom:6px;">选择你的身份</label>
+                    <select id="online-search-my-persona" class="modal-input" style="width:100%;">
+                        <!-- 动态填充已上线的User角色 -->
+                    </select>
                 </div>
                 
-                <!-- 选中的角色信息预览 -->
-                <div id="register-selected-preview" style="display: none; background: linear-gradient(135deg, #f5f7fa 0%, #e8f4f8 100%); border-radius: 10px; padding: 14px; margin-bottom: 16px; border: 2px solid #667eea;">
-                    <div style="font-size: 12px; color: #667eea; margin-bottom: 8px; font-weight: 500;">✓ 已选择</div>
-                    <div style="display: flex; align-items: center;">
-                        <div id="register-bind-avatar" style="width: 44px; height: 44px; border-radius: 50%; background: #ddd; margin-right: 12px; background-size: cover; background-position: center;"></div>
-                        <div>
-                            <div id="register-bind-nickname" style="font-size: 15px; font-weight: 600; color: #333;"></div>
-                            <div style="font-size: 12px; color: #667eea; margin-top: 2px;">虚拟账号: <span id="register-bind-wechat"></span></div>
-                        </div>
-                    </div>
+                <div style="margin-bottom:12px;">
+                    <label style="font-size:13px; color:#666; display:block; margin-bottom:6px;">申请备注</label>
+                    <input type="text" class="modal-input" id="online-search-message" placeholder="我是xxx">
                 </div>
                 
-                <div style="margin-bottom: 16px;">
-                    <label style="display: block; font-size: 14px; color: #666; margin-bottom: 6px;">设置登录用户名</label>
-                    <input type="text" id="register-online-username" placeholder="3-20个字符，用于登录后端" style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; box-sizing: border-box;">
-                </div>
-                <div style="margin-bottom: 16px;">
-                    <label style="display: block; font-size: 14px; color: #666; margin-bottom: 6px;">设置密码</label>
-                    <input type="password" id="register-online-password" placeholder="至少6个字符" style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; box-sizing: border-box;">
-                </div>
-                <div id="register-online-result" style="font-size: 13px; color: #999; margin-bottom: 12px; min-height: 20px;"></div>
-                <div style="display: flex; gap: 12px;">
-                    <button onclick="hideOnlineRegisterModal()" style="flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 8px; background: #fff; font-size: 15px; cursor: pointer;">取消</button>
-                    <button onclick="onlineRegister()" style="flex: 1; padding: 12px; border: none; border-radius: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; font-size: 15px; cursor: pointer;">注册</button>
-                </div>
+                <button onclick="sendOnlineFriendRequest()" style="width:100%; padding:12px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px; font-size:14px; cursor:pointer;">发送好友申请</button>
             </div>
-        </div>
-    </div>
-
-    <!-- 搜索用户模态框 -->
-    <div id="online-search-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center;">
-        <div style="background:#fff; border-radius:16px; max-width:360px; width:90%;">
-            <div style="padding:16px; text-align:center; font-size:17px; font-weight:600; border-bottom:1px solid #eee;">搜索用户</div>
-            <div style="padding: 20px;">
-                <div style="display: flex; gap: 10px; margin-bottom: 16px;">
-                    <input type="text" id="search-wechat-id" placeholder="输入对方的虚拟账号" style="flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px;">
-                    <button onclick="searchOnlineUser()" style="padding: 12px 20px; border: none; border-radius: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; font-size: 14px; cursor: pointer;">搜索</button>
-                </div>
-                <div id="search-user-result" style="min-height: 80px;">
-                    <div style="text-align: center; color: #999; font-size: 14px; padding: 20px;">输入对方角色档案的虚拟账号搜索</div>
-                </div>
-                <button onclick="hideOnlineSearchModal()" style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; background: #fff; font-size: 15px; cursor: pointer; margin-top: 12px;">关闭</button>
+            
+            <!-- 无结果 -->
+            <div id="online-search-empty" style="display:none; text-align:center; padding:30px; color:#999;">
+                <div style="font-size:14px;">未找到该用户</div>
+                <div style="font-size:12px; margin-top:4px;">请检查微信号是否正确</div>
             </div>
-        </div>
-    </div>
-
-    <!-- 好友请求列表模态框 -->
-    <div id="online-requests-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center;">
-        <div style="background:#fff; border-radius:16px; max-width:400px; width:90%; max-height:80vh;">
-            <div style="padding:16px; text-align:center; font-size:17px; font-weight:600; border-bottom:1px solid #eee;">好友请求</div>
-            <div id="online-requests-list" style="padding: 16px; max-height: 400px; overflow-y: auto;">
-                <div style="text-align: center; color: #999; font-size: 14px; padding: 40px 20px;">暂无好友请求</div>
-            </div>
-            <div style="padding: 0 16px 16px;">
-                <button onclick="hideOnlineFriendRequests()" style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; background: #fff; font-size: 15px; cursor: pointer;">关闭</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- 好友列表模态框 -->
-    <div id="online-friends-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center;">
-        <div style="background:#fff; border-radius:16px; max-width:400px; width:90%; max-height:80vh;">
-            <div style="padding:16px; text-align:center; font-size:17px; font-weight:600; border-bottom:1px solid #eee;">在线好友</div>
-            <div id="online-friends-list" style="padding: 16px; max-height: 400px; overflow-y: auto;">
-                <div style="text-align: center; color: #999; font-size: 14px; padding: 40px 20px;">暂无好友</div>
-            </div>
-            <div style="padding: 0 16px 16px;">
-                <button onclick="hideOnlineFriendList()" style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; background: #fff; font-size: 15px; cursor: pointer;">关闭</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- 编辑资料模态框 -->
-    <div id="online-profile-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center;">
-        <div style="background:#fff; border-radius:16px; max-width:360px; width:90%;">
-            <div style="padding:16px; text-align:center; font-size:17px; font-weight:600; border-bottom:1px solid #eee;">编辑资料</div>
-            <div style="padding: 20px;">
-                <div style="text-align: center; margin-bottom: 20px;">
-                    <div id="profile-avatar-preview" onclick="document.getElementById('profile-avatar-input').click()" style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FFB6C1 0%, #FF69B4 100%); margin: 0 auto; display: flex; align-items: center; justify-content: center; font-size: 36px; color: #fff; cursor: pointer;">👤</div>
-                    <div style="font-size: 12px; color: #999; margin-top: 8px;">点击更换头像</div>
-                    <input type="file" id="profile-avatar-input" accept="image/*" style="display: none;" onchange="handleProfileAvatarChange(this)">
-                </div>
-                <div style="margin-bottom: 16px;">
-                    <label style="display: block; font-size: 14px; color: #666; margin-bottom: 6px;">昵称</label>
-                    <input type="text" id="profile-nickname" placeholder="你的昵称" style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; box-sizing: border-box;">
-                </div>
-                <div style="margin-bottom: 16px;">
-                    <label style="display: block; font-size: 14px; color: #666; margin-bottom: 6px;">个性签名</label>
-                    <textarea id="profile-bio" placeholder="介绍一下自己..." style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; box-sizing: border-box; min-height: 80px; resize: none;"></textarea>
-                </div>
-                <div style="display: flex; gap: 12px;">
-                    <button onclick="hideOnlineProfileEdit()" style="flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 8px; background: #fff; font-size: 15px; cursor: pointer;">取消</button>
-                    <button onclick="saveOnlineProfile()" style="flex: 1; padding: 12px; border: none; border-radius: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; font-size: 15px; cursor: pointer;">保存</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 用户间聊天窗口 -->
-    <div class="wechat-page" id="online-chat-page" style="display: none; z-index: 250;">
-        <div class="chat-header">
-            <div class="back-btn" onclick="hideOnlineChatPage()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0;">
-                <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
-            </div>
-            <div class="chat-title" id="online-chat-title">聊天</div>
-            <div style="width: 40px;"></div>
-        </div>
-        <div class="chat-body" id="online-chat-body" style="flex:1; overflow-y:auto; padding:16px;">
-            <!-- 动态渲染消息 -->
-        </div>
-        <div class="chat-footer">
-            <input type="text" class="chat-input" id="online-chat-input" placeholder="输入消息..." onkeypress="if(event.key==='Enter')sendOnlineMessage()">
-            <button class="chat-send-btn" onclick="sendOnlineMessage()">发送</button>
+            
+            <button class="modal-btn btn-cancel" onclick="closeModal('online-search-modal')" style="margin-top:auto;">关闭</button>
         </div>
     </div>
 
@@ -824,17 +824,17 @@
                     </div>
                     <div>创建群聊</div>
                 </div>
-                <div class="wechat-menu-item" onclick="showAddRealFriendModal()">
-                    <div class="wechat-menu-icon">
-                        <svg class="svg-icon" style="width:20px; height:20px; stroke:#fff;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4M12 8h.01"></path></svg>
+                <div class="wechat-menu-item" onclick="showOnlineSearchModal()" style="border-top:1px solid rgba(255,255,255,0.1);">
+                    <div class="wechat-menu-icon" style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                        <svg class="svg-icon" style="width:20px; height:20px; stroke:#fff;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
                     </div>
-                    <div>添加真人好友</div>
+                    <div>联机搜索</div>
                 </div>
-                <div class="wechat-menu-item" onclick="showCreateMixedGroupModal()">
-                    <div class="wechat-menu-icon">
-                        <svg class="svg-icon" style="width:20px; height:20px; stroke:#fff;" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>
+                <div class="wechat-menu-item" onclick="showCreateOnlineGroupModal()">
+                    <div class="wechat-menu-icon" style="background:linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                        <svg class="svg-icon" style="width:20px; height:20px; stroke:#fff;" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
                     </div>
-                    <div>联机群聊</div>
+                    <div>创建联机群聊</div>
                 </div>
             </div>
         </div>
@@ -972,6 +972,190 @@
         </div>
     </div>
 
+    <!-- 收藏页面 -->
+    <div class="wechat-page" id="favorites-page" style="display:none; background:#f2f2f7;">
+        <div class="wechat-header" style="background:#fff;">
+            <div class="back-btn" onclick="hideFavoritesPage()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0; color:var(--ins-text);">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="wechat-title">收藏</div>
+            <div style="width:40px;"></div>
+        </div>
+        
+        <div style="flex:1; overflow-y:auto; padding:16px;">
+            <!-- 分类标签 -->
+            <div style="display:flex; gap:10px; margin-bottom:16px; overflow-x:auto; padding-bottom:8px;">
+                <div class="fav-tab active" data-type="all" onclick="switchFavTab('all')" style="padding:8px 16px; background:var(--ins-pink); color:#fff; border-radius:20px; font-size:14px; white-space:nowrap; cursor:pointer;">全部</div>
+                <div class="fav-tab" data-type="summaries" onclick="switchFavTab('summaries')" style="padding:8px 16px; background:#fff; color:#666; border-radius:20px; font-size:14px; white-space:nowrap; cursor:pointer; border:1px solid #e0e0e0;">聊天总结</div>
+            </div>
+            
+            <!-- 收藏列表 -->
+            <div id="favorites-list" style="display:grid; grid-template-columns: repeat(1, 1fr); gap:12px;">
+                <!-- 动态生成 -->
+            </div>
+            
+            <!-- 空状态 -->
+            <div id="favorites-empty" style="display:none; text-align:center; padding:60px 20px; color:#999;">
+                <svg class="svg-icon" style="width:64px; height:64px; stroke:#ccc; margin-bottom:16px;" viewBox="0 0 24 24">
+                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+                </svg>
+                <div style="font-size:16px; margin-bottom:8px;">暂无收藏</div>
+                <div style="font-size:14px;">聊天总结会自动保存到这里</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 总结详情页面 -->
+    <div class="wechat-page" id="summary-detail-page" style="display:none; background:#fff;">
+        <div class="wechat-header" style="background:#fff;">
+            <div class="back-btn" onclick="hideSummaryDetailPage()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0; color:var(--ins-text);">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="wechat-title" id="summary-detail-title">聊天总结</div>
+            <div id="summary-detail-actions" style="display:flex; gap:12px; align-items:center;">
+                <div class="wechat-add" onclick="toggleEditSummary()" id="summary-edit-btn" style="color:var(--ins-pink); font-size:14px; cursor:pointer;">编辑</div>
+                <div class="wechat-add" onclick="saveSummaryEdit()" id="summary-save-btn" style="display:none; color:var(--ins-pink); font-size:14px; cursor:pointer;">保存</div>
+                <div class="wechat-add" onclick="cancelEditSummary()" id="summary-cancel-btn" style="display:none; color:#666; font-size:14px; cursor:pointer;">取消</div>
+                <div class="wechat-add" onclick="deleteSummary()" id="summary-delete-btn" style="color:#ff3b30; font-size:14px; cursor:pointer;">删除</div>
+            </div>
+        </div>
+        
+        <div style="flex:1; overflow-y:auto; padding:16px;">
+            <!-- 总结头部信息 -->
+            <div style="display:flex; align-items:center; margin-bottom:20px; padding:16px; background:#f9f9f9; border-radius:12px;">
+                <div id="summary-detail-avatar" style="width:50px; height:50px; border-radius:10px; background-size:cover; background-position:center; background-color:#e0e0e0; margin-right:12px;"></div>
+                <div style="flex:1;">
+                    <div id="summary-detail-name" style="font-size:17px; font-weight:600; color:#333; margin-bottom:4px;">角色名称</div>
+                    <div id="summary-detail-time" style="font-size:13px; color:#999;">2024-01-01 12:00</div>
+                </div>
+            </div>
+            
+            <!-- 总结统计 -->
+            <div style="display:flex; gap:12px; margin-bottom:20px;">
+                <div style="flex:1; padding:16px; background:#fff5f7; border-radius:12px; text-align:center;">
+                    <div id="summary-msg-count" style="font-size:24px; font-weight:700; color:var(--ins-pink);">0</div>
+                    <div style="font-size:12px; color:#999; margin-top:4px;">消息数</div>
+                </div>
+                <div style="flex:1; padding:16px; background:#f0f9ff; border-radius:12px; text-align:center;">
+                    <div id="summary-time-range" style="font-size:14px; font-weight:600; color:#3b82f6;">-</div>
+                    <div style="font-size:12px; color:#999; margin-top:4px;">时间跨度</div>
+                </div>
+            </div>
+            
+            <!-- 总结内容 -->
+            <div style="margin-bottom:20px;">
+                <div style="font-size:15px; font-weight:600; color:#333; margin-bottom:12px;">📝 聊天总结</div>
+                <div id="summary-edit-hint" style="display:none; font-size:12px; color:#666; margin-bottom:8px; padding:8px 12px; background:#fff5f7; border-radius:6px; border-left:3px solid var(--ins-pink);">
+                    ✏️ 编辑模式 - 修改完成后点击右上角「保存」按钮
+                </div>
+                <div id="summary-detail-content" style="padding:16px; background:#f9f9f9; border-radius:12px; font-size:15px; color:#333; line-height:1.8; white-space:pre-wrap;">
+                    加载中...
+                </div>
+                <textarea id="summary-detail-content-edit" style="display:none; width:100%; padding:16px; background:#fff; border:2px solid var(--ins-pink); border-radius:12px; font-size:15px; color:#333; line-height:1.8; min-height:200px; font-family:inherit; resize:vertical; box-sizing:border-box; outline:none; box-shadow:0 2px 8px rgba(255,182,193,0.2);" placeholder="在这里编辑总结内容..."></textarea>
+            </div>
+            
+            <!-- 关键词/标签 -->
+            <div id="summary-keywords-section" style="margin-bottom:20px; display:none;">
+                <div style="font-size:15px; font-weight:600; color:#333; margin-bottom:12px;">🏷️ 关键词</div>
+                <div id="summary-detail-keywords" style="display:flex; flex-wrap:wrap; gap:8px;">
+                    <!-- 动态生成标签 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 聊天总结列表页面（从聊天详情跳转） -->
+    <div class="wechat-page" id="chat-summaries-page" style="display:none; background:#f2f2f7;">
+        <div class="wechat-header" style="background:#fff;">
+            <div class="back-btn" onclick="hideChatSummariesPage()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0; color:var(--ins-text);">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="wechat-title" id="chat-summaries-title">聊天总结</div>
+            <div style="width:40px;"></div>
+        </div>
+        
+        <div style="flex:1; overflow-y:auto; padding:16px;">
+            <div id="chat-summaries-list" style="display:flex; flex-direction:column; gap:12px;">
+                <!-- 动态生成 -->
+            </div>
+            
+            <!-- 空状态 -->
+            <div id="chat-summaries-empty" style="display:none; text-align:center; padding:60px 20px; color:#999;">
+                <svg class="svg-icon" style="width:64px; height:64px; stroke:#ccc; margin-bottom:16px;" viewBox="0 0 24 24">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                    <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+                <div style="font-size:16px; margin-bottom:8px;">暂无总结</div>
+                <div style="font-size:14px;">开启自动总结或点击"立即生成"</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 联机状态页面 -->
+    <div class="wechat-page" id="online-status-page" style="display:none; background:#f5f5f5; z-index:10000;">
+        <div class="wechat-header" style="background:#fff;">
+            <div class="back-btn" onclick="hideOnlineStatusPage()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0; color:var(--ins-text);">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="wechat-title">联机状态</div>
+            <div style="width:40px;"></div>
+        </div>
+        
+        <!-- 联机状态卡片 -->
+        <div style="padding:16px;">
+            <div style="background:#fff; border-radius:12px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+                    <div style="flex:1;">
+                        <div style="font-size:14px; font-weight:500; color:#333; margin-bottom:6px;">联机状态</div>
+                        <div id="online-sync-status" style="font-size:13px;">
+                            <!-- 状态动态更新 -->
+                        </div>
+                    </div>
+                    <button onclick="manualSyncOnline()" id="manual-sync-btn" style="padding:8px 16px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px; font-size:13px; cursor:pointer; display:flex; align-items:center; gap:6px; transition:all 0.3s;">
+                        <svg id="sync-icon" viewBox="0 0 24 24" style="width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2;">
+                            <polyline points="23 4 23 10 17 10"></polyline>
+                            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                        </svg>
+                        <span id="sync-btn-text">立即同步</span>
+                    </button>
+                </div>
+                <div style="font-size:11px; color:#999; line-height:1.5;">
+                    系统会自动尝试保持在线，您也可以手动点击同步
+                </div>
+            </div>
+        </div>
+        
+        <div style="flex:1; overflow-y:auto;">
+            <!-- 联机群聊入口 -->
+            <div style="padding:12px 16px; font-size:13px; color:#888; display:flex; justify-content:space-between; align-items:center;">
+                <span>联机群聊</span>
+                <button onclick="showCreateOnlineGroupModal()" style="padding:6px 12px; background:var(--ins-pink); color:#fff; border:none; border-radius:6px; font-size:12px; cursor:pointer;">+ 创建群聊</button>
+            </div>
+            <div id="online-group-list" style="background:#fff;">
+                <!-- 群聊列表动态更新 -->
+            </div>
+            
+            <div style="padding:12px 16px; font-size:13px; color:#888;">
+                我的User角色
+            </div>
+            <div id="online-status-char-list">
+                <!-- 角色列表动态更新 -->
+            </div>
+            
+            <div style="padding:16px; font-size:12px; color:#999; line-height:1.6;">
+                <div style="font-weight:600; color:#666; margin-bottom:6px;">💡 使用说明</div>
+                <div>• 上线后，其他用户可以通过你的虚拟微信号搜索到你</div>
+                <div>• 你可以同时上线多个角色</div>
+                <div>• 上线的角色可以接收好友申请和消息</div>
+                <div>• 关闭页面或刷新后需要重新上线</div>
+                <div>• 联机群聊可以邀请好友一起聊天，每人可带一个AI角色</div>
+            </div>
+        </div>
+    </div>
+
     <!-- 新的好友页面 -->
     <div class="wechat-page" id="new-friends-page" style="display:none;">
         <div class="wechat-header" style="background:#fff;">
@@ -1023,30 +1207,6 @@
         </div>
     </div>
 
-    <!-- 添加真人好友弹窗 -->
-    <div class="modal-overlay" id="add-real-friend-modal">
-        <div class="modal-box" style="max-width:360px;">
-            <div class="modal-title">添加真人好友</div>
-            <div style="padding:20px;">
-                <div id="real-friend-login-check">
-                    <!-- 检查是否已登录联机账号 -->
-                </div>
-                <div id="real-friend-search-area" style="display:none;">
-                    <div style="display:flex; gap:10px; margin-bottom:16px;">
-                        <input type="text" id="real-friend-search-input" placeholder="输入对方的虚拟账号" style="flex:1; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:15px;">
-                        <button onclick="searchRealFriend()" style="padding:12px 16px; border:none; border-radius:8px; background:linear-gradient(135deg, #07c160 0%, #06ad56 100%); color:#fff; font-size:14px; cursor:pointer;">搜索</button>
-                    </div>
-                    <div id="real-friend-search-result" style="min-height:80px;">
-                        <div style="text-align:center; color:#999; font-size:14px; padding:20px;">输入对方角色档案的虚拟账号</div>
-                    </div>
-                </div>
-            </div>
-            <div style="padding:0 20px 20px;">
-                <button onclick="hideAddRealFriendModal()" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; background:#fff; font-size:15px; cursor:pointer;">关闭</button>
-            </div>
-        </div>
-    </div>
-
     <!-- 从档案导入弹窗 -->
     <div class="modal-overlay" id="direct-add-modal">
         <div class="modal-box" style="height:70%;">
@@ -1055,6 +1215,34 @@
                 <!-- 动态生成 -->
             </div>
             <button class="modal-btn btn-cancel" onclick="closeModal('direct-add-modal')">关闭</button>
+        </div>
+    </div>
+
+    <!-- 戳一戳弹窗 -->
+    <div class="modal-overlay" id="poke-modal">
+        <div class="modal-box" style="width: 85%; max-width: 320px;">
+            <div class="modal-title">戳一戳</div>
+            <div style="font-size:13px; color:#666; margin-bottom:20px; text-align:center;">自定义戳一戳动作</div>
+            
+            <div style="margin-bottom:20px;">
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:15px;">
+                    <span id="poke-user-name" style="font-size:15px; font-weight:600; color:#333;">用户</span>
+                    <input type="text" id="poke-action" class="modal-input" placeholder="戳了戳" value="戳了戳" style="flex:1; margin-bottom:0; text-align:center; font-size:14px;">
+                    <span id="poke-char-name" style="font-size:15px; font-weight:600; color:#333;">角色</span>
+                    <span style="font-size:15px; color:#666;">的</span>
+                    <input type="text" id="poke-part" class="modal-input" placeholder="脑袋" value="脑袋" style="width:80px; margin-bottom:0; text-align:center; font-size:14px;">
+                </div>
+                
+                <div style="background:#f5f5f5; padding:12px; border-radius:8px; text-align:center;">
+                    <div style="font-size:12px; color:#999; margin-bottom:6px;">预览效果</div>
+                    <div id="poke-preview" style="font-size:14px; color:#333; line-height:1.6;"></div>
+                </div>
+            </div>
+
+            <div class="modal-btns">
+                <button class="modal-btn btn-cancel" onclick="closeModal('poke-modal')">取消</button>
+                <button class="modal-btn btn-confirm" onclick="confirmPoke()">确认</button>
+            </div>
         </div>
     </div>
 
@@ -1076,98 +1264,40 @@
         </div>
     </div>
 
-    <!-- 创建联机群聊弹窗 -->
-    <div class="modal-overlay" id="create-mixed-group-modal">
-        <div class="modal-box" style="height:85%; max-width:420px;">
-            <div class="modal-title" style="display:flex; align-items:center; gap:8px;">
-                <svg class="svg-icon" style="width:22px; height:22px; stroke:var(--ins-pink);" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>
-                创建联机群聊
-            </div>
-            
-            <!-- 步骤指示器 -->
-            <div style="display:flex; justify-content:center; gap:8px; padding:12px 0; margin-bottom:8px;">
-                <div id="mixed-step-1" class="step-indicator active" style="width:10px; height:10px; border-radius:50%; background:var(--ins-pink); transition:all 0.3s;"></div>
-                <div id="mixed-step-2" class="step-indicator" style="width:10px; height:10px; border-radius:50%; background:#ddd; transition:all 0.3s;"></div>
-            </div>
-            
-            <!-- 步骤1: 选择真人好友 -->
-            <div id="mixed-group-step1" style="flex:1; overflow-y:auto; display:flex; flex-direction:column;">
-                <div style="padding:0 16px 16px;">
-                    <input type="text" id="mixed-group-name-input" placeholder="群聊名称（可选）" style="width:100%; padding:12px 16px; border:1px solid #e0e0e0; border-radius:8px; font-size:15px; box-sizing:border-box; margin-bottom:12px;">
-                </div>
-                <div style="padding:0 16px 8px; font-size:13px; color:#888;">选择要邀请的真人好友：</div>
-                <div style="flex:1; overflow-y:auto; padding:0 16px;" id="mixed-group-friends-list">
-                    <!-- 动态生成真人好友列表 -->
-                </div>
-            </div>
-            
-            <!-- 步骤2: 选择自己要绑定的角色 -->
-            <div id="mixed-group-step2" style="flex:1; overflow-y:auto; display:none; flex-direction:column;">
-                <div style="padding:0 16px 8px; font-size:13px; color:#888;">选择你要带入群聊的角色：</div>
-                <div style="padding:0 16px 8px; font-size:12px; color:#ff6b9d; background:#fff5f7; margin:0 16px 12px; padding:12px; border-radius:8px;">
-                    💡 你的角色将在群聊中代表你说话，其他成员看到的是你角色的回复
-                </div>
-                <div style="flex:1; overflow-y:auto; padding:0 16px;" id="mixed-group-char-list">
-                    <!-- 动态生成角色列表 -->
-                </div>
-            </div>
-            
-            <div style="padding:16px; display:flex; gap:12px;">
-                <button class="modal-btn btn-cancel" style="flex:1;" onclick="closeMixedGroupModal()">取消</button>
-                <button id="mixed-group-next-btn" class="modal-btn" style="flex:1; background:var(--ins-pink); color:#fff;" onclick="mixedGroupNextStep()">下一步</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- 选择绑定角色弹窗（被邀请时） -->
-    <div class="modal-overlay" id="bind-char-modal">
-        <div class="modal-box" style="height:70%; max-width:400px;">
-            <div class="modal-title">选择你的角色</div>
-            <div style="padding:0 16px 12px; font-size:13px; color:#666; text-align:center;">
-                你被邀请加入联机群聊<br>
-                <span style="color:var(--ins-pink); font-weight:600;" id="bind-char-group-name"></span>
-            </div>
-            <div style="padding:0 16px 8px; font-size:12px; color:#ff6b9d; background:#fff5f7; margin:0 16px 12px; padding:12px; border-radius:8px;">
-                💡 选择一个角色后将无法更改，这个角色会在群聊中代表你说话
-            </div>
-            <div style="flex:1; overflow-y:auto; padding:0 16px;" id="bind-char-list">
-                <!-- 动态生成角色列表 -->
-            </div>
-            <div style="padding:16px; display:flex; gap:12px;">
-                <button class="modal-btn btn-cancel" style="flex:1;" onclick="closeModal('bind-char-modal')">稍后</button>
-                <button class="modal-btn" style="flex:1; background:var(--ins-pink); color:#fff;" onclick="confirmBindChar()">确定绑定</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- 联机群聊邀请通知弹窗 -->
-    <div class="modal-overlay" id="mixed-group-invite-modal">
-        <div class="modal-box" style="max-width:360px;">
-            <div style="text-align:center; padding:20px;">
-                <div style="width:64px; height:64px; border-radius:50%; background:linear-gradient(135deg, #FFB6C1 0%, #FFC0CB 100%); margin:0 auto 16px; display:flex; align-items:center; justify-content:center;">
-                    <svg class="svg-icon" style="width:32px; height:32px; stroke:#fff;" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>
-                </div>
-                <div style="font-size:18px; font-weight:600; color:#333; margin-bottom:8px;">联机群聊邀请</div>
-                <div style="font-size:14px; color:#666; margin-bottom:20px;">
-                    <span id="invite-creator-name" style="color:var(--ins-pink); font-weight:600;">xxx</span> 邀请你加入<br>
-                    「<span id="invite-group-name" style="font-weight:600;">xxx</span>」
-                </div>
-                <div style="display:flex; gap:12px;">
-                    <button onclick="rejectMixedGroupInvite()" style="flex:1; padding:12px; border:1px solid #ddd; border-radius:8px; background:#fff; font-size:15px; cursor:pointer;">忽略</button>
-                    <button onclick="acceptMixedGroupInvite()" style="flex:1; padding:12px; border:none; border-radius:8px; background:var(--ins-pink); color:#fff; font-size:15px; cursor:pointer;">加入并选择角色</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- 角色心声弹窗 -->
     <div class="modal-overlay" id="thoughts-modal" onclick="closeModal('thoughts-modal')">
-        <div class="modal-box" style="height:70%; max-width:90%;" onclick="event.stopPropagation()">
-            <div class="modal-title" id="thoughts-modal-title">角色心声</div>
-            <div style="flex:1; overflow-y:auto; padding:10px 0;" id="thoughts-content">
-                <!-- 动态生成 -->
+        <div class="modal-box thoughts-modal-box" onclick="event.stopPropagation()">
+            <!-- 顶部标题栏 -->
+            <div class="thoughts-header">
+                <div class="thoughts-close" onclick="closeModal('thoughts-modal')">×</div>
+                <div class="thoughts-title" id="thoughts-modal-title">TA的心声</div>
+                <div class="thoughts-actions">
+                    <span class="thoughts-action-btn" onclick="editCurrentThought()">编辑</span>
+                    <span class="thoughts-action-btn" onclick="regenerateThought()">重新生成</span>
+                </div>
             </div>
-            <button class="modal-btn btn-cancel" onclick="closeModal('thoughts-modal')">关闭</button>
+            
+            <!-- 当前心声区域 -->
+            <div class="thoughts-current" id="thoughts-current">
+                <div class="thoughts-current-text" id="thoughts-current-text">暂无心声</div>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div class="thoughts-current-time" id="thoughts-current-time"></div>
+                    <div id="thoughts-current-delete" style="font-size:12px; color:#ff3b30; cursor:pointer; padding:2px 8px; display:none;" onclick="deleteCurrentThought()">删除</div>
+                </div>
+            </div>
+            
+            <!-- 查看历史按钮 -->
+            <div class="thoughts-history-btn" id="thoughts-history-btn" onclick="toggleThoughtsHistory()">
+                <span>查看历史心声</span>
+                <svg class="thoughts-arrow" id="thoughts-arrow" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </div>
+            
+            <!-- 历史心声区域（默认隐藏） -->
+            <div class="thoughts-history" id="thoughts-history" style="display:none;">
+                <div id="thoughts-history-content">
+                    <!-- 动态生成 -->
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1350,9 +1480,27 @@
             <!-- 消息列表 -->
         </div>
         <div class="chat-footer" id="chat-footer">
+            <!-- 引用预览区域 -->
+            <div class="quote-preview" id="quote-preview" style="display:none;">
+                <div class="quote-preview-content">
+                    <div class="quote-preview-line"></div>
+                    <div class="quote-preview-text">
+                        <span class="quote-preview-name" id="quote-preview-name"></span>
+                        <span class="quote-preview-msg" id="quote-preview-msg"></span>
+                    </div>
+                </div>
+                <div class="quote-preview-close" onclick="cancelQuote()">
+                    <svg viewBox="0 0 24 24" style="width:16px; height:16px;"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </div>
+            </div>
+            <!-- 智能表情推荐区域 -->
+            <div id="sticker-suggestion-bar" style="display: none; padding: 8px 10px; background: transparent; overflow-x: auto; white-space: nowrap;">
+                <!-- 动态生成推荐的表情 -->
+            </div>
+            
             <div class="chat-input-bar">
                 <!-- 左侧：AI 魔法棒 -->
-                <div class="chat-icon-btn" id="btn-magic-wand" onclick="triggerAiReply()">
+                <div class="chat-icon-btn" onclick="triggerAiReply()">
                     <svg class="svg-icon" viewBox="0 0 24 24"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M9 5H1"/></svg>
                 </div>
                 
@@ -1385,9 +1533,20 @@
                 <div class="emoji-panel" id="emoji-panel" style="height: calc(100% - 40px);">
                     <!-- 动态生成表情 -->
                 </div>
-                <div class="emoji-panel" id="sticker-panel" style="height: calc(100% - 40px); display: none; grid-template-columns: repeat(4, 1fr);">
-                    <!-- 动态生成自定义表情 -->
-                    <div style="text-align:center; grid-column:span 4; color:#999; margin-top:20px;">暂无表情包<br>请在详情页添加</div>
+                <div id="sticker-panel" style="height: calc(100% - 40px); display: none; flex-direction: column; overflow: hidden;">
+                    <!-- 搜索框 -->
+                    <div style="padding: 8px 10px; background: #fff; border-bottom: 1px solid #eee; flex-shrink: 0;">
+                        <input type="text" id="sticker-search-input" placeholder="搜索表情包..." style="width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 20px; font-size: 13px; outline: none;" oninput="searchStickers(this.value)">
+                    </div>
+                    <!-- 分类标签栏 -->
+                    <div id="sticker-category-tabs" style="display: flex; overflow-x: auto; border-bottom: 1px solid #eee; background: #fff; flex-shrink: 0; height: 40px;">
+                        <!-- 动态生成分类标签 -->
+                    </div>
+                    <!-- 表情包内容区域 -->
+                    <div id="sticker-content" style="display: grid; flex: 1; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 10px; overflow-y: auto; align-content: start;">
+                        <!-- 动态生成自定义表情 -->
+                        <div style="text-align:center; grid-column:span 4; color:#999; margin-top:20px;">暂无表情包<br>请去【我-表情】添加</div>
+                    </div>
                 </div>
 
                 <div class="action-panel" id="action-panel">
@@ -1410,7 +1569,7 @@
                         </div>
                         <div class="action-name">转账</div>
                     </div>
-                    <div class="action-item">
+                    <div class="action-item" onclick="showLocationModal()">
                         <div class="action-icon-box">
                             <svg class="svg-icon" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
                         </div>
@@ -1480,7 +1639,7 @@
                 <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
             </div>
             <div class="wechat-title">世界书</div>
-            <div class="wechat-add" onclick="document.getElementById('lorebook-import').click()" style="width:40px; text-align:right; font-size:16px; color:var(--ins-pink);">导入</div>
+            <div class="wechat-add" onclick="document.getElementById('lorebook-import').click()" style="width:40px; text-align:right; font-size:16px; color:#666;">导入</div>
         </div>
         
         <div class="wechat-content" id="lorebook-content" style="display:block; padding:16px;">
@@ -1540,6 +1699,16 @@
                         <span id="detail-lorebook-toggle" style="font-size:12px; color:var(--ins-pink); cursor:pointer;" onclick="toggleLorebookList()">展开</span>
                     </div>
                 </div>
+                <div class="detail-item" onclick="showMountUserModal()" style="cursor:pointer;">
+                    <div style="display:flex; flex-direction:column; gap:4px;">
+                        <div>挂载用户档案</div>
+                        <div style="font-size:12px; color:#999; line-height:1.4;">AI回复时读取用户人设</div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <div id="detail-mounted-user" style="font-size:14px; color:#999;">未挂载</div>
+                        <div class="detail-arrow">›</div>
+                    </div>
+                </div>
             </div>
 
             <!-- 主动聊天设置 -->
@@ -1561,19 +1730,30 @@
             <div class="detail-group">
                 <div class="detail-item">
                     <div style="display:flex; flex-direction:column; gap:4px;">
-                        <div>允许AI查岗</div>
-                        <div style="font-size:12px; color:#999; line-height:1.4;">AI可根据剧情尝试登录你的账号</div>
+                        <div>允许角色查岗</div>
+                        <div style="font-size:12px; color:#999; line-height:1.4;">角色可根据剧情尝试登录你的账号</div>
                     </div>
                     <label class="ios-switch">
                         <input type="checkbox" id="detail-allow-check-switch" onchange="saveChatDetail()">
                         <span class="slider"></span>
                     </label>
                 </div>
+                <div class="detail-item">
+                    <div style="display:flex; flex-direction:column; gap:4px;">
+                        <div>允许修罗场模式</div>
+                        <div style="font-size:12px; color:#999; line-height:1.4;">查岗的角色可以操作你的账号</div>
+                    </div>
+                    <label class="ios-switch">
+                        <input type="checkbox" id="detail-allow-shura-switch" onchange="saveChatDetail()">
+                        <span class="slider"></span>
+                    </label>
+                </div>
                 <div style="padding:12px 16px; font-size:12px; color:#999; line-height:1.6; background:#f8f8f8; border-radius:8px; margin:0 16px 12px 16px;">
                     <div style="font-weight:600; color:#666; margin-bottom:6px;">功能说明：</div>
-                    <div>• 无密码时：AI可直接"登录"你的账号，你会暂时掉线</div>
-                    <div>• 有密码时：AI需猜对密码才能登录，猜错会收到提示</div>
-                    <div>• AI会根据聊天剧情决定是否查岗（如长时间不回等）</div>
+                    <div>• 无密码时：角色可直接"登录"你的账号，你会暂时掉线</div>
+                    <div>• 有密码时：角色需猜对密码才能登录，猜错会收到提示</div>
+                    <div>• 角色会根据聊天剧情决定是否查岗（如长时间不回等）</div>
+                    <div style="margin-top:6px; color:#ff6b9d; font-weight:600;">• 修罗场模式：查岗的角色可以操作你的账号</div>
                 </div>
             </div>
 
@@ -1588,6 +1768,25 @@
                 </div>
                 <div style="padding:12px 16px; font-size:12px; color:#999; line-height:1.5;">
                     发送给AI的历史消息条数，影响AI对对话上下文的理解。
+                </div>
+            </div>
+
+            <!-- 回复消息条数设置 -->
+            <div class="detail-group">
+                <div class="detail-item">
+                    <div style="display:flex; flex-direction:column; gap:4px; flex:1;">
+                        <div>每次回复消息条数</div>
+                        <div style="font-size:12px; color:#999; line-height:1.4;">AI每次回复的消息条数范围</div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <input type="number" id="detail-reply-min-count" value="1" min="1" max="10" style="border:1px solid #e0e0e0; background:#fff; width:50px; text-align:center; font-size:16px; color:#333; outline:none; padding:4px; border-radius:6px;" onchange="saveChatDetail()">
+                        <span style="font-size:14px; color:#999;">~</span>
+                        <input type="number" id="detail-reply-max-count" value="3" min="1" max="10" style="border:1px solid #e0e0e0; background:#fff; width:50px; text-align:center; font-size:16px; color:#333; outline:none; padding:4px; border-radius:6px;" onchange="saveChatDetail()">
+                        <span style="font-size:12px; color:#999;">条</span>
+                    </div>
+                </div>
+                <div style="padding:12px 16px; font-size:12px; color:#999; line-height:1.5;">
+                    模拟真实聊天习惯，AI会在设定范围内随机生成多条消息。建议设置为 1~3 条。
                 </div>
             </div>
 
@@ -1625,49 +1824,116 @@
                 </div>
             </div>
 
-            <!-- 自定义样式设置 -->
+            <!-- 自动总结设置 -->
+            <div class="detail-group">
+                <div class="detail-item">
+                    <div style="display:flex; flex-direction:column; gap:4px;">
+                        <div>自动总结</div>
+                        <div style="font-size:12px; color:#999; line-height:1.4;">AI自动总结聊天内容到收藏</div>
+                    </div>
+                    <label class="ios-switch">
+                        <input type="checkbox" id="detail-auto-summary-switch" onchange="saveChatDetail()">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="detail-item">
+                    <div>每多少条总结</div>
+                    <input type="number" id="detail-summary-interval" placeholder="50" style="border:none; background:transparent; width:60px; text-align:right; font-size:16px; color:#8e8e93; outline:none;" onchange="saveChatDetail()">
+                </div>
+                <div class="detail-item" onclick="showChatSummaries('private')" style="cursor:pointer;">
+                    <div>查看总结记录</div>
+                    <div style="font-size:12px; color:#999;" id="detail-summary-count">0条总结</div>
+                    <div class="detail-arrow">›</div>
+                </div>
+                <div class="detail-item" onclick="triggerManualSummary('private')" style="cursor:pointer;">
+                    <div style="color:var(--ins-pink);">立即生成总结</div>
+                </div>
+                <div style="padding:12px 16px; font-size:12px; color:#999; line-height:1.6; background:#f8f8f8; border-radius:8px; margin:0 16px 12px 16px;">
+                    <div style="font-weight:600; color:#666; margin-bottom:6px;">功能说明：</div>
+                    <div>• 开启后，每达到设定条数会自动调用API生成总结</div>
+                    <div>• 总结内容会保存到个人中心的"收藏"中</div>
+                    <div>• 也可以点击"立即生成总结"手动触发</div>
+                </div>
+            </div>
+
+            <!-- 聊天样式设置（合并气泡预设和自定义样式） -->
             <div class="detail-group">
                 <div class="detail-item" style="flex-direction:column; align-items:flex-start; cursor:pointer;" onclick="toggleCustomStyleSection()">
                     <div style="width:100%; display:flex; justify-content:space-between; align-items:center;">
-                        <div>自定义聊天样式</div>
+                        <div>聊天样式</div>
                         <span id="custom-style-toggle-icon" class="detail-arrow" style="transition: transform 0.3s;">›</span>
                     </div>
                 </div>
                 <div id="custom-style-section" style="display:none; padding:16px; background:#f9f9f9; border-radius:8px; margin:0 16px 16px;">
-                    <!-- 可用类名提示 -->
-                    <div style="background:#fff; border:1px solid #e0e0e0; border-radius:8px; padding:12px; margin-bottom:16px;">
-                        <div style="font-size:13px; font-weight:600; margin-bottom:8px; color:#333;">📝 可用类名参考：</div>
-                        <div style="font-size:11px; font-family:monospace; color:#666; line-height:1.8; user-select:all;">
-                            <div style="margin-bottom:4px; padding:4px 6px; background:#f5f5f5; border-radius:4px;"><strong style="color:#d63384;">.ai-bubble</strong> <span style="color:#999;">// AI气泡</span></div>
-                            <div style="margin-bottom:4px; padding:4px 6px; background:#f5f5f5; border-radius:4px;"><strong style="color:#d63384;">.user-bubble</strong> <span style="color:#999;">// 用户气泡</span></div>
-                            <div style="margin-bottom:4px; padding:4px 6px; background:#f5f5f5; border-radius:4px;"><strong style="color:#d63384;">.message-content</strong> <span style="color:#999;">// 所有气泡</span></div>
-                            <div style="margin-bottom:4px; padding:4px 6px; background:#f5f5f5; border-radius:4px;"><strong style="color:#d63384;">.message-avatar</strong> <span style="color:#999;">// 头像</span></div>
-                            <div style="margin-bottom:4px; padding:4px 6px; background:#f5f5f5; border-radius:4px;"><strong style="color:#d63384;">.message-row.self</strong> <span style="color:#999;">// 用户消息行</span></div>
-                            <div style="margin-bottom:4px; padding:4px 6px; background:#f5f5f5; border-radius:4px;"><strong style="color:#d63384;">.message-row.other</strong> <span style="color:#999;">// AI消息行</span></div>
+                    <!-- 预设气泡样式 -->
+                    <div style="margin-bottom:20px;">
+                        <div style="font-size:14px; font-weight:500; margin-bottom:12px; color:#333;">预设样式</div>
+                        <div style="display:flex; gap:12px;">
+                            <!-- 默认样式 -->
+                            <div class="bubble-style-option" data-style="default" onclick="selectBubbleStyle('default')" style="flex:1; padding:12px; border:2px solid #e0e0e0; border-radius:12px; cursor:pointer; transition:all 0.2s; background:#fff;">
+                                <div style="font-size:12px; font-weight:500; text-align:center; margin-bottom:8px; color:#333;">默认圆角</div>
+                                <div style="display:flex; flex-direction:column; gap:5px; padding:6px; background:#f5f5f5; border-radius:6px;">
+                                    <div style="align-self:flex-start; background:#f2f2f7; color:#333; padding:3px 8px; border-radius:12px 12px 12px 4px; font-size:10px;">你好</div>
+                                    <div style="align-self:flex-end; background:#ffe4e8; color:#333; padding:3px 8px; border-radius:12px 12px 4px 12px; font-size:10px;">嗨~</div>
+                                </div>
+                            </div>
+                            <!-- 仿微信样式 -->
+                            <div class="bubble-style-option" data-style="wechat" onclick="selectBubbleStyle('wechat')" style="flex:1; padding:12px; border:2px solid #e0e0e0; border-radius:12px; cursor:pointer; transition:all 0.2s; background:#fff;">
+                                <div style="font-size:12px; font-weight:500; text-align:center; margin-bottom:8px; color:#333;">仿微信</div>
+                                <div style="display:flex; flex-direction:column; gap:5px; padding:6px; background:#f5f5f5; border-radius:6px;">
+                                    <div style="align-self:flex-start; position:relative; margin-left:4px;">
+                                        <div style="position:absolute; left:-3px; top:4px; width:5px; height:5px; background:#fff; border-left:1px solid #e0e0e0; border-bottom:1px solid #e0e0e0; transform:rotate(45deg);"></div>
+                                        <div style="background:#fff; color:#333; padding:3px 8px; border-radius:4px; font-size:10px; border:1px solid #e0e0e0;">你好</div>
+                                    </div>
+                                    <div style="align-self:flex-end; position:relative; margin-right:4px;">
+                                        <div style="position:absolute; right:-3px; top:4px; width:5px; height:5px; background:#fff; border-right:1px solid #e0e0e0; border-top:1px solid #e0e0e0; transform:rotate(45deg);"></div>
+                                        <div style="background:#fff; color:#333; padding:3px 8px; border-radius:4px; font-size:10px; border:1px solid #e0e0e0;">嗨~</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 分割线 -->
+                    <div style="height:1px; background:#e0e0e0; margin:16px 0;"></div>
+                    
+                    <!-- 自定义样式 -->
+                    <div style="margin-bottom:16px;">
+                        <div style="font-size:14px; font-weight:500; margin-bottom:8px; color:#333;">自定义样式</div>
+                        <div style="font-size:12px; color:#999; margin-bottom:12px;">在预设基础上进一步自定义，或完全自定义样式</div>
+                        
+                        <!-- 可用类名提示 -->
+                        <div style="background:#fff; border:1px solid #e0e0e0; border-radius:8px; padding:10px; margin-bottom:12px;">
+                            <div style="font-size:12px; font-weight:600; margin-bottom:6px; color:#333;">📝 可用类名：</div>
+                            <div style="font-size:10px; font-family:monospace; color:#666; line-height:1.6; display:flex; flex-wrap:wrap; gap:4px;">
+                                <span style="padding:2px 6px; background:#f5f5f5; border-radius:3px;">.ai-bubble</span>
+                                <span style="padding:2px 6px; background:#f5f5f5; border-radius:3px;">.user-bubble</span>
+                                <span style="padding:2px 6px; background:#f5f5f5; border-radius:3px;">.message-content</span>
+                                <span style="padding:2px 6px; background:#f5f5f5; border-radius:3px;">.message-avatar</span>
+                                <span style="padding:2px 6px; background:#f5f5f5; border-radius:3px;">.message-row.self</span>
+                                <span style="padding:2px 6px; background:#f5f5f5; border-radius:3px;">.message-row.other</span>
+                            </div>
                         </div>
                     </div>
                     
                     <div style="margin-bottom:16px;">
-                        <div style="font-size:14px; font-weight:500; margin-bottom:8px; color:#333;">气泡样式 (CSS)</div>
-                        <div style="font-size:12px; color:#999; margin-bottom:8px;">自定义AI聊天气泡的CSS样式（自动应用到 .ai-bubble）</div>
-                        <textarea id="detail-bubble-css" placeholder="例如：&#10;background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);&#10;color: white;&#10;border-radius: 20px;&#10;padding: 12px 16px;" style="width:100%; min-height:120px; padding:10px; border:1px solid #ddd; border-radius:8px; font-family:monospace; font-size:12px; resize:vertical; outline:none;" oninput="saveChatDetail()"></textarea>
+                        <div style="font-size:13px; font-weight:500; margin-bottom:6px; color:#333;">气泡样式 (CSS)</div>
+                        <textarea id="detail-bubble-css" placeholder="例如：&#10;background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);&#10;color: white;" style="width:100%; min-height:80px; padding:10px; border:1px solid #ddd; border-radius:8px; font-family:monospace; font-size:11px; resize:vertical; outline:none; box-sizing:border-box;" oninput="saveChatDetail()"></textarea>
                     </div>
                     
                     <div style="margin-bottom:16px;">
-                        <div style="font-size:14px; font-weight:500; margin-bottom:8px; color:#333;">自定义容器 (HTML)</div>
-                        <div style="font-size:12px; color:#999; margin-bottom:8px;">添加自定义HTML容器，显示在聊天顶部（禁止JS）</div>
-                        <textarea id="detail-custom-html" placeholder="例如：&#10;<div style=&quot;text-align:center; padding:10px; background:#f0f0f0;&quot;>&#10;  <h3>Welcome!</h3>&#10;</div>" style="width:100%; min-height:100px; padding:10px; border:1px solid #ddd; border-radius:8px; font-family:monospace; font-size:12px; resize:vertical; outline:none;" oninput="saveChatDetail()"></textarea>
+                        <div style="font-size:13px; font-weight:500; margin-bottom:6px; color:#333;">自定义容器 (HTML)</div>
+                        <textarea id="detail-custom-html" placeholder="显示在聊天顶部的HTML" style="width:100%; min-height:60px; padding:10px; border:1px solid #ddd; border-radius:8px; font-family:monospace; font-size:11px; resize:vertical; outline:none; box-sizing:border-box;" oninput="saveChatDetail()"></textarea>
                     </div>
                     
                     <div style="margin-bottom:16px;">
-                        <div style="font-size:14px; font-weight:500; margin-bottom:8px; color:#333;">容器样式 (CSS)</div>
-                        <div style="font-size:12px; color:#999; margin-bottom:8px;">为自定义容器添加额外的CSS样式</div>
-                        <textarea id="detail-custom-css" placeholder="例如：&#10;.custom-header {&#10;  background: linear-gradient(to right, #4facfe 0%, #00f2fe 100%);&#10;  padding: 20px;&#10;}" style="width:100%; min-height:100px; padding:10px; border:1px solid #ddd; border-radius:8px; font-family:monospace; font-size:12px; resize:vertical; outline:none;" oninput="saveChatDetail()"></textarea>
+                        <div style="font-size:13px; font-weight:500; margin-bottom:6px; color:#333;">容器样式 (CSS)</div>
+                        <textarea id="detail-custom-css" placeholder="自定义容器的CSS样式" style="width:100%; min-height:60px; padding:10px; border:1px solid #ddd; border-radius:8px; font-family:monospace; font-size:11px; resize:vertical; outline:none; box-sizing:border-box;" oninput="saveChatDetail()"></textarea>
                     </div>
                     
                     <div style="display:flex; gap:10px;">
-                        <button onclick="previewCustomStyle()" style="flex:1; padding:10px; background:var(--ins-pink); color:white; border:none; border-radius:8px; font-size:14px; cursor:pointer;">预览效果</button>
-                        <button onclick="clearCustomStyle()" style="flex:1; padding:10px; background:#f0f0f0; color:#666; border:none; border-radius:8px; font-size:14px; cursor:pointer;">清除样式</button>
+                        <button onclick="previewCustomStyle()" style="flex:1; padding:10px; background:var(--ins-pink); color:white; border:none; border-radius:8px; font-size:13px; cursor:pointer;">预览效果</button>
+                        <button onclick="clearCustomStyle()" style="flex:1; padding:10px; background:#f0f0f0; color:#666; border:none; border-radius:8px; font-size:13px; cursor:pointer;">清除样式</button>
                     </div>
                 </div>
             </div>
@@ -1746,6 +2012,55 @@
                 </div>
             </div>
             
+            <!-- 世界书设置 -->
+            <div class="detail-group">
+                <div class="detail-item" onclick="toggleGroupLorebookList()" style="cursor:pointer;">
+                    <div style="display:flex; flex-direction:column; gap:4px;">
+                        <div>世界书</div>
+                        <div style="font-size:12px; color:#999; line-height:1.4;">为群聊提供背景知识和设定</div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span id="group-detail-lorebook-count" style="color:#999; font-size:14px;">0个</span>
+                        <span id="group-detail-lorebook-toggle" class="detail-arrow">›</span>
+                    </div>
+                </div>
+                <div id="group-detail-lorebook-list" style="display:none; padding:8px 16px; max-height:300px; overflow-y:auto;">
+                    <!-- 动态生成世界书列表 -->
+                </div>
+            </div>
+            
+            <!-- 自动总结设置 -->
+            <div class="detail-group">
+                <div class="detail-item">
+                    <div style="display:flex; flex-direction:column; gap:4px;">
+                        <div>自动总结</div>
+                        <div style="font-size:12px; color:#999; line-height:1.4;">AI自动总结群聊内容到收藏</div>
+                    </div>
+                    <label class="ios-switch">
+                        <input type="checkbox" id="group-detail-auto-summary-switch" onchange="saveGroupDetail()">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="detail-item">
+                    <div>每多少条总结</div>
+                    <input type="number" id="group-detail-summary-interval" placeholder="50" style="border:none; background:transparent; width:60px; text-align:right; font-size:16px; color:#8e8e93; outline:none;" onchange="saveGroupDetail()">
+                </div>
+                <div class="detail-item" onclick="showChatSummaries('group')" style="cursor:pointer;">
+                    <div>查看总结记录</div>
+                    <div style="font-size:12px; color:#999;" id="group-detail-summary-count">0条总结</div>
+                    <div class="detail-arrow">›</div>
+                </div>
+                <div class="detail-item" onclick="triggerManualSummary('group')" style="cursor:pointer;">
+                    <div style="color:var(--ins-pink);">立即生成总结</div>
+                </div>
+                <div style="padding:12px 16px; font-size:12px; color:#999; line-height:1.6; background:#f8f8f8; border-radius:8px; margin:0 16px 12px 16px;">
+                    <div style="font-weight:600; color:#666; margin-bottom:6px;">功能说明：</div>
+                    <div>• 开启后，每达到设定条数会自动调用API生成总结</div>
+                    <div>• 总结内容会保存到个人中心的"收藏"中</div>
+                    <div>• 也可以点击"立即生成总结"手动触发</div>
+                </div>
+            </div>
+
             <!-- 群聊设置 -->
             <div class="detail-group">
                 <div class="detail-item">
@@ -1850,6 +2165,7 @@
     <input type="file" id="detail-avatar-input" style="display:none;" accept="image/*" onchange="setChatDetailAvatar(this)">
     <input type="file" id="group-avatar-input" style="display:none;" accept="image/*" onchange="setGroupAvatar(this)">
     <input type="file" id="detail-chat-bg-input" style="display:none;" accept="image/*" onchange="setChatBackground(this)">
+    <input type="file" id="online-group-bg-input" style="display:none;" accept="image/*" onchange="setOnlineGroupBackground(this)">
     
     <!-- 挂载表情包库弹窗 -->
     <div id="mount-sticker-modal" class="sticker-modal-overlay" style="display:none;">
@@ -1865,6 +2181,21 @@
             </div>
         </div>
     </div>
+    
+    <!-- 挂载用户档案弹窗 -->
+    <div id="mount-user-modal" class="sticker-modal-overlay" style="display:none;">
+        <div class="sticker-modal-box" style="max-height:80vh; overflow-y:auto;">
+            <h3 style="text-align:center; margin-bottom:20px; font-size:18px; font-weight:600;">挂载用户档案</h3>
+            <div style="font-size:13px; color:#666; margin-bottom:16px; text-align:center;">选择AI回复时读取的用户人设</div>
+            <div id="mount-user-list" style="display:flex; flex-direction:column; gap:8px;">
+                <!-- 动态生成 -->
+            </div>
+            <div style="display:flex; gap:10px; margin-top:20px;">
+                <button onclick="hideMountUserModal()" style="flex:1; padding:12px; background:#f2f2f7; border:none; border-radius:8px; font-size:15px; font-weight:500;">取消</button>
+                <button onclick="unmountUser()" style="flex:1; padding:12px; background:#f2f2f7; color:#ff3b30; border:none; border-radius:8px; font-size:15px; font-weight:500;">卸载</button>
+            </div>
+        </div>
+    </div>
 
     <!-- 角色档案页面 -->
     <div class="wechat-page" id="character-page" style="background:#fff;">
@@ -1873,13 +2204,13 @@
                 <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
             </div>
             <div class="wechat-title">角色档案</div>
-            <div class="wechat-add" onclick="document.getElementById('character-import').click()" style="width:40px; text-align:right; font-size:16px; color:var(--ins-pink);">导入</div>
+            <div class="wechat-add" onclick="document.getElementById('character-import').click()" style="width:40px; text-align:right; font-size:16px; color:#666;">导入</div>
         </div>
         
         <div class="wechat-content" id="character-content" style="display:block; padding:16px; padding-bottom: 100px;"> <!-- 底部留空给 Tabbar -->
             <!-- 工具栏 -->
             <div style="display:flex; gap:10px; margin-bottom:16px;">
-                <div onclick="createNewCharacter()" style="flex:1; background:#f2f2f7; padding:12px; border-radius:10px; text-align:center; color:var(--ins-pink); font-weight:500;">+ 新建角色</div>
+                <div onclick="createNewCharacter()" style="flex:1; background:#fff; padding:12px; border-radius:10px; text-align:center; color:#333; font-weight:500; border:1px solid #e0e0e0;">+ 新建角色</div>
             </div>
             
             <!-- 列表 -->
@@ -1945,6 +2276,9 @@
             
             <div class="editor-group">
                 <label class="editor-label">人设/描述 (Description)</label>
+                <div id="char-desc-hint" style="display:none; font-size:12px; color:#999; margin-bottom:8px; padding:8px 12px; background:#fff5f7; border-radius:6px; border-left:3px solid var(--ins-pink);">
+                    💡 这是AI生成的人设，你可以自由修改完善
+                </div>
                 <textarea class="editor-textarea" id="char-desc" placeholder="输入角色设定、性格、背景等..." style="height:300px;"></textarea>
             </div>
 
@@ -2111,16 +2445,18 @@
     <div class="modal-overlay" id="fast-forward-modal">
         <div class="modal-box" style="width: 80%; max-width: 300px;">
             <div class="modal-title">快进时间</div>
-            <div style="font-size:12px; color:#666; margin-bottom:15px; text-align:center;">选择时间流逝长度，AI将根据时间跨度继续对话</div>
+            <div style="font-size:12px; color:#666; margin-bottom:15px; text-align:center;">输入时间流逝长度，AI将根据时间跨度继续对话</div>
             
             <div style="display:flex; gap:10px; margin-bottom:20px;">
-                <input type="number" id="ff-amount" class="modal-input" placeholder="数值" style="flex:1; margin-bottom:0; text-align:center;" value="1">
+                <input type="number" id="ff-amount" class="modal-input" placeholder="输入数字" min="1" max="999" style="flex:1; margin-bottom:0; text-align:center; font-size:16px; font-weight:600;" value="1" onfocus="this.select()">
                 <select id="ff-unit" class="modal-input" style="flex:1; margin-bottom:0;">
                     <option value="minute">分钟</option>
                     <option value="hour" selected>小时</option>
                     <option value="day">天</option>
                 </select>
             </div>
+            
+            <div style="font-size:11px; color:#999; margin-bottom:15px; text-align:center;">💡 可以直接输入任意数字</div>
 
             <div class="modal-btns">
                 <button class="modal-btn btn-cancel" onclick="closeModal('fast-forward-modal')">取消</button>
@@ -2138,6 +2474,10 @@
 
     <!-- 消息上下文菜单 -->
     <div class="context-menu" id="msg-context-menu">
+        <div class="context-menu-item" onclick="handleMsgQuote()">
+            <span>引用</span>
+            <svg class="svg-icon" style="width:16px; height:16px;" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+        </div>
         <div class="context-menu-item" onclick="handleMsgEdit()">
             <span>编辑</span>
             <svg class="svg-icon" style="width:16px; height:16px;" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
@@ -2209,15 +2549,15 @@
             <!-- 服务九宫格 -->
             <div class="section-title">金融服务 FINANCE</div>
             <div class="grid-card" style="margin-bottom: 24px;">
-                <div class="grid-item">
+                <div class="grid-item" onclick="showScratchCardPage()">
                     <div class="icon-box"><svg class="service-icon" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2" /><line x1="2" y1="10" x2="22" y2="10" /></svg></div>
-                    <div class="grid-text">信用卡</div>
+                    <div class="grid-text">刮刮乐</div>
                 </div>
                 <div class="grid-item">
                     <div class="icon-box"><svg class="service-icon" viewBox="0 0 24 24"><path d="M22 17a3 3 0 0 0-3-3h-1.66V8.2a2.8 2.8 0 0 0-2.8-2.8H9.46A2.8 2.8 0 0 0 6.66 8.2V14H5a3 3 0 0 0-3 3v3h20Z"/></svg></div>
                     <div class="grid-text">理财通</div>
                 </div>
-                <div class="grid-item">
+                <div class="grid-item" onclick="showLoanPage()">
                     <div class="icon-box"><svg class="service-icon" viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
                     <div class="grid-text">借钱</div>
                 </div>
@@ -2225,6 +2565,10 @@
 
             <div class="section-title">生活服务 UTILITIES</div>
             <div class="grid-card">
+                <div class="grid-item" onclick="showEmeiPage()">
+                    <div class="icon-box"><svg class="service-icon" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 11h8M8 15h5"/><path d="M3 3h18v4H3z"/></svg></div>
+                    <div class="grid-text">饿美了</div>
+                </div>
                 <div class="grid-item" onclick="showPhoneRechargePage()">
                     <div class="icon-box"><svg class="service-icon" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></svg></div>
                     <div class="grid-text">手机充值</div>
@@ -2297,6 +2641,261 @@
         </div>
     </div>
 
+    <!-- 借钱页面 -->
+    <div class="wechat-page service-sub-page" id="loan-page" style="display:none;">
+        <div class="svc-nav-bar">
+            <div class="back-btn" onclick="hideLoanPage()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0; color:var(--ins-text); position:static;">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div style="flex:1;">借钱 <span style="font-size: 14px; color: #ccc; margin-left: 4px;">Loan</span></div>
+            <div style="width:40px;"></div>
+        </div>
+
+        <div class="svc-container" style="padding-top:20px;">
+            <!-- 可借额度卡片 -->
+            <div class="loan-header-card">
+                <div class="loan-header-icon">
+                    <svg viewBox="0 0 24 24" style="width:48px; height:48px; stroke:#666; stroke-width:1.5; fill:none;">
+                        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                    </svg>
+                </div>
+                <div class="loan-header-title">可借额度</div>
+                <div class="loan-header-amount" id="loan-available-amount">¥50,000</div>
+                <div class="loan-header-subtitle">最高可借 ¥50,000</div>
+            </div>
+
+            <!-- 借款金额选择 -->
+            <div class="loan-amount-section">
+                <div class="loan-section-title">选择借款金额</div>
+                <div class="loan-amount-grid">
+                    <div class="loan-amount-btn" data-amount="1000" onclick="selectLoanAmount(1000)">
+                        <div class="loan-amount-value">¥1,000</div>
+                        <div class="loan-amount-desc">小额应急</div>
+                    </div>
+                    <div class="loan-amount-btn" data-amount="5000" onclick="selectLoanAmount(5000)">
+                        <div class="loan-amount-value">¥5,000</div>
+                        <div class="loan-amount-desc">日常周转</div>
+                    </div>
+                    <div class="loan-amount-btn" data-amount="10000" onclick="selectLoanAmount(10000)">
+                        <div class="loan-amount-value">¥10,000</div>
+                        <div class="loan-amount-desc">推荐</div>
+                    </div>
+                    <div class="loan-amount-btn" data-amount="20000" onclick="selectLoanAmount(20000)">
+                        <div class="loan-amount-value">¥20,000</div>
+                        <div class="loan-amount-desc">大额需求</div>
+                    </div>
+                </div>
+                <div class="loan-custom-amount">
+                    <div class="loan-custom-label">或输入自定义金额</div>
+                    <div class="loan-custom-input-wrapper">
+                        <span class="loan-currency">¥</span>
+                        <input type="number" id="loan-custom-input" class="loan-custom-input" placeholder="请输入金额" min="100" max="50000" step="100" oninput="handleCustomLoanAmount(this.value)">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 借款信息卡片 -->
+            <div class="loan-info-card">
+                <div class="loan-info-item">
+                    <div class="loan-info-label">借款期限</div>
+                    <div class="loan-info-value">
+                        <select id="loan-term-select" class="loan-select" onchange="updateLoanInfo()">
+                            <option value="3">3个月</option>
+                            <option value="6" selected>6个月</option>
+                            <option value="12">12个月</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="loan-info-item">
+                    <div class="loan-info-label">日利率</div>
+                    <div class="loan-info-value">0.05%</div>
+                </div>
+                <div class="loan-info-item">
+                    <div class="loan-info-label">预计还款总额</div>
+                    <div class="loan-info-value loan-highlight" id="loan-total-amount">¥0.00</div>
+                </div>
+            </div>
+
+            <!-- 借款按钮 -->
+            <button id="loan-submit-btn" onclick="submitLoan()" class="loan-submit-btn" disabled>
+                请选择借款金额
+            </button>
+
+            <!-- 温馨提示 -->
+            <div class="loan-tips">
+                <div class="loan-tips-title">温馨提示</div>
+                <div class="loan-tips-content">
+                    <div class="loan-tip-item">• 借款需按时还款，逾期将产生额外费用</div>
+                    <div class="loan-tip-item">• 请根据自身还款能力合理借款</div>
+                    <div class="loan-tip-item">• 借款前请仔细阅读相关协议</div>
+                </div>
+            </div>
+
+            <!-- 借款记录 -->
+            <div class="loan-history-section">
+                <div class="loan-section-title">借款记录</div>
+                <div id="loan-history-list" class="loan-history-list">
+                    <div class="loan-empty-state">暂无借款记录</div>
+                </div>
+            </div>
+
+            <!-- 测试按钮 -->
+            <div style="margin-top: 20px;">
+                <button onclick="testLoanReminder()" class="loan-submit-btn" style="background: #999; opacity: 1;">
+                    测试提醒功能
+                </button>
+                <div id="test-reminder-status" style="text-align: center; margin-top: 10px; font-size: 12px; color: #999;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 还款页面 -->
+    <div class="wechat-page service-sub-page" id="repay-page" style="display:none;">
+        <div class="svc-nav-bar">
+            <div class="back-btn" onclick="hideRepayPage()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0; color:var(--ins-text); position:static;">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div style="flex:1;">还款 <span style="font-size: 14px; color: #ccc; margin-left: 4px;">Repay</span></div>
+            <div style="width:40px;"></div>
+        </div>
+
+        <div class="svc-container" style="padding-top:20px;">
+            <!-- 当前余额显示 -->
+            <div class="scratch-balance-card">
+                <div class="scratch-balance-label">当前余额</div>
+                <div class="scratch-balance-amount" id="repay-current-balance">¥0.00</div>
+            </div>
+
+            <!-- 借款信息卡片 -->
+            <div class="loan-info-card" id="repay-loan-info">
+                <div class="loan-info-item">
+                    <div class="loan-info-label">借款金额</div>
+                    <div class="loan-info-value" id="repay-loan-amount">¥0</div>
+                </div>
+                <div class="loan-info-item">
+                    <div class="loan-info-label">借款日期</div>
+                    <div class="loan-info-value" id="repay-loan-date">-</div>
+                </div>
+                <div class="loan-info-item">
+                    <div class="loan-info-label">借款期限</div>
+                    <div class="loan-info-value" id="repay-loan-term">-</div>
+                </div>
+                <div class="loan-info-item">
+                    <div class="loan-info-label">应还总额</div>
+                    <div class="loan-info-value loan-highlight" id="repay-total-amount">¥0.00</div>
+                </div>
+                <div class="loan-info-item">
+                    <div class="loan-info-label">已还金额</div>
+                    <div class="loan-info-value" id="repay-paid-amount">¥0.00</div>
+                </div>
+                <div class="loan-info-item" style="border-top: 2px solid #f7f7f7; margin-top: 8px; padding-top: 16px;">
+                    <div class="loan-info-label" style="font-size: 16px; font-weight: 600;">剩余应还</div>
+                    <div class="loan-info-value loan-highlight" style="font-size: 20px;" id="repay-remaining-amount">¥0.00</div>
+                </div>
+            </div>
+
+            <!-- 还款金额选择 -->
+            <div class="loan-amount-section">
+                <div class="loan-section-title">选择还款金额</div>
+                <div class="loan-amount-grid" style="grid-template-columns: repeat(3, 1fr);">
+                    <div class="loan-amount-btn" onclick="selectRepayAmount('monthly')">
+                        <div class="loan-amount-value" id="repay-monthly-value">¥0</div>
+                        <div class="loan-amount-desc">按月还款</div>
+                    </div>
+                    <div class="loan-amount-btn" onclick="selectRepayAmount('half')">
+                        <div class="loan-amount-value" id="repay-half-value">¥0</div>
+                        <div class="loan-amount-desc">还一半</div>
+                    </div>
+                    <div class="loan-amount-btn" onclick="selectRepayAmount('all')">
+                        <div class="loan-amount-value" id="repay-all-value">¥0</div>
+                        <div class="loan-amount-desc">全部还清</div>
+                    </div>
+                </div>
+                <div class="loan-custom-amount">
+                    <div class="loan-custom-label">或输入自定义金额</div>
+                    <div class="loan-custom-input-wrapper">
+                        <span class="loan-currency">¥</span>
+                        <input type="number" id="repay-custom-input" class="loan-custom-input" placeholder="请输入金额" min="1" step="0.01" oninput="handleCustomRepayAmount(this.value)">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 还款按钮 -->
+            <button id="repay-submit-btn" onclick="submitRepay()" class="loan-submit-btn" disabled>
+                请选择还款金额
+            </button>
+
+            <!-- 温馨提示 -->
+            <div class="loan-tips">
+                <div class="loan-tips-title">温馨提示</div>
+                <div class="loan-tips-content">
+                    <div class="loan-tip-item">• 还款将从钱包余额扣除</div>
+                    <div class="loan-tip-item">• 请确保余额充足</div>
+                    <div class="loan-tip-item">• 提前还款可减少利息支出</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 刮刮乐页面 -->
+    <div class="wechat-page service-sub-page" id="scratch-card-page" style="display:none;">
+        <div class="svc-nav-bar">
+            <div class="back-btn" onclick="hideScratchCardPage()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0; color:var(--ins-text); position:static;">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div style="flex:1;">刮刮乐 <span style="font-size: 14px; color: #ccc; margin-left: 4px;">Scratch Card</span></div>
+            <div style="width:40px;"></div>
+        </div>
+
+        <div class="svc-container" style="padding-top:20px;">
+            <!-- 当前余额显示 -->
+            <div class="scratch-balance-card">
+                <div class="scratch-balance-label">当前余额</div>
+                <div class="scratch-balance-amount" id="scratch-current-balance">¥0.00</div>
+            </div>
+
+            <!-- 刮刮乐卡片区域 -->
+            <div class="scratch-card-container">
+                <div class="scratch-card-wrapper">
+                    <div class="scratch-card" id="scratch-card">
+                        <div class="scratch-card-cover" id="scratch-cover">
+                            <div class="scratch-cover-pattern"></div>
+                            <div class="scratch-cover-text">刮开查看</div>
+                        </div>
+                        <div class="scratch-card-content" id="scratch-content">
+                            <div class="scratch-result-icon" id="scratch-result-icon"></div>
+                            <div class="scratch-result-text" id="scratch-result-text">恭喜中奖！</div>
+                            <div class="scratch-result-amount" id="scratch-result-amount">¥0</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 购买按钮 -->
+            <button id="scratch-buy-btn" class="scratch-buy-btn" onclick="buyScratchCard()">
+                <span id="scratch-buy-text">购买刮刮乐 (¥10)</span>
+            </button>
+
+            <!-- 中奖记录 -->
+            <div class="scratch-history-section">
+                <div class="loan-section-title">中奖记录</div>
+                <div id="scratch-history-list" class="loan-history-list">
+                    <div class="loan-empty-state">暂无中奖记录</div>
+                </div>
+            </div>
+
+            <!-- 温馨提示 -->
+            <div class="loan-tips">
+                <div class="loan-tips-title">温馨提示</div>
+                <div class="loan-tips-content">
+                    <div class="loan-tip-item">• 每张刮刮乐售价 ¥10，从钱包余额扣除</div>
+                    <div class="loan-tip-item">• 中奖金额将自动添加到钱包余额</div>
+                    <div class="loan-tip-item">• 理性消费，量力而行</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 朋友圈页面 -->
     <div class="wechat-page" id="moments-page" style="background:#ffffff; overflow-y:auto; display:none;">
         <!-- 沉浸式导航栏 -->
@@ -2352,12 +2951,14 @@
         </div>
 
         <!-- 置顶区域 -->
-        <div id="my-moments-pinned-section" style="display:none;">
-            <div style="padding:12px 16px; font-size:14px; color:#333; font-weight:600; background:#fff;">置顶</div>
-            <div id="my-moments-pinned-list" style="display:flex; overflow-x:auto; padding:12px 16px; gap:12px; background:#fff; -webkit-overflow-scrolling:touch;">
-                <!-- 置顶的朋友圈卡片 -->
+        <div id="my-moments-pinned-section" class="moments-pinned-section">
+            <div class="moments-pinned-label">置顶</div>
+            <div class="moments-pinned-scroll">
+                <div id="my-moments-pinned-list" class="moments-pinned-list">
+                    <!-- 置顶的朋友圈卡片 -->
+                </div>
+                <div class="moments-pinned-arrow">›</div>
             </div>
-            <div style="height:8px; background:#f5f5f5; border-top:1px solid #f0f0f0; width:90%; margin:0 auto;"></div>
         </div>
 
         <!-- 普通内容列表 -->
@@ -2365,6 +2966,19 @@
             <div class="wechat-empty-state" style="margin-top:60px;">
                 <div style="color:#999; font-size:14px;">加载中...</div>
             </div>
+        </div>
+    </div>
+
+    <!-- 所有置顶朋友圈页面 -->
+    <div class="wechat-page" id="all-pinned-moments-page" style="display:none; z-index:205;">
+        <div class="wechat-header">
+            <div class="back-btn" onclick="hideAllPinnedMoments()" style="margin:0; background:none; font-size:16px; color:#333; width:60px;">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:24px; height:24px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="wechat-title">置顶</div>
+            <div style="width:60px;"></div>
+        </div>
+        <div class="moments-list" id="all-pinned-list" style="padding-top:60px;">
         </div>
     </div>
 
@@ -2439,13 +3053,76 @@
                     <div class="wechat-cell-text">所在位置</div>
                     <div class="wechat-cell-arrow">›</div>
                 </div>
-                <div class="wechat-cell" style="padding:12px 0; border:none;">
+                <div class="wechat-cell" style="padding:12px 0; border:none;" onclick="showPrivacySelector()">
                     <div class="wechat-cell-icon" style="margin-right:10px;">
                         <svg class="svg-icon" viewBox="0 0 24 24" style="width:20px; height:20px;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
                     </div>
                     <div class="wechat-cell-text">谁可以看</div>
-                    <div class="wechat-cell-arrow">›</div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span id="privacy-selected-text" style="font-size:14px; color:#999;">公开</span>
+                        <div class="wechat-cell-arrow">›</div>
+                    </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 朋友圈权限选择页面 -->
+    <div class="wechat-page" id="privacy-selector-page" style="display:none; z-index:220;">
+        <div class="wechat-header">
+            <div class="back-btn" onclick="hidePrivacySelector()" style="margin:0; background:none; font-size:16px; color:#333; width:60px;">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:24px; height:24px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="wechat-title">谁可以看</div>
+            <div style="width:60px;"></div>
+        </div>
+        <div style="padding-top:60px;">
+            <div class="privacy-option" data-value="public" onclick="selectPrivacy('public', '公开')">
+                <div class="privacy-option-content">
+                    <div class="privacy-option-title">公开</div>
+                    <div class="privacy-option-desc">所有朋友可见</div>
+                </div>
+                <div class="privacy-option-check" id="privacy-check-public">✓</div>
+            </div>
+            <div class="privacy-option" data-value="private" onclick="selectPrivacy('private', '私密')">
+                <div class="privacy-option-content">
+                    <div class="privacy-option-title">私密</div>
+                    <div class="privacy-option-desc">仅自己可见</div>
+                </div>
+                <div class="privacy-option-check" id="privacy-check-private"></div>
+            </div>
+            <div class="privacy-option" data-value="partial" onclick="showFriendSelector('partial')">
+                <div class="privacy-option-content">
+                    <div class="privacy-option-title">部分可见</div>
+                    <div class="privacy-option-desc" id="partial-desc">选中的朋友可见</div>
+                </div>
+                <div class="wechat-cell-arrow">›</div>
+            </div>
+            <div class="privacy-option" data-value="exclude" onclick="showFriendSelector('exclude')">
+                <div class="privacy-option-content">
+                    <div class="privacy-option-title">不给谁看</div>
+                    <div class="privacy-option-desc" id="exclude-desc">选中的朋友不可见</div>
+                </div>
+                <div class="wechat-cell-arrow">›</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 好友选择页面 -->
+    <div class="wechat-page" id="friend-selector-page" style="display:none; z-index:230;">
+        <div class="wechat-header">
+            <div class="back-btn" onclick="hideFriendSelector()" style="margin:0; background:none; font-size:16px; color:#333; width:60px;">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:24px; height:24px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="wechat-title" id="friend-selector-title">选择好友</div>
+            <div class="wechat-add" onclick="confirmFriendSelection()" style="width:60px; justify-content:flex-end;">
+                <span style="color:#07c160; font-size:16px; font-weight:600;">完成</span>
+            </div>
+        </div>
+        <div style="padding:60px 0 20px;">
+            <div style="padding:12px 16px; background:#f8f8f8; font-size:12px; color:#999;">选择好友</div>
+            <div id="friend-selector-list" style="background:#fff;">
+                <!-- 好友列表 -->
             </div>
         </div>
     </div>
@@ -2505,8 +3182,8 @@
     </div>
 
     <!-- 零钱页面 -->
-    <div class="sub-page-container" id="balance-page">
-        <div class="wallet-nav" style="background:#fff;">
+    <div class="sub-page-container service-sub-page" id="balance-page">
+        <div class="wallet-nav" style="background:rgba(255,251,252,0.95); backdrop-filter:blur(10px);">
             <div class="back-btn" onclick="hideBalancePage()">
                 <svg width="24" height="24" fill="none" stroke="#333" stroke-width="2" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"></polyline></svg>
             </div>
@@ -2567,6 +3244,168 @@
         </div>
     </div>
 
+    <!-- 群聊转账类型选择弹窗 - INS风格 -->
+    <div class="modal-overlay" id="group-transfer-type-modal" style="display:none;">
+        <div class="modal-box" style="max-width:300px; padding:0; overflow:hidden; border-radius:16px;">
+            <div style="padding:20px 16px; text-align:center; border-bottom:0.5px solid #f0f0f0;">
+                <div style="font-size:17px; font-weight:600; color:#333;">选择类型</div>
+            </div>
+            <div style="padding:16px;">
+                <div onclick="showGroupRedPacketPage()" style="display:flex; align-items:center; padding:14px 16px; background:#fafafa; border-radius:12px; margin-bottom:12px; cursor:pointer; transition:all 0.2s; border:1px solid #f0f0f0;">
+                    <div style="width:44px; height:44px; border-radius:12px; background:#fff; border:1px solid #eee; display:flex; align-items:center; justify-content:center; margin-right:14px;">
+                        <svg viewBox="0 0 24 24" style="width:22px; height:22px; stroke:var(--ins-pink); fill:none; stroke-width:1.5;"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><circle cx="12" cy="15" r="2"/></svg>
+                    </div>
+                    <div style="flex:1;">
+                        <div style="font-size:15px; font-weight:500; color:#333;">群红包</div>
+                        <div style="font-size:12px; color:#999; margin-top:2px;">拼手气或普通红包</div>
+                    </div>
+                    <svg viewBox="0 0 24 24" style="width:18px; height:18px; stroke:#ccc; fill:none;"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </div>
+                <div onclick="showExclusiveTransferPage()" style="display:flex; align-items:center; padding:14px 16px; background:#fafafa; border-radius:12px; cursor:pointer; transition:all 0.2s; border:1px solid #f0f0f0;">
+                    <div style="width:44px; height:44px; border-radius:12px; background:#fff; border:1px solid #eee; display:flex; align-items:center; justify-content:center; margin-right:14px;">
+                        <svg viewBox="0 0 24 24" style="width:22px; height:22px; stroke:var(--ins-pink); fill:none; stroke-width:1.5;"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                    </div>
+                    <div style="flex:1;">
+                        <div style="font-size:15px; font-weight:500; color:#333;">专属转账</div>
+                        <div style="font-size:12px; color:#999; margin-top:2px;">转给指定群成员</div>
+                    </div>
+                    <svg viewBox="0 0 24 24" style="width:18px; height:18px; stroke:#ccc; fill:none;"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </div>
+            </div>
+            <div onclick="closeModal('group-transfer-type-modal')" style="padding:14px 16px; text-align:center; border-top:0.5px solid #f0f0f0; color:#999; font-size:15px; cursor:pointer;">取消</div>
+        </div>
+    </div>
+
+    <!-- 群红包页面 - INS风格 -->
+    <div class="transfer-modal" id="group-redpacket-page" style="display:none;">
+        <div class="transfer-page-header" style="background:#fff; border-bottom:0.5px solid #f0f0f0;">
+            <div class="back-btn" onclick="hideGroupRedPacketPage()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0; color:#333;">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="transfer-page-title" style="color:#333;">发红包</div>
+            <div style="width:40px;"></div>
+        </div>
+        
+        <div style="flex:1; background:#fff; padding:16px;">
+            <!-- 红包类型选择 -->
+            <div style="background:#fff; border-radius:12px; padding:16px; margin-bottom:12px; border:1px solid #eee;">
+                <div style="font-size:13px; color:#999; margin-bottom:12px;">红包类型</div>
+                <div style="display:flex; gap:12px;">
+                    <div id="rp-type-lucky" onclick="selectRedPacketType('lucky')" style="flex:1; padding:12px; border:1.5px solid #333; border-radius:10px; text-align:center; cursor:pointer; background:#fff;">
+                        <div style="font-size:14px; font-weight:500; color:#333;">拼手气红包</div>
+                        <div style="font-size:11px; color:#999; margin-top:4px;">金额随机</div>
+                    </div>
+                    <div id="rp-type-normal" onclick="selectRedPacketType('normal')" style="flex:1; padding:12px; border:1.5px solid #e8e8e8; border-radius:10px; text-align:center; cursor:pointer; background:#fff;">
+                        <div style="font-size:14px; font-weight:500; color:#666;">普通红包</div>
+                        <div style="font-size:11px; color:#999; margin-top:4px;">金额相同</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 红包金额 -->
+            <div style="background:#fff; border-radius:12px; padding:16px; margin-bottom:12px; border:1px solid #eee;">
+                <div style="display:flex; align-items:center; border-bottom:1px solid #f0f0f0; padding-bottom:14px; margin-bottom:14px;">
+                    <div style="font-size:14px; color:#999; width:70px;">总金额</div>
+                    <div style="flex:1; display:flex; align-items:center;">
+                        <span style="font-size:18px; color:#333; margin-right:4px;">¥</span>
+                        <input type="number" id="rp-amount-input" placeholder="0.00" style="flex:1; border:none; font-size:22px; font-weight:500; outline:none; color:#333;" oninput="checkRedPacketInput()">
+                    </div>
+                </div>
+                <div style="display:flex; align-items:center;">
+                    <div style="font-size:14px; color:#999; width:70px;">红包个数</div>
+                    <div style="flex:1; display:flex; align-items:center;">
+                        <input type="number" id="rp-count-input" placeholder="1" min="1" style="flex:1; border:none; font-size:16px; outline:none; color:#333;" oninput="checkRedPacketInput()">
+                        <span style="font-size:13px; color:#999;">个</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 祝福语 -->
+            <div style="background:#fff; border-radius:12px; padding:14px 16px; margin-bottom:24px; border:1px solid #eee;">
+                <input type="text" id="rp-wish-input" placeholder="祝福语（选填）" maxlength="20" style="width:100%; border:none; font-size:14px; outline:none; box-sizing:border-box; color:#333;">
+            </div>
+            
+            <!-- 金额提示 -->
+            <div style="text-align:center; margin-bottom:20px;">
+                <span style="font-size:13px; color:#999;" id="rp-total-hint">共0.00元</span>
+            </div>
+            
+            <!-- 发送按钮 -->
+            <button id="btn-send-redpacket" onclick="sendGroupRedPacket()" disabled style="width:100%; padding:14px; background:#ccc; color:#fff; border:none; border-radius:24px; font-size:16px; font-weight:500; cursor:not-allowed; transition:all 0.2s;">
+                发红包
+            </button>
+        </div>
+    </div>
+
+    <!-- 红包详情页面 -->
+    <div class="transfer-modal" id="redpacket-detail-page" style="display:none;">
+        <div class="transfer-page-header" style="background:#fff; border-bottom:0.5px solid #f0f0f0;">
+            <div class="back-btn" onclick="hideRedPacketDetail()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0; color:#333;">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="transfer-page-title" style="color:#333;">红包详情</div>
+            <div style="width:40px;"></div>
+        </div>
+        
+        <div style="flex:1; background:#fff; overflow-y:auto;">
+            <!-- 红包信息头部 -->
+            <div style="padding:30px 20px; text-align:center; border-bottom:1px solid #f0f0f0;">
+                <div id="rp-detail-avatar" style="width:60px; height:60px; border-radius:50%; background:#eee; margin:0 auto 12px; background-size:cover; background-position:center;"></div>
+                <div id="rp-detail-sender" style="font-size:15px; color:#333; margin-bottom:8px;">发送者</div>
+                <div id="rp-detail-wish" style="font-size:18px; font-weight:500; color:#333; margin-bottom:6px;">恭喜发财</div>
+                <div id="rp-detail-type" style="font-size:13px; color:#999;">拼手气红包</div>
+            </div>
+            
+            <!-- 领取按钮区域 -->
+            <div id="rp-detail-action" style="padding:20px; border-bottom:1px solid #f0f0f0;">
+                <button id="btn-claim-redpacket" onclick="claimRedPacket()" style="width:100%; padding:14px; background:#333; color:#fff; border:none; border-radius:24px; font-size:16px; font-weight:500; cursor:pointer;">
+                    领取红包
+                </button>
+            </div>
+            
+            <!-- 已领取列表 -->
+            <div style="padding:16px 20px;">
+                <div style="font-size:13px; color:#999; margin-bottom:12px;">
+                    <span id="rp-detail-claimed-count">0</span>/<span id="rp-detail-total-count">0</span> 已领取，共 <span id="rp-detail-total-amount">0.00</span> 元
+                </div>
+                <div id="rp-detail-claimed-list">
+                    <!-- 动态生成已领取成员列表 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 专属转账选人弹窗 -->
+    <div class="modal-overlay" id="exclusive-transfer-modal" style="display:none;">
+        <div class="modal-box" style="max-width:340px; max-height:70vh; padding:0; display:flex; flex-direction:column;">
+            <div style="padding:16px; border-bottom:0.5px solid #f0f0f0; display:flex; align-items:center; justify-content:space-between;">
+                <div style="font-size:17px; font-weight:600; color:#333;">选择转账对象</div>
+                <div onclick="closeModal('exclusive-transfer-modal')" style="font-size:24px; color:#999; cursor:pointer; line-height:1;">×</div>
+            </div>
+            <div id="exclusive-member-list" style="flex:1; overflow-y:auto; padding:8px 0;">
+                <!-- 动态生成群成员列表 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- 位置输入弹窗 -->
+    <div class="location-modal-overlay" id="location-modal">
+        <div class="location-popup">
+            <div class="location-popup-header">
+                <span>发送位置</span>
+                <div class="location-close-btn" onclick="hideLocationModal()">×</div>
+            </div>
+            <div class="location-popup-body">
+                <input type="text" class="location-popup-input" id="location-name-input" placeholder="位置名称">
+                <input type="text" class="location-popup-input" id="location-address-input" placeholder="详细地址（选填）">
+            </div>
+            <div class="location-popup-footer">
+                <button class="location-popup-btn cancel" onclick="hideLocationModal()">取消</button>
+                <button class="location-popup-btn confirm" onclick="sendLocationMessage()">发送</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 收款确认弹窗 -->
     <div class="confirm-modal-overlay" id="transfer-confirm-modal">
         <div class="confirm-box">
@@ -2613,8 +3452,8 @@
     </div>
 
     <!-- 亲属卡页面 -->
-    <div class="sub-page-container" id="family-card-page" style="display:none;">
-        <div class="wallet-nav" style="background:#fff;">
+    <div class="sub-page-container service-sub-page" id="family-card-page" style="display:none;">
+        <div class="wallet-nav" style="background:rgba(255,251,252,0.95); backdrop-filter:blur(10px);">
             <div class="back-btn" onclick="hideFamilyCardPage()">
                 <svg width="24" height="24" fill="none" stroke="#333" stroke-width="2" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"></polyline></svg>
             </div>
@@ -2623,7 +3462,7 @@
         </div>
         <div style="padding:16px;">
             <!-- 说明 -->
-            <div style="background:var(--ins-pink-light); border-radius:12px; padding:16px; margin-bottom:20px; border:1px solid var(--ins-pink);">
+            <div style="background:#FFF7FA; border-radius:12px; padding:16px; margin-bottom:20px; border:1px solid #f0e8ea;">
                 <div style="font-size:14px; color:#333; line-height:1.6;">
                     💝 亲属卡可以让对方使用你的零钱消费，你可以随时查看消费记录或解绑。
                 </div>
@@ -2636,7 +3475,7 @@
                     <!-- 动态渲染 -->
                 </div>
                 <div class="family-card-add" onclick="showGiveFamilyCardModal()">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--ins-pink)" stroke-width="2">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2">
                         <line x1="12" y1="5" x2="12" y2="19"></line>
                         <line x1="5" y1="12" x2="19" y2="12"></line>
                     </svg>
@@ -3281,16 +4120,20 @@
         <div class="wyy-app-wrapper">
             <!-- 主页面 -->
             <div class="wyy-page wyy-main-page active" id="wyyMainPage">
-                <!-- 顶部返回按钮 -->
-                <button class="wyy-main-back-btn" onclick="closeMusicApp()" style="position: fixed; top: 20px; left: 20px; z-index: 200; font-size: 18px; background: rgba(0,0,0,0.1); border: none; width: 40px; height: 40px; border-radius: 50%; color: #333; cursor: pointer; display: flex; align-items: center; justify-content: center;">
-                    <i class="fa fa-chevron-left"></i>
-                </button>
+                <!-- 顶栏 -->
+                <div class="wyy-top-bar">
+                    <button class="wyy-top-bar-back" onclick="closeMusicApp()">
+                        <i class="fa fa-chevron-left"></i>
+                    </button>
+                    <div class="wyy-top-bar-title">网易云音乐</div>
+                    <div class="wyy-top-bar-right"></div>
+                </div>
                 <!-- 顶部个人信息 -->
                 <div class="wyy-user-header">
                     <div class="wyy-avatar-wrapper">
                         <div class="wyy-avatar" id="wyyAvatarDisplay"></div>
                     </div>
-                    <div class="wyy-nickname">他的命就这样落到了我的怀里 <span class="wyy-vip-tag">VIP叁</span></div>
+                    <div class="wyy-nickname">user <span class="wyy-vip-tag">VIP叁</span></div>
                     <div class="wyy-user-stats">
                         <div class="wyy-stat-item" data-type="follow">
                             <div class="wyy-stat-value">29</div>
@@ -3369,10 +4212,14 @@
             <!-- 播放详情页面 -->
             <div class="wyy-page wyy-player-page" id="wyyPlayerPage">
                 <div class="wyy-player-header">
-                    <button class="wyy-back-btn" id="wyyBackBtn"><i class="fa fa-chevron-down"></i></button>
-                    <button class="wyy-together-listen-btn" id="wyyTogetherListenBtn" title="一起听">
-                        <i class="fa fa-users"></i>
-                    </button>
+                    <!-- 顶栏 -->
+                    <div class="wyy-player-top-bar">
+                        <button class="wyy-player-top-bar-back" id="wyyBackBtn"><i class="fa fa-chevron-down"></i></button>
+                        <div class="wyy-player-top-bar-title" style="text-align:center;">正在播放</div>
+                        <button class="wyy-player-top-bar-right" id="wyyTogetherListenBtn" title="一起听">
+                            <i class="fa fa-headphones"></i>
+                        </button>
+                    </div>
                     <div class="wyy-song-info-large">
                         <div class="wyy-song-name-large" id="wyyPlayerSongName">怎么唱情歌</div>
                         <div class="wyy-singer-name-large" id="wyyPlayerSingerName">刘惜君</div>
@@ -4042,6 +4889,459 @@
                 <button class="cabin-pixel-btn" onclick="resetCabinColor()" style="background:#ffffff; border-color: #cccccc; color: #999999;">重置颜色</button>
                 <button class="cabin-pixel-btn" onclick="applyCabinColor()" style="background:#fff5f7; border-color: #ffb3c1; color: #999999;">应用颜色</button>
                 <button class="cabin-pixel-btn" onclick="closeCabinColorPicker()" style="background:#ffffff; border-color: #cccccc; color: #999999;">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 饿美了外卖页面 -->
+    <div class="sub-page-container service-sub-page" id="emei-page" style="display:none;">
+        <!-- 主页 -->
+        <div id="emei-main-view" style="flex: 1; overflow-y: auto;">
+            <!-- 顶部导航栏 -->
+            <div style="position: sticky; top: 0; z-index: 100; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.05);">
+                <div class="wallet-nav" style="background: #fff;">
+                    <div class="back-btn" onclick="hideEmeiPage()">
+                        <svg width="24" height="24" fill="none" stroke="#333" stroke-width="2" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                    </div>
+                    <div style="font-size: 18px; font-weight: 600; letter-spacing: 0.5px;">饿美了</div>
+                    <div style="width: 40px;"></div>
+                </div>
+            </div>
+
+            <!-- 优惠券领取区域 -->
+            <div style="margin: 16px; padding: 20px; background: linear-gradient(135deg, #fff5f7 0%, #ffeef2 100%); border-radius: 16px; box-shadow: 0 2px 12px rgba(255,105,180,0.08);">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                    <div>
+                        <div style="font-size: 16px; font-weight: 600; color: #333; margin-bottom: 4px;">每日领券</div>
+                        <div style="font-size: 12px; color: #999;">今日还有 <span id="emei-coupon-count">3</span> 次机会</div>
+                    </div>
+                    <div onclick="claimEmeiCoupon()" style="padding: 10px 24px; background: linear-gradient(135deg, #ff6b9d 0%, #ff8fab 100%); color: #fff; border-radius: 20px; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(255,107,157,0.3); transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                        领取
+                    </div>
+                </div>
+                <!-- 已领取的优惠券 -->
+                <div id="emei-my-coupons" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px dashed rgba(255,107,157,0.2);"></div>
+            </div>
+
+            <!-- 店铺列表 -->
+            <div style="padding: 0 16px 80px;">
+                <div style="font-size: 14px; font-weight: 600; color: #333; margin: 20px 0 12px; letter-spacing: 0.5px;">推荐商家</div>
+                <div id="emei-store-list">
+                    <!-- 动态生成店铺卡片 -->
+                </div>
+            </div>
+        </div>
+
+        <!-- 店铺详情页 -->
+        <div id="emei-store-detail-view" style="display: none; flex: 1; overflow-y: auto; flex-direction: column;">
+            <!-- 顶部导航栏 -->
+            <div style="position: sticky; top: 0; z-index: 100; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.05);">
+                <div class="wallet-nav" style="background: #fff;">
+                    <div class="back-btn" onclick="backToEmeiMain()">
+                        <svg width="24" height="24" fill="none" stroke="#333" stroke-width="2" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                    </div>
+                    <div style="font-size: 16px; font-weight: 600;" id="emei-store-name">店铺名称</div>
+                    <div style="width: 40px;"></div>
+                </div>
+            </div>
+
+            <!-- 店铺信息 -->
+            <div style="padding: 16px; background: #fff;">
+                <div style="display: flex; gap: 12px;">
+                    <div id="emei-store-avatar" style="width: 60px; height: 60px; border-radius: 12px; background: #f5f5f5; flex-shrink: 0;"></div>
+                    <div style="flex: 1;">
+                        <div id="emei-store-title" style="font-size: 16px; font-weight: 600; color: #333; margin-bottom: 4px;"></div>
+                        <div id="emei-store-desc" style="font-size: 12px; color: #999; margin-bottom: 6px;"></div>
+                        <div style="display: flex; gap: 8px; font-size: 11px; color: #666;">
+                            <span>⭐ 4.8</span>
+                            <span>月售 <span id="emei-store-sales">999+</span></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 菜单列表 -->
+            <div style="padding: 16px; padding-bottom: 120px;">
+                <div style="font-size: 14px; font-weight: 600; color: #333; margin-bottom: 12px;">菜单</div>
+                <div id="emei-menu-list">
+                    <!-- 动态生成菜单项 -->
+                </div>
+            </div>
+
+            <!-- 底部购物车 -->
+            <div id="emei-cart-bar" style="position: fixed; bottom: 0; left: 0; right: 0; background: #fff; border-top: 1px solid #f0f0f0; padding: 12px 16px; box-shadow: 0 -2px 12px rgba(0,0,0,0.05); z-index: 101;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div style="flex: 1;">
+                        <div style="font-size: 12px; color: #999; margin-bottom: 2px;">配送给</div>
+                        <select id="emei-recipient-select" onchange="updateEmeiRecipient(this.value)" style="width: 100%; padding: 8px; border: 1px solid #e5e5e5; border-radius: 8px; font-size: 13px; outline: none;">
+                            <option value="self">我自己</option>
+                            <!-- 动态添加角色选项 -->
+                        </select>
+                    </div>
+                    <div style="flex: 1; text-align: right;">
+                        <div style="font-size: 12px; color: #999;">合计</div>
+                        <div style="font-size: 20px; font-weight: 600; color: var(--ins-pink);">¥<span id="emei-total-price">0</span></div>
+                    </div>
+                    <div onclick="showEmeiCheckout()" style="padding: 12px 28px; background: linear-gradient(135deg, #ff6b9d 0%, #ff8fab 100%); color: #fff; border-radius: 24px; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; box-shadow: 0 4px 12px rgba(255,107,157,0.3);">
+                        去结算
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 结算页面 -->
+        <div id="emei-checkout-view" style="display: none; flex: 1; overflow-y: auto; flex-direction: column;">
+            <!-- 顶部导航栏 -->
+            <div style="position: sticky; top: 0; z-index: 100; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.05);">
+                <div class="wallet-nav" style="background: #fff;">
+                    <div class="back-btn" onclick="backToEmeiStore()">
+                        <svg width="24" height="24" fill="none" stroke="#333" stroke-width="2" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                    </div>
+                    <div style="font-size: 16px; font-weight: 600;">确认订单</div>
+                    <div style="width: 40px;"></div>
+                </div>
+            </div>
+
+            <div style="padding: 16px; padding-bottom: 100px;">
+                <!-- 配送信息 -->
+                <div style="background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
+                    <div style="font-size: 14px; font-weight: 600; color: #333; margin-bottom: 12px;">配送信息</div>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <div id="emei-recipient-avatar" style="width: 48px; height: 48px; border-radius: 50%; background: #f5f5f5;"></div>
+                        <div>
+                            <div style="font-size: 14px; font-weight: 500; color: #333;" id="emei-recipient-name">我自己</div>
+                            <div style="font-size: 12px; color: #999;">预计30分钟送达</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 订单详情 -->
+                <div style="background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
+                    <div style="font-size: 14px; font-weight: 600; color: #333; margin-bottom: 12px;">订单详情</div>
+                    <div id="emei-checkout-items"></div>
+                    
+                    <!-- 使用优惠券 -->
+                    <div onclick="selectEmeiCoupon()" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-top: 1px solid #f5f5f5; cursor: pointer;">
+                        <div style="font-size: 13px; color: #666;">优惠券</div>
+                        <div style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: #999;">
+                            <span id="emei-selected-coupon-text">未使用</span>
+                            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 价格明细 -->
+                <div style="background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span style="font-size: 13px; color: #999;">商品总价</span>
+                        <span style="font-size: 13px; color: #333;">¥<span id="emei-checkout-subtotal">0</span></span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span style="font-size: 13px; color: #999;">配送费</span>
+                        <span style="font-size: 13px; color: #333;">¥<span id="emei-checkout-delivery">3</span></span>
+                    </div>
+                    <div id="emei-checkout-discount-row" style="display: none; margin-bottom: 8px;">
+                        <div style="display: flex; justify-content: space-between;">
+                            <span style="font-size: 13px; color: #999;">优惠</span>
+                            <span style="font-size: 13px; color: var(--ins-pink);">-¥<span id="emei-checkout-discount">0</span></span>
+                        </div>
+                    </div>
+                    <div style="border-top: 1px solid #f5f5f5; margin: 12px 0;"></div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 14px; font-weight: 600; color: #333;">实付</span>
+                        <span style="font-size: 20px; font-weight: 600; color: var(--ins-pink);">¥<span id="emei-checkout-total">0</span></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 底部支付按钮 -->
+            <div style="position: fixed; bottom: 0; left: 0; right: 0; background: #fff; border-top: 1px solid #f0f0f0; padding: 12px 16px; box-shadow: 0 -2px 12px rgba(0,0,0,0.05); z-index: 101;">
+                <div onclick="showEmeiPaymentModal()" style="width: 100%; padding: 14px; background: linear-gradient(135deg, #ff6b9d 0%, #ff8fab 100%); color: #fff; border-radius: 24px; font-size: 16px; font-weight: 600; text-align: center; cursor: pointer; box-shadow: 0 4px 16px rgba(255,107,157,0.3);">
+                    立即支付
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 优惠券选择弹窗 -->
+    <div id="emei-coupon-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box" style="max-height: 70vh; overflow-y: auto;">
+            <div style="font-size: 16px; font-weight: 600; text-align: center; margin-bottom: 16px;">选择优惠券</div>
+            <div id="emei-coupon-list">
+                <!-- 动态生成优惠券列表 -->
+            </div>
+            <button onclick="closeEmeiCouponModal()" style="width: 100%; padding: 12px; background: #f5f5f5; border: none; border-radius: 8px; font-size: 14px; color: #666; margin-top: 12px; cursor: pointer;">取消</button>
+        </div>
+    </div>
+
+    <!-- 支付方式选择弹窗 -->
+    <div id="emei-payment-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div style="font-size: 16px; font-weight: 600; text-align: center; margin-bottom: 20px;">选择支付方式</div>
+            
+            <div onclick="selectEmeiPaymentMethod('wallet')" class="emei-payment-option" style="display: flex; align-items: center; justify-content: space-between; padding: 16px; background: #fff; border: 2px solid #f0f0f0; border-radius: 12px; margin-bottom: 12px; cursor: pointer; transition: border-color 0.2s;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <svg width="32" height="32" fill="none" stroke="var(--ins-pink)" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><path d="M3 9h18"></path></svg>
+                    <div>
+                        <div style="font-size: 14px; font-weight: 500; color: #333;">零钱</div>
+                        <div style="font-size: 12px; color: #999;">余额 ¥<span id="emei-wallet-balance">0</span></div>
+                    </div>
+                </div>
+                <input type="radio" name="emei-payment" value="wallet">
+            </div>
+
+            <div onclick="selectEmeiPaymentMethod('family')" class="emei-payment-option" style="display: flex; align-items: center; justify-content: space-between; padding: 16px; background: #fff; border: 2px solid #f0f0f0; border-radius: 12px; margin-bottom: 12px; cursor: pointer; transition: border-color 0.2s;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <svg width="32" height="32" fill="none" stroke="var(--ins-pink)" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                    <div>
+                        <div style="font-size: 14px; font-weight: 500; color: #333;">亲属卡</div>
+                        <div style="font-size: 12px; color: #999;" id="emei-family-card-info">未绑定</div>
+                    </div>
+                </div>
+                <input type="radio" name="emei-payment" value="family">
+            </div>
+
+            <div onclick="selectEmeiPaymentMethod('request')" class="emei-payment-option" style="display: flex; align-items: center; justify-content: space-between; padding: 16px; background: #fff; border: 2px solid #f0f0f0; border-radius: 12px; margin-bottom: 20px; cursor: pointer; transition: border-color 0.2s;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <svg width="32" height="32" fill="none" stroke="var(--ins-pink)" stroke-width="2" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><polyline points="17 11 19 13 23 9"></polyline></svg>
+                    <div>
+                        <div style="font-size: 14px; font-weight: 500; color: #333;">申请代付</div>
+                        <div style="font-size: 12px; color: #999;">请好友帮忙支付</div>
+                    </div>
+                </div>
+                <input type="radio" name="emei-payment" value="request">
+            </div>
+
+            <button onclick="confirmEmeiPayment()" style="width: 100%; padding: 14px; background: linear-gradient(135deg, #ff6b9d 0%, #ff8fab 100%); color: #fff; border: none; border-radius: 24px; font-size: 16px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 16px rgba(255,107,157,0.3); margin-bottom: 8px;">确认支付</button>
+            <button onclick="closeEmeiPaymentModal()" style="width: 100%; padding: 12px; background: #f5f5f5; border: none; border-radius: 8px; font-size: 14px; color: #666; cursor: pointer;">取消</button>
+        </div>
+    </div>
+
+    <!-- icity App页面 -->
+    <div class="icity-app-page" id="icityAppPage">
+        <!-- icity 账号选择页面 -->
+        <div class="icity-select-page" id="icitySelectAccountPage" style="display: flex;">
+            <div class="icity-select-header">
+                <div class="icity-select-back" onclick="closeIcityApp()">
+                    <svg viewBox="0 0 24 24" width="24" height="24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" fill="currentColor"/></svg>
+                </div>
+                <div class="icity-select-title">选择微信账号</div>
+                <div style="width:40px;"></div>
+            </div>
+            <div class="icity-select-logo">
+                <div class="icity-select-logo-icon">
+                    <svg viewBox="0 0 24 24" style="width:48px; height:48px; fill:#fff;">
+                        <path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z"></path>
+                    </svg>
+                </div>
+                <div class="icity-select-logo-title">icity · 日记</div>
+                <div class="icity-select-logo-desc">选择一个微信账号进入</div>
+            </div>
+            <div class="icity-select-list" id="icityAccountList">
+                <!-- 账号列表动态生成 -->
+            </div>
+        </div>
+
+        <div style="width: 100%; height: 100%; overflow-y: auto; background-color: #fafafa; position: relative; display: none;" id="icityMainContent">
+            <div id="icityContent" class="icity-inner" style="max-width: 600px; margin: 0 auto;">
+                <!-- 1. 日记列表页 -->
+                <div class="page active" id="icityListPage">
+                    <div class="top-bar">
+                        <div class="back-btn" onclick="exitIcityToSelect()">
+                            <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+                        </div>
+                        <h1 class="page-title">icity · 我的日记</h1>
+                        <div class="top-icons">
+                            <div class="top-icon" id="icityGenerateBtn" title="生成日记">
+                                <svg class="icon-svg" viewBox="0 0 24 24"><path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z"/></svg>
+                            </div>
+                            <div class="top-icon" id="icitySelectRoleBtn" title="选择角色">
+                                <svg class="icon-svg" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                            </div>
+                            <div class="top-icon">
+                                <svg class="icon-svg" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="diary-list" id="icityDiaryList">
+                        <div style="text-align: center; padding: 60px 20px; color: #999; font-size: 14px;">
+                            <div style="margin-bottom: 10px;">📝</div>
+                            <div>还没有日记</div>
+                            <div style="font-size: 12px; margin-top: 8px; color: #ccc;">点击右上角图标选择角色并生成日记</div>
+                        </div>
+                    </div>
+
+                    <div class="bottom-tab">
+                        <div class="tab-item active" id="icityTabDiary">
+                            <div class="tab-icon">
+                                <svg viewBox="0 0 24 24"><path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/></svg>
+                            </div>
+                            <span>日记</span>
+                        </div>
+                        <div class="tab-publish" id="icityTabPublishBtn">
+                            <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                        </div>
+                        <div class="tab-item" id="icityTabMy">
+                            <div class="tab-icon">
+                                <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                            </div>
+                            <span>我的</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. 日记详情页 -->
+                <div class="page" id="icityDetailPage">
+                    <div class="detail-page">
+                        <div class="top-bar">
+                            <div class="back-btn" id="icityDetailBackBtn">
+                                <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+                            </div>
+                            <div class="page-title">user · 日记</div>
+                        </div>
+
+                        <div class="detail-card" id="icityDetailCard">
+                            <div class="detail-header">
+                                <div class="detail-avatar"></div>
+                                <div class="detail-user">
+                                    <div class="detail-username">user</div>
+                                    <div class="detail-userid">@user</div>
+                                </div>
+                            </div>
+                            <div class="detail-content" id="icityDetailContent"></div>
+                            <div class="detail-time" id="icityDetailTime"></div>
+                            <div class="icity-annotation-list" id="icityAnnotationList" style="display: none;"></div>
+                            <div class="detail-actions">
+                                <div class="detail-action" id="icityLikeBtn">
+                                    <svg viewBox="0 0 24 24"><path d="M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zM12.1 18.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z"/></svg>
+                                    喜欢
+                                </div>
+                                <div class="detail-action">
+                                    <svg viewBox="0 0 24 24"><path d="M21.99 4c0-1.1-.89-2-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14l4 4-.01-18zM18 14H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/></svg>
+                                    小纸条
+                                </div>
+                                <div class="detail-action">
+                                    <svg viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/></svg>
+                                    存为图片
+                                </div>
+                                <div class="detail-action" id="icityDeleteBtn">
+                                    <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                                    删除
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="comment-box">
+                            <input type="text" class="comment-input" placeholder="我要评论">
+                            <button class="send-btn" id="icitySendBtn">发送</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. 发布日记页面 -->
+                <div class="page" id="icityPublishPage">
+                    <div class="publish-page">
+                        <div class="publish-top">
+                            <div class="publish-avatar"></div>
+                            <input type="text" class="title-input" id="icityTitleInput" placeholder="标题（可选）">
+                            <div class="close-publish" id="icityPublishCloseBtn">
+                                <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                            </div>
+                        </div>
+                        <textarea class="content-input" id="icityContentInput" placeholder="写点什么吧"></textarea>
+                        <div class="publish-toolbar">
+                            <div class="tool-icons">
+                                <svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                                <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+                                <svg viewBox="0 0 24 24"><path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/></svg>
+                            </div>
+                            <div class="publish-setting">
+                                <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                                <span>公开</span>
+                                <button class="publish-submit" id="icityPublishSubmit">发送</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4. 我的页面（纯个人日记查看版） -->
+                <div class="page" id="icityMyPage">
+                    <div class="my-page">
+                        <div class="top-bar">
+                            <div class="page-title">我的</div>
+                        </div>
+
+                        <!-- 用户信息 -->
+                        <div class="user-profile">
+                            <div class="profile-avatar"></div>
+                            <div class="profile-info">
+                                <div class="profile-name">user</div>
+                                <div class="profile-id">@user</div>
+                            </div>
+                            <div class="profile-edit" id="icityProfileEdit">编辑资料</div>
+                        </div>
+
+                        <!-- 我的日记统计 -->
+                        <div class="my-diary-stat">我的日记（0篇）</div>
+
+                        <!-- 我的日记列表 -->
+                        <div class="my-diary-list">
+                        </div>
+                    </div>
+
+                    <div class="bottom-tab">
+                        <div class="tab-item" id="icityMyTabDiary">
+                            <div class="tab-icon">
+                                <svg viewBox="0 0 24 24"><path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/></svg>
+                            </div>
+                            <span>日记</span>
+                        </div>
+                        <div class="tab-publish" id="icityMyTabPublishBtn">
+                            <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                        </div>
+                        <div class="tab-item active" id="icityMyTabMy">
+                            <div class="tab-icon">
+                                <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                            </div>
+                            <span>我的</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- icity 角色选择模态框 -->
+    <div class="icity-role-modal" id="icityRoleModal" style="display: none;" onclick="if(event.target === this) closeIcityRoleModal()">
+        <div class="icity-role-modal-content" onclick="event.stopPropagation()">
+            <div class="icity-role-modal-title">选择角色</div>
+            <div class="icity-role-list" id="icityRoleList">
+                <!-- 角色列表将动态加载 -->
+            </div>
+            <div class="icity-role-modal-buttons">
+                <button class="icity-role-btn-cancel" onclick="closeIcityRoleModal()">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- icity 编辑资料模态框 -->
+    <div class="icity-role-modal" id="icityEditProfileModal" style="display: none;" onclick="if(event.target === this) closeIcityEditProfileModal()">
+        <div class="icity-role-modal-content" onclick="event.stopPropagation()">
+            <div class="icity-role-modal-title">编辑资料</div>
+            <div style="padding: 10px 0;">
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; font-size: 14px; color: #666; margin-bottom: 5px;">用户名</label>
+                    <input type="text" id="icityEditUsername" placeholder="请输入用户名" style="width: 100%; padding: 12px; border: 1px solid #eee; border-radius: 8px; font-size: 15px; outline: none; box-sizing: border-box;">
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; font-size: 14px; color: #666; margin-bottom: 5px;">微信ID</label>
+                    <input type="text" id="icityEditWechatId" placeholder="请输入微信ID" style="width: 100%; padding: 12px; border: 1px solid #eee; border-radius: 8px; font-size: 15px; outline: none; box-sizing: border-box;">
+                </div>
+            </div>
+            <div class="icity-role-modal-buttons">
+                <button class="icity-role-btn-cancel" onclick="closeIcityEditProfileModal()">取消</button>
+                <button class="icity-role-btn-cancel" onclick="saveIcityProfile()" style="background: #4096ff; color: #fff; border: none;">保存</button>
             </div>
         </div>
     </div>

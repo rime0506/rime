@@ -1,79 +1,74 @@
-// Service Worker - 真正的后台推送接收器
-// 这个文件在后台独立运行，即使页面关闭也能收到推送
+// Service Worker - 纯前端 PWA 版本
+// 用于离线缓存和 PWA 功能，不依赖后端推送
 
-console.log('[SW] Service Worker loaded');
+console.log('[SW] Service Worker loaded (纯前端模式)');
 
-// 安装
+// 缓存名称
+const CACHE_NAME = 'ins-desktop-v1';
+
+// 需要缓存的资源
+const CACHE_URLS = [
+    './',
+    './index.html',
+    './style.css',
+    './script.JS',
+    './manifest.json'
+];
+
+// 安装：预缓存资源
 self.addEventListener('install', (event) => {
     console.log('[SW] Installing...');
+    event.waitUntil(
+        caches.open(CACHE_NAME)
+            .then(cache => {
+                console.log('[SW] Caching app shell');
+                return cache.addAll(CACHE_URLS).catch(err => {
+                    console.log('[SW] Cache failed for some resources:', err);
+                });
+            })
+    );
     self.skipWaiting();
 });
 
-// 激活
+// 激活：清理旧缓存
 self.addEventListener('activate', (event) => {
     console.log('[SW] Activated');
-    event.waitUntil(clients.claim());
-});
-
-// 接收推送（核心）
-self.addEventListener('push', (event) => {
-    console.log('[SW] ========================================');
-    console.log('[SW] 🔔🔔🔔 收到推送事件！');
-    console.log('[SW] Event:', event);
-    
-    let payload = {
-        title: '新消息',
-        body: '你有一条新消息',
-        icon: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png',
-        badge: 'https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png'
-    };
-    
-    if (event.data) {
-        try {
-            const data = event.data.json();
-            console.log('[SW] 解析推送数据:', data);
-            payload = {
-                title: data.title || payload.title,
-                body: data.body || payload.body,
-                icon: data.icon || payload.icon,
-                badge: data.badge || payload.badge,
-                data: data.data || {}
-            };
-        } catch (e) {
-            console.error('[SW] 解析推送数据失败:', e);
-            // 尝试文本格式
-            try {
-                payload.body = event.data.text();
-            } catch (e2) {
-                console.error('[SW] 无法解析推送数据');
-            }
-        }
-    }
-    
-    console.log('[SW] 准备显示通知:', payload);
-    
-    // 显示通知（这是唯一允许显示通知的地方）
     event.waitUntil(
-        self.registration.showNotification(payload.title, {
-            body: payload.body,
-            icon: payload.icon,
-            badge: payload.badge,
-            vibrate: [200, 100, 200],
-            tag: 'chat-notification-' + (payload.data.char_id || Date.now()),
-            data: payload.data || {},
-            requireInteraction: false,
-            silent: false
-        }).then(() => {
-            console.log('[SW] ✓✓✓ 通知已成功显示！');
-        }).catch((err) => {
-            console.error('[SW] ✗✗✗ 通知显示失败:', err);
-        })
+        caches.keys().then(cacheNames => {
+            return Promise.all(
+                cacheNames.filter(name => name !== CACHE_NAME)
+                    .map(name => caches.delete(name))
+            );
+        }).then(() => clients.claim())
     );
-    
-    console.log('[SW] ========================================');
 });
 
-// 点击通知
+// 请求拦截：网络优先，失败时使用缓存
+self.addEventListener('fetch', (event) => {
+    // 跳过非 GET 请求和 API 请求
+    if (event.request.method !== 'GET') return;
+    if (event.request.url.includes('/api/')) return;
+    
+    event.respondWith(
+        fetch(event.request)
+            .then(response => {
+                // 缓存成功的响应
+                if (response.status === 200) {
+                    const responseClone = response.clone();
+                    caches.open(CACHE_NAME).then(cache => {
+                        cache.put(event.request, responseClone);
+                    });
+                }
+                return response;
+            })
+            .catch(() => {
+                // 网络失败时使用缓存
+                return caches.match(event.request);
+            })
+    );
+});
+
+// 点击通知（本地通知点击处理）
 self.addEventListener('notificationclick', (event) => {
     console.log('[SW] Notification clicked');
     event.notification.close();
@@ -84,17 +79,17 @@ self.addEventListener('notificationclick', (event) => {
             .then((clientList) => {
                 // 先尝试聚焦已有窗口
                 for (let client of clientList) {
-                    if (client.url.includes('index.html') && 'focus' in client) {
+                    if ('focus' in client) {
                         return client.focus();
                     }
                 }
                 // 否则打开新窗口
                 if (clients.openWindow) {
-                    return clients.openWindow('/index.html');
+                    return clients.openWindow('./');
                 }
             })
     );
 });
 
-console.log('[SW] Ready for push notifications');
+console.log('[SW] Ready (纯前端 PWA 模式)');
 
