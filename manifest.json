@@ -1,0 +1,25 @@
+{
+  "name": "微信模拟器",
+  "short_name": "微信",
+  "description": "AI角色扮演微信模拟器",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#07c160",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://img.heliar.top/file/1769158422909_无标题281_20251207015501_20260123165317.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
+

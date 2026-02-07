@@ -109,9 +109,9 @@
                     <div class="icon"></div>
                     <div class="name">网易云</div>
                 </div>
-                <div class="app-icon" id="icon-camera" onclick="showCoupleSpacePage()">
+                <div class="app-icon" id="icon-xianyu" onclick="openXianyuApp()">
                     <div class="icon"></div>
-                    <div class="name">情侣空间</div>
+                    <div class="name">闲鱼</div>
                 </div>
                 <div class="app-icon" id="icon-cabin" onclick="showCabinPage()">
                     <div class="icon"></div>
@@ -231,9 +231,9 @@
                     <div class="icon"></div>
                     <div class="name">网易云</div>
                 </div>
-                <div class="icon-select-item" onclick="selectIcon('camera')">
+                <div class="icon-select-item" onclick="selectIcon('xianyu')">
                     <div class="icon"></div>
-                    <div class="name">情侣空间</div>
+                    <div class="name">闲鱼</div>
                 </div>
                 <div class="icon-select-item" onclick="selectIcon('phone')">
                     <div class="icon"></div>
@@ -5117,6 +5117,416 @@
         </div>
     </div>
 
+    <!-- 闲鱼App页面 -->
+    <div class="xianyu-app-page" id="xianyuAppPage">
+        <!-- 闲鱼 账号选择页面 -->
+        <div class="xy-select-page" id="xySelectAccountPage" style="display: flex;">
+            <div class="xy-select-header">
+                <div class="xy-select-back" onclick="closeXianyuApp()">
+                    <svg viewBox="0 0 24 24" width="24" height="24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" fill="currentColor"/></svg>
+                </div>
+                <div class="xy-select-title">选择微信账号</div>
+                <div style="width:40px;"></div>
+            </div>
+            <div class="xy-select-logo">
+                <div class="xy-select-logo-icon">
+                    <svg viewBox="0 0 24 24" style="width:48px; height:48px; fill:#fff;">
+                        <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3c1.93 0 3.5 1.57 3.5 3.5S13.93 13 12 13s-3.5-1.57-3.5-3.5S10.07 6 12 6zm7 13H5v-.23c0-.62.28-1.2.76-1.58C7.47 15.82 9.64 15 12 15s4.53.82 6.24 2.19c.48.38.76.97.76 1.58V19z"/>
+                    </svg>
+                </div>
+                <div class="xy-select-logo-title">闲鱼 · 二手交易</div>
+                <div class="xy-select-logo-desc">选择一个微信账号进入</div>
+            </div>
+            <div class="xy-select-list" id="xyAccountList">
+                <!-- 账号列表动态生成 -->
+            </div>
+        </div>
+
+        <!-- 闲鱼主内容区 -->
+        <div id="xyMainContent" style="display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; overflow: hidden;">
+        <!-- 数据状态指示器 -->
+        <div class="xy-data-status" id="xyDataStatus" style="display: none;">
+            数据已保存
+        </div>
+
+        <!-- 首页 -->
+        <div class="xy-page active" id="xyHomePage">
+            <div class="xy-header xy-header-home">
+                <div class="xy-back-btn" onclick="exitXianyuToSelect()" style="margin-right: 15px;">
+                    <i class="fa fa-arrow-left"></i>
+                </div>
+                <div class="xy-search-box">
+                    <i class="fa fa-search xy-search-icon"></i>
+                    <input type="text" id="xySearchInput" placeholder="搜索你想要的宝贝" />
+                </div>
+                <div class="xy-header-icon" style="margin-left: 10px;">
+                    <button class="xy-generate-btn" onclick="xianyuShowGenerateDialog()" title="生成商品">
+                        <i class="fa fa-magic"></i> 生成
+                    </button>
+                </div>
+            </div>
+            <div class="xy-category-nav">
+                <div class="xy-category-item" onclick="xianyuFilterByCategory('女装')">
+                    <div class="xy-category-icon"><i class="fa fa-shirt"></i></div>
+                    <span>女装</span>
+                </div>
+                <div class="xy-category-item" onclick="xianyuFilterByCategory('美妆')">
+                    <div class="xy-category-icon"><i class="fa fa-gift"></i></div>
+                    <span>美妆</span>
+                </div>
+                <div class="xy-category-item" onclick="xianyuFilterByCategory('数码')">
+                    <div class="xy-category-icon"><i class="fa fa-mobile"></i></div>
+                    <span>数码</span>
+                </div>
+                <div class="xy-category-item" onclick="xianyuFilterByCategory('图书')">
+                    <div class="xy-category-icon"><i class="fa fa-book"></i></div>
+                    <span>图书</span>
+                </div>
+                <div class="xy-category-item" onclick="xianyuShowAllGoods()">
+                    <div class="xy-category-icon"><i class="fa fa-ellipsis-h"></i></div>
+                    <span>全部</span>
+                </div>
+            </div>
+            <div class="xy-goods-list" id="xyGoodsListContainer">
+                <!-- 商品将通过JS动态加载 -->
+            </div>
+        </div>
+
+        <!-- 商品详情页 -->
+        <div class="xy-page" id="xyDetailPage">
+            <div class="xy-header xy-header-detail">
+                <i class="fa fa-arrow-left xy-back-btn" onclick="xianyuGoBack()"></i>
+                <div class="xy-header-icon">
+                    <i class="fa fa-star-o" id="xyDetailCollectBtn"></i>
+                    <i class="fa fa-share-alt"></i>
+                </div>
+            </div>
+            <div class="xy-seller-info">
+                <div class="xy-seller-avatar"><i class="fa fa-user"></i></div>
+                <div class="xy-seller-name-box">
+                    <div class="xy-seller-name">卖家 <span class="xy-credit-tag">卖家信用极好</span></div>
+                    <div class="xy-seller-desc">
+                        <span id="xySellerLocation">7小时前前来过 | 泉州</span>
+                        <span id="xySellerService">230+已服务(次) | 2年服务经验</span>
+                    </div>
+                </div>
+            </div>
+            <div class="xy-goods-detail-header">
+                <h1 class="xy-goods-detail-title" id="xyDetailTitle">商品标题</h1>
+                <div class="xy-goods-detail-meta" id="xyDetailMeta">想要0 | 浏览0</div>
+                <div class="xy-goods-price-box">
+                    <div class="xy-goods-price" id="xyDetailPrice">¥0</div>
+                    <div class="xy-postage-tag" id="xyDetailPostage">包邮</div>
+                </div>
+                <div class="xy-goods-meta-list">
+                    <span id="xyDetailMeta1Key">类别</span>
+                    <span id="xyDetailMeta1Val">其他</span>
+                </div>
+            </div>
+            <div class="xy-goods-detail-desc">
+                <h3 class="xy-desc-title" id="xyDetailDescTitle">商品描述</h3>
+                <p class="xy-desc-content" id="xyDetailDescContent">商品描述内容</p>
+            </div>
+            <div class="xy-tips-box">
+                <h3 class="xy-tips-title" id="xyDetailTipsTitle">小贴士</h3>
+                <p class="xy-tips-content" id="xyDetailTipsContent">温馨提示内容</p>
+            </div>
+            <div class="xy-goods-detail-img"><i class="fa fa-image"></i></div>
+            <div class="xy-operate-bar">
+                <div class="xy-operate-btn xy-btn-collect" id="xyCollectBtn">
+                    <i class="fa fa-star-o"></i> 收藏
+                </div>
+                <div class="xy-operate-btn xy-btn-buy" onclick="xianyuBuyNow()">立即购买</div>
+                <div class="xy-operate-btn xy-btn-chat" onclick="xianyuGoToChat()">聊一聊</div>
+            </div>
+        </div>
+
+        <!-- 消息列表页面 -->
+        <div class="xy-page" id="xyMessageListPage">
+            <div class="xy-header xy-header-my">
+                <div class="xy-page-title">消息</div>
+                <div class="xy-header-icon">
+                    <i class="fa fa-user-plus"></i>
+                </div>
+            </div>
+            <div class="xy-message-list" id="xyMessageListContainer">
+                <div class="xy-msg-list-item">
+                    <div class="xy-msg-avatar" style="background-color: #ff9db0; color: white;">
+                        <i class="fa fa-bell"></i>
+                    </div>
+                    <div class="xy-msg-info">
+                        <div class="xy-msg-top">
+                            <div class="xy-msg-name">通知消息</div>
+                            <div class="xy-msg-time"></div>
+                        </div>
+                        <div class="xy-msg-content">暂无新通知</div>
+                    </div>
+                </div>
+                <div class="xy-msg-list-item">
+                    <div class="xy-msg-avatar" style="background-color: #ffcc00; color: white;">
+                        <i class="fa fa-comment-dots"></i>
+                    </div>
+                    <div class="xy-msg-info">
+                        <div class="xy-msg-top">
+                            <div class="xy-msg-name">互动消息</div>
+                            <div class="xy-msg-time"></div>
+                        </div>
+                        <div class="xy-msg-content">暂无新互动</div>
+                    </div>
+                </div>
+                <div id="xyChatListContent"></div>
+            </div>
+        </div>
+
+        <!-- 私聊页面 -->
+        <div class="xy-page" id="xyChatPage">
+            <div class="xy-header xy-header-chat">
+                <i class="fa fa-arrow-left xy-back-btn" onclick="xianyuGoBack()"></i>
+                <div class="xy-chat-header-name" id="xyChatHeaderName">卖家 <span class="xy-credit-tag">卖家信用极好</span></div>
+                <div class="xy-header-icon">
+                    <i class="fa fa-ellipsis-v" onclick="xianyuShowChatMenu()" style="cursor: pointer;"></i>
+                </div>
+            </div>
+            <div class="xy-chat-menu" id="xyChatMenu" style="display: none; position: absolute; top: 50px; right: 15px; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); z-index: 100; padding: 10px; min-width: 120px;">
+                <div class="xy-chat-menu-item" onclick="xianyuShowPriceEditDialog()" style="padding: 10px; cursor: pointer; border-bottom: 1px solid #f0f0f0;">
+                    <i class="fa fa-money" style="margin-right: 8px;"></i>改价
+                </div>
+                <div class="xy-chat-menu-item" onclick="xianyuBlockUser()" style="padding: 10px; cursor: pointer; color: #ff6666;">
+                    <i class="fa fa-ban" style="margin-right: 8px;"></i>拉黑
+                </div>
+            </div>
+            <div class="xy-chat-goods-bar" id="xyChatGoodsBar">
+                <div class="xy-chat-goods-avatar"><i class="fa fa-image"></i></div>
+                <div class="xy-chat-goods-info">
+                    <div class="xy-chat-goods-price" id="xyChatGoodsPrice">¥0</div>
+                    <div class="xy-chat-goods-desc" id="xyChatGoodsDesc">包邮</div>
+                    <div class="xy-chat-goods-desc" id="xyChatGoodsLocation">未知地区</div>
+                </div>
+                <button class="xy-chat-buy-btn" onclick="xianyuBuyFromChat()">立即购买</button>
+            </div>
+            <div class="xy-chat-content" id="xyChatContent">
+                <!-- 聊天消息将动态加载 -->
+            </div>
+            <div class="xy-chat-input-box">
+                <input type="text" class="xy-chat-input" id="xyChatInput" placeholder="想跟TA说点什么..." onkeypress="if(event.key==='Enter') xianyuSendMessage()">
+                <button class="xy-chat-send-btn" onclick="xianyuSendMessage()">发送</button>
+                <button class="xy-chat-receive-btn" onclick="xianyuReceiveReply()">接收回复</button>
+            </div>
+        </div>
+
+        <!-- 我的页面 -->
+        <div class="xy-page" id="xyMyPage">
+            <div class="xy-header xy-header-my">
+                <div class="xy-page-title">我的</div>
+                <div class="xy-header-icon">
+                    <i class="fa fa-cog" onclick="xianyuShowSettings()"></i>
+                </div>
+            </div>
+            <div class="xy-my-header" id="xyMyHeaderContent">
+                <div class="xy-my-user-info">
+                    <div class="xy-my-avatar" id="xyUserAvatar">
+                        <i class="fa fa-user"></i>
+                    </div>
+                    <div class="xy-my-user-details">
+                        <div class="xy-my-username" id="xyUserName">浅粉少女</div>
+                        <div class="xy-my-user-id">ID: xianyu_001</div>
+                    </div>
+                </div>
+                <button class="xy-my-edit-btn" onclick="xianyuEditProfile()">编辑资料</button>
+                <div class="xy-my-stats">
+                    <div class="xy-my-stat-item" onclick="xianyuShowMyGoods()">
+                        <div class="xy-my-stat-number" id="xyMyGoodsCount">0</div>
+                        <div class="xy-my-stat-label">我发布的</div>
+                    </div>
+                    <div class="xy-my-stat-item" onclick="xianyuShowMySold()">
+                        <div class="xy-my-stat-number" id="xyMySoldCount">0</div>
+                        <div class="xy-my-stat-label">我卖出的</div>
+                    </div>
+                    <div class="xy-my-stat-item" onclick="xianyuShowMyBought()">
+                        <div class="xy-my-stat-number" id="xyMyBoughtCount">0</div>
+                        <div class="xy-my-stat-label">我买到的</div>
+                    </div>
+                </div>
+            </div>
+            <div class="xy-my-menu">
+                <div class="xy-my-menu-item" onclick="xianyuShowMyCollections()">
+                    <div class="xy-my-menu-icon"><i class="fa fa-star"></i></div>
+                    <div class="xy-my-menu-text">我的收藏</div>
+                    <div class="xy-my-menu-arrow"><i class="fa fa-chevron-right"></i></div>
+                </div>
+                <div class="xy-my-menu-item" onclick="xianyuShowMyChats()">
+                    <div class="xy-my-menu-icon"><i class="fa fa-comments"></i></div>
+                    <div class="xy-my-menu-text">我的聊天</div>
+                    <div class="xy-my-menu-arrow"><i class="fa fa-chevron-right"></i></div>
+                </div>
+                <div class="xy-my-menu-item" onclick="xianyuShowMyOrders()">
+                    <div class="xy-my-menu-icon"><i class="fa fa-list-alt"></i></div>
+                    <div class="xy-my-menu-text">我的订单</div>
+                    <div class="xy-my-menu-arrow"><i class="fa fa-chevron-right"></i></div>
+                </div>
+                <div class="xy-my-menu-item" onclick="xianyuShowMyWallet()">
+                    <div class="xy-my-menu-icon"><i class="fa fa-wallet"></i></div>
+                    <div class="xy-my-menu-text">我的钱包</div>
+                    <div class="xy-my-menu-arrow"><i class="fa fa-chevron-right"></i></div>
+                </div>
+                <div class="xy-my-menu-item" onclick="xianyuShowDataManagement()">
+                    <div class="xy-my-menu-icon"><i class="fa fa-database"></i></div>
+                    <div class="xy-my-menu-text">数据管理</div>
+                    <div class="xy-my-menu-arrow"><i class="fa fa-chevron-right"></i></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 我的发布页面 -->
+        <div class="xy-page" id="xyMyGoodsPage">
+            <div class="xy-header xy-header-my">
+                <i class="fa fa-arrow-left xy-back-btn" onclick="xianyuGoBackToMyPage()"></i>
+                <div class="xy-page-title">我发布的</div>
+            </div>
+            <div class="xy-goods-list" id="xyMyGoodsListContainer"></div>
+        </div>
+
+        <!-- 我的卖出页面 -->
+        <div class="xy-page" id="xyMySoldPage">
+            <div class="xy-header xy-header-my">
+                <i class="fa fa-arrow-left xy-back-btn" onclick="xianyuGoBackToMyPage()"></i>
+                <div class="xy-page-title">我卖出的</div>
+            </div>
+            <div class="xy-goods-list" id="xyMySoldListContainer"></div>
+        </div>
+
+        <!-- 我的买到页面 -->
+        <div class="xy-page" id="xyMyBoughtPage">
+            <div class="xy-header xy-header-my">
+                <i class="fa fa-arrow-left xy-back-btn" onclick="xianyuGoBackToMyPage()"></i>
+                <div class="xy-page-title">我买到的</div>
+            </div>
+            <div class="xy-goods-list" id="xyMyBoughtListContainer"></div>
+        </div>
+
+        <!-- 我的收藏页面 -->
+        <div class="xy-page" id="xyMyCollectionsPage">
+            <div class="xy-header xy-header-my">
+                <i class="fa fa-arrow-left xy-back-btn" onclick="xianyuGoBackToMyPage()"></i>
+                <div class="xy-page-title">我的收藏</div>
+            </div>
+            <div class="xy-goods-list" id="xyMyCollectionsListContainer"></div>
+        </div>
+
+        <!-- 底部导航栏 -->
+        <div class="xy-tab-bar">
+            <div class="xy-tab-item active" id="xy-tab-home" onclick="xianyuSwitchTab('xyHomePage', 'xy-tab-home')">
+                <i class="fa fa-home xy-tab-icon"></i>
+                <span>首页</span>
+            </div>
+            <div class="xy-tab-item" id="xy-tab-fishpond" onclick="xianyuSwitchTab('xyHomePage', 'xy-tab-fishpond')">
+                <i class="fa fa-users xy-tab-icon"></i>
+                <span>鱼塘</span>
+            </div>
+            <div class="xy-publish-tab" onclick="xianyuShowPublishDialog()">
+                <i class="fa fa-plus"></i>
+            </div>
+            <div class="xy-tab-item" id="xy-tab-message" onclick="xianyuSwitchTab('xyMessageListPage', 'xy-tab-message')">
+                <i class="fa fa-comment-dots xy-tab-icon"></i>
+                <span>消息</span>
+            </div>
+            <div class="xy-tab-item" id="xy-tab-mine" onclick="xianyuSwitchTab('xyMyPage', 'xy-tab-mine')">
+                <i class="fa fa-user xy-tab-icon"></i>
+                <span>我的</span>
+            </div>
+        </div>
+
+        <!-- 发布商品弹窗 -->
+        <div class="xy-modal" id="xyPublishDialog">
+            <div class="xy-modal-content">
+                <h3 class="xy-modal-title">发布新商品</h3>
+                <input type="text" class="xy-modal-input" id="xyPublishTitle" placeholder="商品标题">
+                <input type="number" class="xy-modal-input" id="xyPublishPrice" placeholder="价格">
+                <select class="xy-modal-select" id="xyPublishCategory">
+                    <option value="女装">女装</option>
+                    <option value="美妆">美妆</option>
+                    <option value="数码">数码</option>
+                    <option value="图书">图书</option>
+                    <option value="其他">其他</option>
+                </select>
+                <textarea class="xy-modal-textarea" id="xyPublishDesc" placeholder="商品描述"></textarea>
+                <div class="xy-modal-buttons">
+                    <button class="xy-modal-btn xy-modal-btn-primary" onclick="xianyuPublishGoods()">发布</button>
+                    <button class="xy-modal-btn xy-modal-btn-secondary" onclick="xianyuHidePublishDialog()">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 编辑资料弹窗 -->
+        <div class="xy-modal" id="xyEditProfileDialog">
+            <div class="xy-modal-content">
+                <h3 class="xy-modal-title">编辑资料</h3>
+                <input type="text" class="xy-modal-input" id="xyEditUserName" placeholder="用户名">
+                <select class="xy-modal-select" id="xyEditUserAvatar">
+                    <option value="fa-user">默认头像</option>
+                    <option value="fa-user-circle">圆形头像</option>
+                    <option value="fa-user-secret">神秘头像</option>
+                    <option value="fa-user-tie">正式头像</option>
+                    <option value="fa-user-ninja">忍者头像</option>
+                    <option value="fa-user-astronaut">宇航员</option>
+                    <option value="fa-user-graduate">毕业生</option>
+                    <option value="fa-user-md">医生</option>
+                </select>
+                <div class="xy-modal-buttons">
+                    <button class="xy-modal-btn xy-modal-btn-primary" onclick="xianyuSaveProfile()">保存</button>
+                    <button class="xy-modal-btn xy-modal-btn-secondary" onclick="xianyuHideEditProfileDialog()">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 生成商品弹窗 -->
+        <div class="xy-modal" id="xyGenerateDialog">
+            <div class="xy-modal-content" style="max-width: 500px;">
+                <h3 class="xy-modal-title">生成商品</h3>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; color: #666; font-size: 14px;">世界观（作为生成商品类型的参考）</label>
+                    <textarea class="xy-modal-textarea" id="xyWorldViewInput" placeholder="输入世界观描述，例如：这是一个魔法世界，有各种魔法道具和装备..." style="height: 100px; resize: vertical;"></textarea>
+                </div>
+                <div style="margin-bottom: 15px; padding: 10px; background-color: #f5f5f5; border-radius: 5px; font-size: 12px; color: #666;">
+                    <i class="fa fa-info-circle"></i> 将使用桌面设置中的API配置
+                </div>
+                <div class="xy-modal-buttons">
+                    <button class="xy-modal-btn xy-modal-btn-primary" onclick="xianyuGenerateGoods()">生成商品（不少于10个）</button>
+                    <button class="xy-modal-btn xy-modal-btn-secondary" onclick="xianyuHideGenerateDialog()">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 设置弹窗 -->
+        <div class="xy-modal" id="xySettingsDialog">
+            <div class="xy-modal-content">
+                <h3 class="xy-modal-title">设置</h3>
+                <div class="xy-my-menu">
+                    <div class="xy-my-menu-item" onclick="xianyuExportData()">
+                        <div class="xy-my-menu-icon"><i class="fa fa-download"></i></div>
+                        <div class="xy-my-menu-text">导出数据</div>
+                    </div>
+                    <div class="xy-my-menu-item" onclick="xianyuImportData()">
+                        <div class="xy-my-menu-icon"><i class="fa fa-upload"></i></div>
+                        <div class="xy-my-menu-text">导入数据</div>
+                    </div>
+                    <div class="xy-my-menu-item" onclick="xianyuClearAllData()">
+                        <div class="xy-my-menu-icon"><i class="fa fa-trash"></i></div>
+                        <div class="xy-my-menu-text">清空所有数据</div>
+                    </div>
+                    <div class="xy-my-menu-item" onclick="xianyuResetToDefault()">
+                        <div class="xy-my-menu-icon"><i class="fa fa-redo"></i></div>
+                        <div class="xy-my-menu-text">恢复默认数据</div>
+                    </div>
+                </div>
+                <div class="xy-modal-buttons">
+                    <button class="xy-modal-btn xy-modal-btn-secondary" onclick="xianyuHideSettingsDialog()">关闭</button>
+                </div>
+            </div>
+        </div>
+        </div><!-- /xyMainContent -->
+    </div>
+
     <!-- icity App页面 -->
     <div class="icity-app-page" id="icityAppPage">
         <!-- icity 账号选择页面 -->
@@ -5158,7 +5568,7 @@
                             <div class="top-icon" id="icitySelectRoleBtn" title="选择角色">
                                 <svg class="icon-svg" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
                             </div>
-                            <div class="top-icon">
+                            <div class="top-icon" id="icitySwitchAccountBtn" title="切换账号" onclick="exitIcityToSelect()">
                                 <svg class="icon-svg" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
                             </div>
                         </div>
