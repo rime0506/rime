@@ -1,0 +1,116 @@
+<div id="receipt_wrapper_h3n7k" style="all: initial; font-family: 'Courier New', Courier, monospace; display: flex; justify-content: center; margin: 20px 0;">
+  <style>
+    #receipt_wrapper_h3n7k * { box-sizing: border-box; }
+    #receipt_card_h3n7k {
+      width: 320px;
+      background: #fff;
+      padding: 20px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+      position: relative;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
+    }
+    /* 顶部锯齿 */
+    #receipt_card_h3n7k::before {
+      content: ''; position: absolute; top: -5px; left: 0; width: 100%; height: 10px;
+      background: linear-gradient(135deg, transparent 5px, #fff 5px) 0 0, linear-gradient(225deg, transparent 5px, #fff 5px) 0 0;
+      background-size: 20px 20px; background-repeat: repeat-x;
+    }
+    /* 底部锯齿 */
+    #receipt_card_h3n7k::after {
+      content: ''; position: absolute; bottom: -10px; left: 0; width: 100%; height: 10px;
+      background: linear-gradient(45deg, transparent 5px, #fff 5px) 0 0, linear-gradient(-45deg, transparent 5px, #fff 5px) 0 0;
+      background-size: 20px 20px; background-repeat: repeat-x;
+    }
+
+    #shop_title_p9m2x {
+      text-align: center;
+      font-weight: 800;
+      font-size: 18px;
+      color: #333;
+      margin-bottom: 5px;
+      border-bottom: 2px dashed #ddd;
+      padding-bottom: 15px;
+    }
+    
+    #order_list_u4b6v {
+      margin: 15px 0;
+      font-size: 14px;
+      color: #555;
+    }
+    .item_row_f8c3d {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .item_name_s1q9w { color: #333; font-weight: 600; }
+    .item_price_g5l0k { font-family: Arial, sans-serif; }
+
+    #divider_line_x2z8m {
+      border-top: 1px dashed #ccc;
+      margin: 15px 0;
+    }
+
+    #total_row_k7j4h {
+      display: flex;
+      justify-content: space-between;
+      font-size: 18px;
+      font-weight: 900;
+      color: #000;
+      margin-bottom: 20px;
+    }
+
+    #pay_btn_r6t2y {
+      display: block;
+      width: 100%;
+      padding: 12px;
+      background: #ff4d4f;
+      color: white;
+      text-align: center;
+      text-decoration: none;
+      border-radius: 4px;
+      font-family: sans-serif;
+      font-weight: bold;
+      letter-spacing: 1px;
+      transition: 0.2s;
+    }
+    #pay_btn_r6t2y:hover { background: #ff2629; }
+    
+    #timestamp_n5v8c {
+      text-align: center;
+      font-size: 10px;
+      color: #aaa;
+      margin-top: 15px;
+      font-family: Arial, sans-serif;
+    }
+  </style>
+
+  <div id="receipt_card_h3n7k">
+    <div id="shop_title_p9m2x">深夜食堂 · 订单详情</div>
+    
+    <div id="order_list_u4b6v">
+      <div class="item_row_f8c3d">
+        <span class="item_name_s1q9w">超级烤冷面 (加肠)</span>
+        <span class="item_price_g5l0k">¥15.00</span>
+      </div>
+      <div class="item_row_f8c3d">
+        <span class="item_name_s1q9w">暴打柠檬茶 (少冰)</span>
+        <span class="item_price_g5l0k">¥10.00</span>
+      </div>
+      <div class="item_row_f8c3d">
+        <span class="item_name_s1q9w" style="color:#999; font-size:12px;">配送费 (夜间)</span>
+        <span class="item_price_g5l0k" style="color:#999; font-size:12px;">¥0.00</span>
+      </div>
+    </div>
+
+    <div id="divider_line_x2z8m"></div>
+
+    <div id="total_row_k7j4h">
+      <span>合计</span>
+      <span style="font-family: Arial, sans-serif;">¥25.00</span>
+    </div>
+
+    <a id="pay_btn_r6t2y">帮我支付</a>
+
+    <div id="timestamp_n5v8c">2026-02-08 02:44:12</div>
+  </div>
+</div>

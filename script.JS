@@ -17349,6 +17349,11 @@ ${loreContext}
 - **亲属卡**：\`((FAMILY_CARD: 额度))\`（极少用，亲密关系）
 - **朋友圈**：\`[MOMENTS]\ncontent: 内容\nimages: 数量\`（99%不需要）
 - **撤回**：\`((RECALL))\`（说错话、后悔时）
+- **给用户点外卖**：\`((EMEI_ORDER: 店铺名, 商品1 x数量/商品2 x数量, 总金额))\`（主动给对方点吃的、请客、关心对方时使用）
+- **代付请求**：\`((EMEI_PAY: 店铺名, 商品1 x数量/商品2 x数量, 总金额))\`（让对方帮忙付外卖钱）
+- **分享外卖**：\`((EMEI_SHARE: 店铺名, 商品1/商品2, 总金额))\`（分享自己点的外卖）
+
+**外卖功能说明**：你可以像真人一样给对方点外卖、请对方帮忙代付、或者分享你刚点的外卖。自然地使用，比如对方说饿了就给点一份，或者自己点了外卖想分享。
 
 **原则**：99%的聊天就是普通文字，不要为了用功能而用功能。
 
@@ -17904,6 +17909,102 @@ ${togetherListenInfo.isPlaying ? '正在播放中...' : '已暂停'}
                         }
                         
                         showToast(`${freshChar.name} 赠送了亲属卡`);
+                    }
+                    return;
+                }
+                
+                // 🎯 检测外卖卡片指令 ((EMEI_ORDER: 店铺, 商品, 金额)) / ((EMEI_PAY: ...)) / ((EMEI_SHARE: ...))
+                const emeiOrderMatch = replyText.match(/\(\(EMEI_ORDER:\s*(.+?),\s*(.+?),\s*(\d+(?:\.\d+)?)\)\)/i);
+                const emeiPayMatch = replyText.match(/\(\(EMEI_PAY:\s*(.+?),\s*(.+?),\s*(\d+(?:\.\d+)?)\)\)/i);
+                const emeiShareMatch = replyText.match(/\(\(EMEI_SHARE:\s*(.+?),\s*(.+?),\s*(\d+(?:\.\d+)?)\)\)/i);
+                const emeiMatch = emeiOrderMatch || emeiPayMatch || emeiShareMatch;
+                
+                if (emeiMatch) {
+                    const emeiType = emeiOrderMatch ? 'order' : (emeiPayMatch ? 'pay' : 'share');
+                    const emeiStore = emeiMatch[1].trim();
+                    const emeiItems = emeiMatch[2].trim();
+                    const emeiTotal = parseFloat(emeiMatch[3]);
+                    
+                    // 提取外卖指令前面的文字内容
+                    const textBeforeEmei = replyText.substring(0, emeiMatch.index).trim();
+                    
+                    const freshChar = await db.characters.get(targetCharId);
+                    if (freshChar) {
+                        let history = getChatHistory(freshChar, accountId);
+                        
+                        // 1. 先发送文字消息（如果有）
+                        if (textBeforeEmei) {
+                            let textSegments = [];
+                            const textToSplit = textBeforeEmei.replace(/[,，]/g, ' ');
+                            if (textToSplit.includes('|||')) {
+                                textSegments = textToSplit.split('|||').map(s => s.trim()).filter(s => s.length > 0);
+                            } else {
+                                textSegments = splitMessage(textToSplit);
+                            }
+                            textSegments = textSegments.filter(seg => seg.replace(/[.,，。!?！？~…\s]/g, '').length >= 2);
+                            if (textSegments.length === 0 && textBeforeEmei.replace(/[.,，。!?！？~…\s]/g, '').length > 0) {
+                                textSegments = [textBeforeEmei];
+                            }
+                            
+                            for (let i = 0; i < textSegments.length; i++) {
+                                const seg = textSegments[i];
+                                history.push({ role: 'char', content: seg, time: Date.now() + i });
+                                await setChatHistory(freshChar, accountId, history);
+                                if (currentChatCharId === targetCharId) {
+                                    await appendMessageToUI('char', seg, freshChar.avatar);
+                                }
+                                if (i < textSegments.length - 1) {
+                                    await new Promise(r => setTimeout(r, 300));
+                                }
+                            }
+                            await new Promise(r => setTimeout(r, 500));
+                        }
+                        
+                        // 2. 构建小票风格卡片HTML
+                        const emeiItemList = emeiItems.split(/[/\/、]/).map(item => item.trim());
+                        const emeiItemsHtml = emeiItemList.map(item => {
+                            const priceEach = (emeiTotal / emeiItemList.length).toFixed(2);
+                            return `<div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px;"><span style="color:#333;font-weight:600;">${item}</span><span style="font-family:Arial,sans-serif;">¥${priceEach}</span></div>`;
+                        }).join('');
+                        
+                        let emeiTitle, emeiHint, emeiBtnHtml, emeiTag;
+                        if (emeiType === 'order') {
+                            emeiTitle = `${emeiStore} · 给你点的`;
+                            emeiHint = `${freshChar.name}给你点了外卖~`;
+                            emeiBtnHtml = '';
+                            emeiTag = 'emei_order';
+                        } else if (emeiType === 'pay') {
+                            emeiTitle = `${emeiStore} · 代付请求`;
+                            emeiHint = '帮我付一下外卖~';
+                            emeiBtnHtml = `<div onclick="handlePaymentRequest(this)" style="display:block;width:100%;padding:10px;background:#ff4d4f;color:white;text-align:center;border-radius:4px;font-family:sans-serif;font-weight:bold;letter-spacing:1px;cursor:pointer;box-sizing:border-box;margin-top:4px;">帮TA支付</div>`;
+                            emeiTag = 'payment_request';
+                        } else {
+                            emeiTitle = `🛵 ${emeiStore} · 外卖分享`;
+                            emeiHint = '我刚点了外卖 分享给你看看~';
+                            emeiBtnHtml = '';
+                            emeiTag = 'emei_share';
+                        }
+                        
+                        const emeiCardHtml = `<div style="width:260px;background:#fff;padding:16px;box-shadow:0 4px 15px rgba(0,0,0,0.1);position:relative;font-family:'Courier New',Courier,monospace;box-sizing:border-box;"><div style="position:absolute;top:-5px;left:0;width:100%;height:10px;background:linear-gradient(135deg,transparent 5px,#fff 5px) 0 0,linear-gradient(225deg,transparent 5px,#fff 5px) 0 0;background-size:20px 20px;background-repeat:repeat-x;"></div><div style="position:absolute;bottom:-10px;left:0;width:100%;height:10px;background:linear-gradient(45deg,transparent 5px,#fff 5px) 0 0,linear-gradient(-45deg,transparent 5px,#fff 5px) 0 0;background-size:20px 20px;background-repeat:repeat-x;"></div><div style="text-align:center;font-weight:800;font-size:16px;color:#333;margin-bottom:5px;border-bottom:2px dashed #ddd;padding-bottom:12px;">${emeiTitle}</div><div style="text-align:center;font-size:12px;color:#888;margin:8px 0;">${emeiHint}</div><div style="margin:12px 0;font-size:13px;color:#555;">${emeiItemsHtml}</div><div style="border-top:1px dashed #ccc;margin:12px 0;"></div><div style="display:flex;justify-content:space-between;font-size:16px;font-weight:900;color:#000;margin-bottom:8px;"><span>合计</span><span style="font-family:Arial,sans-serif;${emeiType === 'pay' ? 'color:#ff4d4f;' : ''}">¥${emeiTotal.toFixed(2)}</span></div>${emeiBtnHtml}<div style="text-align:center;font-size:10px;color:#aaa;margin-top:10px;font-family:Arial,sans-serif;">${new Date().toLocaleString('zh-CN')}</div></div>`;
+                        
+                        // 3. 发送卡片消息
+                        const emeiCardMsg = {
+                            role: 'char',
+                            content: `[${emeiTag}]${emeiCardHtml}`,
+                            time: Date.now()
+                        };
+                        history = getChatHistory(freshChar, accountId);
+                        history.push(emeiCardMsg);
+                        await setChatHistory(freshChar, accountId, history);
+                        
+                        if (currentChatCharId === targetCharId) {
+                            renderChatBody(freshChar);
+                        } else {
+                            const tagNames = { 'emei_order': '外卖订单', 'payment_request': '代付请求', 'emei_share': '外卖分享' };
+                            sendSystemNotification(freshChar.name, `[${tagNames[emeiTag]}]`);
+                        }
+                        
+                        showToast(`${freshChar.name} 发送了${emeiType === 'order' ? '外卖订单' : emeiType === 'pay' ? '代付请求' : '外卖分享'}`);
                     }
                     return;
                 }
@@ -35920,8 +36021,11 @@ async function sendEmeiOrderCard() {
         recipient: emeiData.selectedRecipient === 'self' ? '我自己' : char.name
     };
     
-    // 🔧 紧凑卡片样式（无换行，避免white-space问题）
-    const cardHtml = `<div style="width:100%;background:linear-gradient(135deg,#fff5f7 0%,#ffeef2 100%);border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,0.06);box-sizing:border-box;"><div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;"><span style="font-size:16px;">🍔</span><span style="font-size:13px;font-weight:600;color:#333;">饿美了订单</span></div><div style="font-size:12px;color:#666;line-height:1.5;"><div style="margin-bottom:4px;"><span style="color:#999;">店铺：</span>${orderInfo.store}</div><div style="margin-bottom:4px;"><span style="color:#999;">商品：</span>${orderInfo.items}</div><div style="margin-top:6px;"><span style="color:#999;">总计：</span><span style="font-size:14px;font-weight:600;color:#FF6B9D;">¥${orderInfo.total}</span></div></div></div>`;
+    // 🔧 小票风格卡片
+    const itemsHtml = emeiData.cart.map(item => `<div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px;"><span style="color:#333;font-weight:600;">${item.name} x${item.count}</span><span style="font-family:Arial,sans-serif;">¥${(item.price * item.count).toFixed(2)}</span></div>`).join('');
+    const deliveryFee = 3;
+    const couponAmount = emeiData.selectedCoupon ? emeiData.selectedCoupon.amount : 0;
+    const cardHtml = `<div style="width:260px;background:#fff;padding:16px;box-shadow:0 4px 15px rgba(0,0,0,0.1);position:relative;font-family:'Courier New',Courier,monospace;box-sizing:border-box;"><div style="position:absolute;top:-5px;left:0;width:100%;height:10px;background:linear-gradient(135deg,transparent 5px,#fff 5px) 0 0,linear-gradient(225deg,transparent 5px,#fff 5px) 0 0;background-size:20px 20px;background-repeat:repeat-x;"></div><div style="position:absolute;bottom:-10px;left:0;width:100%;height:10px;background:linear-gradient(45deg,transparent 5px,#fff 5px) 0 0,linear-gradient(-45deg,transparent 5px,#fff 5px) 0 0;background-size:20px 20px;background-repeat:repeat-x;"></div><div style="text-align:center;font-weight:800;font-size:16px;color:#333;margin-bottom:5px;border-bottom:2px dashed #ddd;padding-bottom:12px;">${orderInfo.store} · 订单详情</div><div style="margin:12px 0;font-size:13px;color:#555;">${itemsHtml}<div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:11px;color:#999;"><span>配送费</span><span>¥${deliveryFee.toFixed(2)}</span></div>${couponAmount > 0 ? `<div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:11px;color:#ff6b6b;"><span>优惠券</span><span>-¥${couponAmount.toFixed(2)}</span></div>` : ''}</div><div style="border-top:1px dashed #ccc;margin:12px 0;"></div><div style="display:flex;justify-content:space-between;font-size:16px;font-weight:900;color:#000;margin-bottom:12px;"><span>合计</span><span style="font-family:Arial,sans-serif;">¥${orderInfo.total}</span></div><div style="text-align:center;font-size:10px;color:#aaa;font-family:Arial,sans-serif;">${new Date().toLocaleString('zh-CN')}</div></div>`;
     
     // 🔧 使用按账号隔离的聊天记录（accountId 已在函数开头声明）
     let history = getChatHistory(char, accountId);
@@ -35952,10 +36056,10 @@ async function sendPaymentRequestCard(recipient, amount) {
         if (recipientChar) recipientName = recipientChar.name;
     }
     
-    // 🔧 紧凑卡片样式（无换行，避免white-space问题）
+    // 🔧 小票风格代付请求卡片
     const storeName = emeiData.currentStore.name;
-    const itemNames = emeiData.cart.map(i => i.name).join('、');
-    const cardHtml = `<div style="width:100%;background:linear-gradient(135deg,#fff9e6 0%,#fff5e6 100%);border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,0.06);box-sizing:border-box;"><div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;"><span style="font-size:16px;">💰</span><span style="font-size:13px;font-weight:600;color:#333;">代付请求</span></div><div style="font-size:12px;color:#666;line-height:1.5;"><div style="margin-bottom:6px;color:#888;">帮我付一下外卖~</div><div style="padding:10px;background:rgba(255,255,255,0.8);border-radius:6px;"><div style="margin-bottom:4px;"><span style="color:#999;">店铺：</span>${storeName}</div><div style="margin-bottom:4px;"><span style="color:#999;">商品：</span>${itemNames}</div><div style="margin-top:6px;font-size:14px;font-weight:600;color:#ff9500;">¥${amount.toFixed(2)}</div></div></div><div onclick="handlePaymentRequest(this)" style="margin-top:10px;padding:10px;background:linear-gradient(135deg,#ff9500 0%,#ffb300 100%);color:#fff;text-align:center;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">立即支付</div></div>`;
+    const payItemsHtml = emeiData.cart.map(i => `<div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px;"><span style="color:#333;font-weight:600;">${i.name} x${i.count}</span><span style="font-family:Arial,sans-serif;">¥${(i.price * i.count).toFixed(2)}</span></div>`).join('');
+    const cardHtml = `<div style="width:260px;background:#fff;padding:16px;box-shadow:0 4px 15px rgba(0,0,0,0.1);position:relative;font-family:'Courier New',Courier,monospace;box-sizing:border-box;"><div style="position:absolute;top:-5px;left:0;width:100%;height:10px;background:linear-gradient(135deg,transparent 5px,#fff 5px) 0 0,linear-gradient(225deg,transparent 5px,#fff 5px) 0 0;background-size:20px 20px;background-repeat:repeat-x;"></div><div style="position:absolute;bottom:-10px;left:0;width:100%;height:10px;background:linear-gradient(45deg,transparent 5px,#fff 5px) 0 0,linear-gradient(-45deg,transparent 5px,#fff 5px) 0 0;background-size:20px 20px;background-repeat:repeat-x;"></div><div style="text-align:center;font-weight:800;font-size:16px;color:#333;margin-bottom:5px;border-bottom:2px dashed #ddd;padding-bottom:12px;">${storeName} · 代付请求</div><div style="text-align:center;font-size:12px;color:#888;margin:8px 0;">帮我付一下外卖~</div><div style="margin:12px 0;font-size:13px;color:#555;">${payItemsHtml}</div><div style="border-top:1px dashed #ccc;margin:12px 0;"></div><div style="display:flex;justify-content:space-between;font-size:16px;font-weight:900;color:#000;margin-bottom:14px;"><span>合计</span><span style="font-family:Arial,sans-serif;color:#ff4d4f;">¥${amount.toFixed(2)}</span></div><div onclick="handlePaymentRequest(this)" style="display:block;width:100%;padding:10px;background:#ff4d4f;color:white;text-align:center;border-radius:4px;font-family:sans-serif;font-weight:bold;letter-spacing:1px;cursor:pointer;box-sizing:border-box;">帮我支付</div><div style="text-align:center;font-size:10px;color:#aaa;margin-top:12px;font-family:Arial,sans-serif;">${new Date().toLocaleString('zh-CN')}</div></div>`;
     
     // 🔧 使用按账号隔离的聊天记录
     const accountId = getCurrentAccountId();
@@ -36066,8 +36170,9 @@ async function sendShareOrderCard(charId, accountId) {
         total: (emeiData.cart.reduce((sum, item) => sum + item.price * item.count, 0) + 3 - (emeiData.selectedCoupon ? emeiData.selectedCoupon.amount : 0)).toFixed(2)
     };
     
-    // 创建分享卡片HTML（紧凑格式，避免white-space问题）
-    const cardHtml = `<div style="width:100%;background:linear-gradient(135deg,#e8f5e9 0%,#f1f8e9 100%);border-radius:12px;padding:14px;box-shadow:0 2px 8px rgba(0,0,0,0.08);box-sizing:border-box;"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><div style="font-size:18px;">🛵</div><div style="font-size:14px;font-weight:600;color:#333;">外卖分享</div></div><div style="font-size:13px;color:#666;line-height:1.5;"><div style="margin-bottom:8px;">我刚点了外卖，分享给你看看~</div><div style="padding:10px;background:rgba(255,255,255,0.8);border-radius:8px;"><div style="margin-bottom:4px;"><span style="color:#999;">店铺：</span>${orderInfo.store}</div><div style="margin-bottom:4px;"><span style="color:#999;">商品：</span>${orderInfo.items}</div><div style="margin-top:6px;font-size:12px;color:#4caf50;">💰 ¥${orderInfo.total}</div></div></div><div style="margin-top:10px;font-size:11px;color:#999;text-align:center;">🍔 一起点外卖呀~</div></div>`;
+    // 创建小票风格分享卡片HTML
+    const shareItemsHtml = emeiData.cart.map(item => `<div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px;"><span style="color:#333;font-weight:600;">${item.name} x${item.count}</span><span style="font-family:Arial,sans-serif;">¥${(item.price * item.count).toFixed(2)}</span></div>`).join('');
+    const cardHtml = `<div style="width:260px;background:#fff;padding:16px;box-shadow:0 4px 15px rgba(0,0,0,0.1);position:relative;font-family:'Courier New',Courier,monospace;box-sizing:border-box;"><div style="position:absolute;top:-5px;left:0;width:100%;height:10px;background:linear-gradient(135deg,transparent 5px,#fff 5px) 0 0,linear-gradient(225deg,transparent 5px,#fff 5px) 0 0;background-size:20px 20px;background-repeat:repeat-x;"></div><div style="position:absolute;bottom:-10px;left:0;width:100%;height:10px;background:linear-gradient(45deg,transparent 5px,#fff 5px) 0 0,linear-gradient(-45deg,transparent 5px,#fff 5px) 0 0;background-size:20px 20px;background-repeat:repeat-x;"></div><div style="text-align:center;font-weight:800;font-size:16px;color:#333;margin-bottom:5px;border-bottom:2px dashed #ddd;padding-bottom:12px;">🛵 ${orderInfo.store} · 外卖分享</div><div style="text-align:center;font-size:12px;color:#888;margin:8px 0;">我刚点了外卖，分享给你看看~</div><div style="margin:12px 0;font-size:13px;color:#555;">${shareItemsHtml}</div><div style="border-top:1px dashed #ccc;margin:12px 0;"></div><div style="display:flex;justify-content:space-between;font-size:16px;font-weight:900;color:#000;margin-bottom:8px;"><span>合计</span><span style="font-family:Arial,sans-serif;">¥${orderInfo.total}</span></div><div style="text-align:center;font-size:11px;color:#999;margin-top:8px;">🍔 一起点外卖呀~</div></div>`;
     
     // 添加到聊天记录
     let history = getChatHistory(char, accountId);

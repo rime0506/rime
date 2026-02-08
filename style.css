@@ -2138,6 +2138,9 @@
             box-shadow: none !important;
             max-width: 300px !important;
             white-space: normal !important; /* 修复：覆盖pre-wrap，防止换行符导致显示异常 */
+            overflow: visible !important; /* 允许锯齿边溢出 */
+            margin-top: 8px !important;
+            margin-bottom: 14px !important;
         }
         .message-content.card-message > div {
             width: 260px !important;
